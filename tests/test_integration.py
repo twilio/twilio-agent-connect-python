@@ -436,8 +436,8 @@ class TestTACIntegration:
         assert received_context.channel == "sms"
 
     @pytest.mark.asyncio
-    async def test_sms_channel_skips_when_agent_cannot_be_resolved(self) -> None:
-        """If reconciliation cannot find an agent-address owner, webhook is skipped."""
+    async def test_sms_channel_posts_agent_on_solo_customer_inbound(self) -> None:
+        """v1-bridge inbound: only customer exists → POST AI_AGENT, then deliver."""
         tac = TAC(get_test_config())
         tac.conversation_memory_client = create_memory_client(tac)
         channel = SMSChannel(tac)
@@ -454,13 +454,19 @@ class TestTACIntegration:
 
         tac.on_message_ready(cb)
 
-        # Only a CUSTOMER, no participant owning the agent's address.
+        empty_response = MemoryRetrievalResponse(
+            observations=[],
+            summaries=[],
+            meta=MemoryRetrievalMeta(queryTime=0),
+        )
+        tac.conversation_memory_client.retrieve_memory = AsyncMock(return_value=empty_response)
+
         only_customer = [
             ParticipantResponse(
                 **{  # type: ignore[arg-type]
                     "id": "PA_CUSTOMER",
                     "accountId": "ACtest123",
-                    "conversationId": "CH_NO_AGENT",
+                    "conversationId": "CH_SOLO",
                     "name": "+12345678901",
                     "type": "CUSTOMER",
                     "addresses": [
@@ -471,16 +477,40 @@ class TestTACIntegration:
                 }
             ),
         ]
-
-        message_webhook = create_communication_created_webhook(
-            "CH_NO_AGENT", "MB123", "Hi", "2025-11-18T00:00:00.000Z"
+        created_agent = ParticipantResponse(
+            **{  # type: ignore[arg-type]
+                "id": "PA_AGENT_NEW",
+                "accountId": "ACtest123",
+                "conversationId": "CH_SOLO",
+                "name": "+15551234567",
+                "type": "AI_AGENT",
+                "addresses": [
+                    ParticipantAddress(channel="SMS", address="+15551234567").model_dump(
+                        by_alias=True
+                    )
+                ],
+            }
         )
 
-        with patch.object(
-            tac.conversation_orchestrator_client,
-            "list_participants",
-            return_value=only_customer,
+        message_webhook = create_communication_created_webhook(
+            "CH_SOLO", "MB123", "hey help plz", "2025-11-18T00:00:00.000Z"
+        )
+
+        with (
+            patch.object(
+                tac.conversation_orchestrator_client,
+                "list_participants",
+                return_value=only_customer,
+            ),
+            patch.object(
+                tac.conversation_orchestrator_client,
+                "add_participant",
+                new=AsyncMock(return_value=created_agent),
+            ) as mock_add,
         ):
             await channel.process_webhook(message_webhook)
 
-        assert not callback_invoked
+        mock_add.assert_called_once()
+        assert mock_add.call_args.kwargs["participant_type"] == "AI_AGENT"
+        assert callback_invoked
+        assert channel._conversations["CH_SOLO"].metadata["agent_participant_id"] == "PA_AGENT_NEW"

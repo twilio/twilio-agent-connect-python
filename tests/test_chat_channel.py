@@ -278,6 +278,13 @@ class TestChatChannel:
             await channel.send_response("CH_NO_CID", "Hi")
 
     @pytest.mark.asyncio
+    async def test_send_response_rejects_non_string(self) -> None:
+        tac = TAC(get_test_config())
+        channel = ChatChannel(tac)
+        with pytest.raises(TypeError, match="Chat channel only supports string responses"):
+            await channel.send_response("CH123", 123)  # type: ignore[arg-type]
+
+    @pytest.mark.asyncio
     async def test_deduplication(self) -> None:
         """Same idempotency token processed once."""
         tac = TAC(get_test_config())

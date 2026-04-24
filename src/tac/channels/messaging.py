@@ -282,9 +282,12 @@ class MessagingChannel(BaseChannel):
         joins with a *different* address/participant — collisions at our
         address mean the type is simply wrong, not that a human is speaking.
 
-        v1-bridge capture currently creates our Twilio number as `UNKNOWN`,
-        which is why this reconciliation pass is load-bearing. Decision matrix
-        (coordinated with the Maestro team):
+        v1-bridge capture emits two broken shapes this pass handles:
+        (1) the agent side is created as `UNKNOWN` (so it owns our address but
+        has the wrong type), and (2) the agent side is not created at all — on
+        inbound SMS the bridge often produces only the customer participant,
+        and TAC must add itself before replying. Decision matrix (coordinated
+        with the Maestro team):
 
             | Agent side                  | Customer side           | Action                      |
             |-----------------------------|-------------------------|-----------------------------|
@@ -292,8 +295,8 @@ class MessagingChannel(BaseChannel):
             | AI_AGENT                    | UNKNOWN (no CUSTOMER)   | PUT customer → CUSTOMER.    |
             | other, owns our address     | CUSTOMER                | PUT agent → AI_AGENT.       |
             | other, owns our address     | UNKNOWN (no CUSTOMER)   | Two PUTs.                   |
-            | nobody owns our address     | any                     | Skip webhook (WARN).        |
-            | AI_AGENT                    | no resolvable customer  | Skip webhook (WARN).        |
+            | nobody owns our address     | CUSTOMER or UNKNOWN     | POST AI_AGENT, then proceed.|
+            | any                         | no resolvable customer  | Skip webhook (WARN).        |
 
         Customer-side reconciliation is gated by `reconcile_customer_type`.
         Chat sets it to `False` because chat identifies the customer
@@ -302,6 +305,8 @@ class MessagingChannel(BaseChannel):
 
         PUT 409 is treated as concurrent-update success: re-list and use the
         current server view of that participant id (see `_promote_participant`).
+        POST 409 (another worker added the agent first) is likewise handled by
+        re-listing and picking up the existing AI_AGENT owner.
 
         Returns:
             `(agent, customer_or_none)` when the agent side is resolvable.
@@ -335,15 +340,13 @@ class MessagingChannel(BaseChannel):
 
         agent_candidate = next((p for p in participants if _owns_agent_address(p)), None)
         if agent_candidate is None:
-            self.logger.warning(
-                "Cannot resolve agent participant; skipping webhook",
+            agent_candidate = await self._add_agent_participant(
                 conversation_id=conversation_id,
-                channel=channel,
-                address=agent_address.address,
+                agent_address=agent_address,
             )
-            return None
-
-        if agent_candidate.type != "AI_AGENT":
+            if agent_candidate is None:
+                return None
+        elif agent_candidate.type != "AI_AGENT":
             agent_candidate = await self._promote_participant(
                 conversation_id=conversation_id,
                 participant=agent_candidate,
@@ -461,6 +464,88 @@ class MessagingChannel(BaseChannel):
                 conversation_id=conversation_id,
                 participant_id=participant.id,
                 target_type=new_type,
+                error=str(e),
+            )
+            return None
+
+    async def _add_agent_participant(
+        self,
+        conversation_id: str,
+        agent_address: ParticipantAddress,
+    ) -> ParticipantResponse | None:
+        """POST an `AI_AGENT` participant owning `agent_address`.
+
+        On 409 (another worker added it first), re-lists and returns the
+        existing owner of `agent_address` if one now exists. Other errors
+        return None.
+        """
+        try:
+            created = await self.tac.conversation_orchestrator_client.add_participant(
+                conversation_id=conversation_id,
+                addresses=[agent_address],
+                participant_type="AI_AGENT",
+            )
+            self.logger.debug(
+                "Added AI_AGENT participant",
+                conversation_id=conversation_id,
+                participant_id=created.id,
+                channel=agent_address.channel,
+                address=agent_address.address,
+            )
+            return created
+        except httpx.HTTPStatusError as e:
+            if e.response is not None and e.response.status_code == 409:
+                self.logger.debug(
+                    "Add agent participant 409; re-listing after concurrent add",
+                    conversation_id=conversation_id,
+                )
+                try:
+                    refreshed = await self.tac.conversation_orchestrator_client.list_participants(
+                        conversation_id
+                    )
+                except Exception as list_err:
+                    self.logger.error(
+                        "Failed to re-list participants after 409",
+                        conversation_id=conversation_id,
+                        error=str(list_err),
+                    )
+                    return None
+                existing = next(
+                    (
+                        p
+                        for p in refreshed
+                        if p.type == "AI_AGENT"
+                        and any(
+                            a.channel == agent_address.channel
+                            and a.address == agent_address.address
+                            for a in p.addresses
+                        )
+                    ),
+                    None,
+                )
+                if existing is not None:
+                    return existing
+                self.logger.error(
+                    "No AI_AGENT owner found after add 409",
+                    conversation_id=conversation_id,
+                    channel=agent_address.channel,
+                    address=agent_address.address,
+                )
+                return None
+            self.logger.error(
+                "Failed to add AI_AGENT participant",
+                conversation_id=conversation_id,
+                channel=agent_address.channel,
+                address=agent_address.address,
+                error=str(e),
+            )
+            return None
+        except Exception as e:
+            self.logger.error(
+                "Failed to add AI_AGENT participant",
+                conversation_id=conversation_id,
+                channel=agent_address.channel,
+                address=agent_address.address,
                 error=str(e),
             )
             return None

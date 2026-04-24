@@ -13,6 +13,8 @@ from tac.models.conversation import (
     ConversationRequest,
     ConversationResponse,
     ConversationsListResponse,
+    ParticipantAddress,
+    ParticipantRequest,
     ParticipantResponse,
     SendMessageActionRequest,
     UpdateConversationRequest,
@@ -95,6 +97,56 @@ class ConversationClient(BaseAPIClient):
                 f"Failed to list conversations: {e}\n"
                 f"URL: {url}\n"
                 f"Query params: {params}\n"
+                f"Response: {response_text}"
+            )
+            raise
+
+    async def add_participant(
+        self,
+        conversation_id: str,
+        addresses: list[ParticipantAddress] | None = None,
+        participant_type: Literal["HUMAN_AGENT", "CUSTOMER", "AI_AGENT", "AGENT", "UNKNOWN"]
+        | None = None,
+    ) -> ParticipantResponse:
+        """
+        Add a new participant to a conversation.
+
+        Used by `_reconcile_participants` when Maestro's v1-bridge emits only
+        the customer participant on an inbound SMS/chat — TAC adds itself as
+        `AI_AGENT` before replying.
+
+        Args:
+            conversation_id: The conversation ID to add participant to
+            addresses: List of communication addresses for the participant (optional)
+            participant_type: Type of participant (e.g., "CUSTOMER", "AI_AGENT"). Optional.
+
+        Returns:
+            ParticipantResponse object containing the created participant details
+
+        Raises:
+            httpx.HTTPError: If the API request fails
+        """
+        url = f"{self.base_url}/v2/Conversations/{conversation_id}/Participants"
+
+        request_data = ParticipantRequest(addresses=addresses, type=participant_type)
+        request_payload = request_data.model_dump(by_alias=True, exclude_none=True)
+
+        try:
+            async with self._get_client() as client:
+                response = await client.post(url, json=request_payload)
+                response.raise_for_status()
+                return ParticipantResponse(**response.json())
+
+        except httpx.HTTPError as e:
+            response_text = (
+                getattr(e.response, "text", "No response body")
+                if hasattr(e, "response")
+                else "No response"
+            )
+            self.logger.error(
+                f"Failed to add participant: {e}\n"
+                f"URL: {url}\n"
+                f"Request body: {request_payload}\n"
                 f"Response: {response_text}"
             )
             raise

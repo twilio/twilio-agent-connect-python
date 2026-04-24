@@ -266,6 +266,13 @@ class TestSMSChannel:
             await channel.send_response("CH_NOIDS", "hi")
 
     @pytest.mark.asyncio
+    async def test_send_response_rejects_non_string(self) -> None:
+        tac = TAC(get_test_config())
+        channel = SMSChannel(tac)
+        with pytest.raises(TypeError, match="SMS channel only supports string responses"):
+            await channel.send_response("CH123", 123)  # type: ignore[arg-type]
+
+    @pytest.mark.asyncio
     async def test_conversation_ended_callback_fires_on_close(self) -> None:
         tac = TAC(get_test_config())
         channel = SMSChannel(tac)
