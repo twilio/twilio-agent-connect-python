@@ -6,7 +6,11 @@ from typing import Any
 from pydantic import Field
 
 from tac import TAC
-from tac.channels.messaging import MessagingChannel, MessagingChannelConfig
+from tac.channels.messaging import (
+    SESSION_META_AGENT_PARTICIPANT_ID,
+    MessagingChannel,
+    MessagingChannelConfig,
+)
 from tac.models.conversation import (
     ActionChannelSettings,
     ActionParticipantRef,
@@ -33,10 +37,12 @@ class ChatChannelConfig(MessagingChannelConfig):
 class ChatChannel(MessagingChannel):
     """Chat Channel for handling web chat conversations.
 
-    Uses identity-based addressing instead of phone numbers.
-    Automatically creates AI_AGENT participant if needed (lazy creation)
-    and manages conversation lifecycle through Conversation Orchestrator webhooks.
+    Uses identity-based addressing instead of phone numbers. Customer-side
+    resolution is author-driven (from the inbound communication), so
+    reconciliation only promotes the agent participant.
     """
+
+    reconcile_customer_type = False
 
     def __init__(
         self,
@@ -64,6 +70,15 @@ class ChatChannel(MessagingChannel):
     def is_own_message(self, author_address: str) -> bool:
         return author_address == self.agent_address
 
+    def get_agent_address(self, conversation_id: str) -> ParticipantAddress:
+        session = self._conversations.get(conversation_id)
+        channel_id = session.metadata.get("channel_id") if session else None
+        return ParticipantAddress(
+            channel="CHAT",
+            address=self.agent_address,
+            channel_id=channel_id if isinstance(channel_id, str) else None,
+        )
+
     async def send_response(
         self,
         conversation_id: str,
@@ -72,7 +87,9 @@ class ChatChannel(MessagingChannel):
     ) -> None:
         """Send chat response using the Conversation Orchestrator Send API.
 
-        Lazily creates an AI_AGENT participant if one doesn't exist yet.
+        Reads the agent participant id resolved by `_reconcile_participants`
+        from the session; the customer (recipient) remains author-driven from
+        the inbound communication's `author_info`.
 
         Args:
             conversation_id: Conversation ID to send response to
@@ -81,6 +98,7 @@ class ChatChannel(MessagingChannel):
 
         Raises:
             TypeError: If response is not a string
+            RuntimeError: If no inbound webhook has populated the session state
         """
         if not isinstance(response, str):
             raise TypeError("Chat channel only supports string responses")
@@ -112,30 +130,11 @@ class ChatChannel(MessagingChannel):
                 "session.metadata['channel_id'] explicitly in advanced usage."
             )
 
-        try:
-            participants = await self.tac.conversation_orchestrator_client.list_participants(
-                conversation_id
-            )
-        except Exception as e:
-            self.logger.error(
-                "Failed to list participants",
-                conversation_id=conversation_id,
-                error=str(e),
-            )
-            return
-
-        agent_participant = await self._ensure_agent_participant(
-            conversation_id,
-            existing_participants=participants,
-            agent_address=ParticipantAddress(
-                channel="CHAT",
-                address=self.agent_address,
-                channel_id=chat_channel_sid,
-            ),
-        )
-        if not agent_participant:
+        agent_id = session.metadata.get(SESSION_META_AGENT_PARTICIPANT_ID)
+        if not isinstance(agent_id, str):
             raise RuntimeError(
-                f"Failed to resolve AI_AGENT participant for conversation {conversation_id}"
+                f"Agent participant id not resolved for conversation {conversation_id}; "
+                "reconciliation must run via an inbound webhook before send_response."
             )
 
         # TODO(maestro): Drop `chat_service` here once the Actions API resolves the
@@ -151,10 +150,7 @@ class ChatChannel(MessagingChannel):
         try:
             action_request = SendMessageActionRequest(
                 payload=SendMessageActionPayload(
-                    from_=ActionParticipantRef(
-                        channel="CHAT",
-                        participant_id=agent_participant.id,
-                    ),
+                    from_=ActionParticipantRef(channel="CHAT", participant_id=agent_id),
                     to=[
                         ActionParticipantRef(
                             channel="CHAT",

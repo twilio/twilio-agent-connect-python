@@ -6,7 +6,12 @@ from typing import Any
 from pydantic import Field
 
 from tac import TAC
-from tac.channels.messaging import MessagingChannel, MessagingChannelConfig
+from tac.channels.messaging import (
+    SESSION_META_AGENT_PARTICIPANT_ID,
+    SESSION_META_CUSTOMER_PARTICIPANT_ID,
+    MessagingChannel,
+    MessagingChannelConfig,
+)
 from tac.models.conversation import (
     ActionChannelSettings,
     ActionParticipantRef,
@@ -69,6 +74,9 @@ class SMSChannel(MessagingChannel):
     def is_own_message(self, author_address: str) -> bool:
         return author_address == self.tac.config.phone_number
 
+    def get_agent_address(self, conversation_id: str) -> ParticipantAddress:
+        return ParticipantAddress(channel="SMS", address=self.tac.config.phone_number)
+
     async def send_response(
         self,
         conversation_id: str,
@@ -77,6 +85,9 @@ class SMSChannel(MessagingChannel):
     ) -> None:
         """Send SMS response using the Conversation Orchestrator Send API.
 
+        Reads participant ids resolved by `_reconcile_participants` from the
+        session; requires an inbound webhook to have populated them.
+
         Args:
             conversation_id: Conversation ID to send response to
             response: Message content (must be string for SMS)
@@ -84,52 +95,27 @@ class SMSChannel(MessagingChannel):
 
         Raises:
             TypeError: If response is not a string
+            RuntimeError: If participant reconciliation has not run for this conversation
         """
         if not isinstance(response, str):
             raise TypeError("SMS channel only supports string responses")
 
-        try:
-            participants = await self.tac.conversation_orchestrator_client.list_participants(
-                conversation_id
-            )
-        except Exception as e:
-            self.logger.error(
-                "Failed to list participants",
-                conversation_id=conversation_id,
-                error=str(e),
-            )
-            return
-
-        customer_participant = None
-        customer_address = None
-        for participant in participants:
-            if participant.type == "CUSTOMER":
-                for address in participant.addresses:
-                    if address.channel == "SMS":
-                        customer_participant = participant
-                        customer_address = address.address
-                        break
-                if customer_participant:
-                    break
-
-        agent_participant = await self._ensure_agent_participant(
-            conversation_id,
-            existing_participants=participants,
-            agent_address=ParticipantAddress(channel="SMS", address=self.tac.config.phone_number),
-        )
-        if not agent_participant:
-            raise RuntimeError(
-                f"Failed to resolve AI_AGENT participant for conversation {conversation_id}"
-            )
-
-        if not customer_participant or not customer_address:
-            raise RuntimeError(
-                "Customer participant with SMS address not found for conversation "
-                f"{conversation_id}"
-            )
-
         session = self._conversations.get(conversation_id)
-        channel_id = session.metadata.get("channel_id") if session else None
+        if not session:
+            raise RuntimeError(
+                f"No active session for conversation {conversation_id}; "
+                "send_response requires a prior inbound webhook."
+            )
+
+        agent_id = session.metadata.get(SESSION_META_AGENT_PARTICIPANT_ID)
+        customer_id = session.metadata.get(SESSION_META_CUSTOMER_PARTICIPANT_ID)
+        if not isinstance(agent_id, str) or not isinstance(customer_id, str):
+            raise RuntimeError(
+                f"Participant ids not resolved for conversation {conversation_id}; "
+                "reconciliation must run via an inbound webhook before send_response."
+            )
+
+        channel_id = session.metadata.get("channel_id")
         channel_settings = (
             ActionChannelSettings(channel_id=channel_id)
             if isinstance(channel_id, str) and channel_id
@@ -139,16 +125,8 @@ class SMSChannel(MessagingChannel):
         try:
             action_request = SendMessageActionRequest(
                 payload=SendMessageActionPayload(
-                    from_=ActionParticipantRef(
-                        channel="SMS",
-                        participant_id=agent_participant.id,
-                    ),
-                    to=[
-                        ActionParticipantRef(
-                            channel="SMS",
-                            participant_id=customer_participant.id,
-                        )
-                    ],
+                    from_=ActionParticipantRef(channel="SMS", participant_id=agent_id),
+                    to=[ActionParticipantRef(channel="SMS", participant_id=customer_id)],
                     content=ActionTextContent(text=response),
                     channel_settings=channel_settings,
                 ),
@@ -161,7 +139,6 @@ class SMSChannel(MessagingChannel):
             self.logger.info(
                 "Sent SMS response via Actions API",
                 conversation_id=conversation_id,
-                to_address=customer_address,
             )
         except Exception as e:
             self.logger.error(

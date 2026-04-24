@@ -5,6 +5,7 @@ from collections import OrderedDict
 from collections.abc import AsyncGenerator
 from typing import Any
 
+import httpx
 from pydantic import BaseModel, Field
 
 from tac import TAC
@@ -16,6 +17,10 @@ from tac.models.conversation import (
     ParticipantResponse,
 )
 from tac.models.session import AuthorInfo
+
+# Session metadata keys populated by participant reconciliation.
+SESSION_META_AGENT_PARTICIPANT_ID = "agent_participant_id"
+SESSION_META_CUSTOMER_PARTICIPANT_ID = "customer_participant_id"
 
 
 class MessagingChannelConfig(BaseModel):
@@ -44,15 +49,24 @@ class MessagingChannel(BaseChannel):
     """Abstract base class for messaging channels (SMS, Chat).
 
     Provides shared webhook processing logic for channels that use
-    Conversation Orchestrator webhooks with PARTICIPANT_ADDED,
-    COMMUNICATION_CREATED, and CONVERSATION_UPDATED event types.
+    Conversation Orchestrator webhooks with COMMUNICATION_CREATED
+    and CONVERSATION_UPDATED event types.
 
     Subclasses must implement:
     - is_own_message(): Check if a message is from the bot itself
     - get_channel_type_upper(): Return uppercase channel type ("SMS", "CHAT")
+    - get_agent_address(conversation_id): Return the agent's ParticipantAddress for a conversation
     - send_response(): Send messages back through the channel
     - get_channel_name(): Return lowercase channel name ("sms", "chat")
+
+    Subclass class attributes:
+    - reconcile_customer_type: If True, reconciliation will also promote a
+      channel-matching UNKNOWN participant (not owning the agent address) to
+      CUSTOMER. Set False for channels where the customer is identified
+      author-driven (e.g. chat).
     """
+
+    reconcile_customer_type: bool = True
 
     def __init__(
         self,
@@ -82,6 +96,16 @@ class MessagingChannel(BaseChannel):
 
         Returns:
             Channel type string (e.g., "SMS", "CHAT")
+        """
+        pass
+
+    @abstractmethod
+    def get_agent_address(self, conversation_id: str) -> ParticipantAddress:
+        """Return the agent-side ParticipantAddress for this conversation.
+
+        Used by `_reconcile_participants` to identify which participant (by
+        channel + address) represents the agent. May read from session state
+        (e.g. chat's per-conversation channelId) to build the address.
         """
         pass
 
@@ -143,7 +167,6 @@ class MessagingChannel(BaseChannel):
         """Process messaging channel webhook event and manage conversation lifecycle.
 
         Handles:
-        - PARTICIPANT_ADDED: Initialize conversation and track profile_id
         - COMMUNICATION_CREATED: Process incoming messages from customers
         - CONVERSATION_UPDATED: Clean up when conversation is closed
 
@@ -168,46 +191,10 @@ class MessagingChannel(BaseChannel):
             )
             return
 
-        if event_type == "PARTICIPANT_ADDED":
-            self._handle_participant_added(event_data)
-        elif event_type == "COMMUNICATION_CREATED":
+        if event_type == "COMMUNICATION_CREATED":
             await self._handle_communication_created(event_data)
         elif event_type == "CONVERSATION_UPDATED":
             await self._handle_conversation_updated(event_data)
-
-    def _handle_participant_added(self, event_data: Any) -> None:
-        """Handle PARTICIPANT_ADDED event.
-
-        Only processes CUSTOMER participants with addresses matching this channel type.
-        """
-        participant_data = ParticipantResponse.model_validate(event_data)
-        conv_id = participant_data.conversation_id
-        profile_id = participant_data.profile_id
-        participant_type = participant_data.type
-
-        if participant_type != "CUSTOMER":
-            return
-
-        has_matching_address = any(
-            address.channel == self.get_channel_type_upper()
-            for address in participant_data.addresses
-        )
-
-        if not has_matching_address:
-            return
-
-        if conv_id not in self._conversations:
-            self._start_conversation(conv_id, profile_id)
-
-        if profile_id:
-            session = self._conversations[conv_id]
-            session.profile_id = profile_id
-
-        self.logger.debug(
-            "Customer participant added",
-            conversation_id=conv_id,
-            profile_id=profile_id,
-        )
 
     async def _handle_communication_created(self, event_data: Any) -> None:
         """Handle COMMUNICATION_CREATED event (incoming message)."""
@@ -235,6 +222,17 @@ class MessagingChannel(BaseChannel):
         # Store channelId in session metadata for outbound reply channelSettings
         if communication_data.channel_id:
             session.metadata["channel_id"] = communication_data.channel_id
+
+        # Reconcile participant types so `send_response` can attribute outbound
+        # Actions to the correct AI_AGENT / CUSTOMER ids. Runs pre-LLM so a
+        # broken conversation fails fast without wasting an agent turn.
+        resolved = await self._reconcile_participants(conv_id)
+        if resolved is None:
+            return
+        agent_participant, customer_participant = resolved
+        session.metadata[SESSION_META_AGENT_PARTICIPANT_ID] = agent_participant.id
+        if customer_participant is not None:
+            session.metadata[SESSION_META_CUSTOMER_PARTICIPANT_ID] = customer_participant.id
 
         memory_response = await self._retrieve_memory_if_enabled(session, message_text, conv_id)
 
@@ -267,77 +265,179 @@ class MessagingChannel(BaseChannel):
         ):
             await self._end_conversation(conv_id)
 
-    async def _ensure_agent_participant(
+    async def _reconcile_participants(
         self,
         conversation_id: str,
-        existing_participants: list[ParticipantResponse],
-        agent_address: ParticipantAddress,
-    ) -> ParticipantResponse | None:
-        """Return the conversation's AI_AGENT participant, creating one if absent.
+    ) -> tuple[ParticipantResponse, ParticipantResponse | None] | None:
+        """Reconcile Maestro's participants to the types TAC needs for sending.
 
-        Returns the first participant in `existing_participants` whose type is
-        AI_AGENT / AGENT / HUMAN_AGENT and owns `agent_address`. If none match,
-        creates an AI_AGENT with that address. On a 409 from another worker
-        creating it concurrently, re-lists and re-matches.
+        TAC treats itself strictly as `AI_AGENT` — any participant owning TAC's
+        (channel, address) with a different type is promoted via PUT. When
+        `reconcile_customer_type` is True (e.g. SMS), a channel-matching
+        `UNKNOWN` that does not own TAC's address is promoted to `CUSTOMER`.
 
-        Returns None if match-then-create-then-retry all fail. The caller should
-        log and bail on None.
+        v1-bridge capture currently creates our Twilio number as `UNKNOWN`,
+        which is why this reconciliation pass is load-bearing.
+
+        Returns:
+            Tuple `(agent, customer_or_none)` when the agent side is resolvable.
+            `customer` may be None when `reconcile_customer_type` is False
+            (chat uses author_info-driven customer resolution instead).
+            Returns `None` when the agent cannot be resolved at all — caller
+            should skip the webhook.
         """
-
-        def _matches(p: ParticipantResponse) -> bool:
-            return p.type in ("AI_AGENT", "HUMAN_AGENT", "AGENT") and any(
-                a.channel == agent_address.channel and a.address == agent_address.address
-                for a in p.addresses
-            )
-
-        agent = next((p for p in existing_participants if _matches(p)), None)
-        if agent:
-            return agent
-
-        self.logger.debug(
-            "No agent participant found, creating AI_AGENT",
-            conversation_id=conversation_id,
-            channel=agent_address.channel,
-            address=agent_address.address,
-        )
-        try:
-            agent = await self.tac.conversation_orchestrator_client.add_participant(
-                conversation_id,
-                addresses=[agent_address],
-                participant_type="AI_AGENT",
-            )
-            self.logger.debug(
-                "Created AI_AGENT participant",
-                conversation_id=conversation_id,
-                participant_id=agent.id,
-            )
-            return agent
-        except Exception as e:
-            # Most likely a 409 race (another worker just created the agent), but
-            # we catch broadly here — log the original error so a real 5xx isn't
-            # hidden by the generic "failed to create or find" log below.
-            self.logger.warning(
-                "Failed to create AI_AGENT, retrying participant list",
-                conversation_id=conversation_id,
-                error=str(e),
-            )
+        agent_address = self.get_agent_address(conversation_id)
 
         try:
-            retried = await self.tac.conversation_orchestrator_client.list_participants(
+            participants = await self.tac.conversation_orchestrator_client.list_participants(
                 conversation_id
             )
         except Exception as e:
             self.logger.error(
-                "Failed to retry listing participants",
+                "Failed to list participants for reconciliation",
                 conversation_id=conversation_id,
                 error=str(e),
             )
             return None
 
-        agent = next((p for p in retried if _matches(p)), None)
-        if not agent:
-            self.logger.error(
-                "Failed to create or find AI_AGENT participant",
-                conversation_id=conversation_id,
+        channel = agent_address.channel
+
+        def _owns_agent_address(p: ParticipantResponse) -> bool:
+            return any(
+                a.channel == channel and a.address == agent_address.address for a in p.addresses
             )
-        return agent
+
+        def _matches_channel(p: ParticipantResponse) -> bool:
+            return any(a.channel == channel for a in p.addresses)
+
+        agent_candidate = next((p for p in participants if _owns_agent_address(p)), None)
+        if agent_candidate is None:
+            self.logger.warning(
+                "Cannot resolve agent participant; skipping webhook",
+                conversation_id=conversation_id,
+                channel=channel,
+                address=agent_address.address,
+            )
+            return None
+
+        if agent_candidate.type != "AI_AGENT":
+            agent_candidate = await self._promote_participant(
+                conversation_id=conversation_id,
+                participant=agent_candidate,
+                new_type="AI_AGENT",
+            )
+            if agent_candidate is None:
+                return None
+
+        if not self.reconcile_customer_type:
+            return agent_candidate, None
+
+        customer = next(
+            (
+                p
+                for p in participants
+                if p.type == "CUSTOMER" and _matches_channel(p) and not _owns_agent_address(p)
+            ),
+            None,
+        )
+        if customer is not None:
+            return agent_candidate, customer
+
+        customer_unknown = next(
+            (
+                p
+                for p in participants
+                if p.type == "UNKNOWN" and _matches_channel(p) and not _owns_agent_address(p)
+            ),
+            None,
+        )
+        if customer_unknown is not None:
+            promoted_customer = await self._promote_participant(
+                conversation_id=conversation_id,
+                participant=customer_unknown,
+                new_type="CUSTOMER",
+            )
+            if promoted_customer is not None:
+                return agent_candidate, promoted_customer
+
+        self.logger.warning(
+            "No customer participant resolvable; skipping webhook",
+            conversation_id=conversation_id,
+            channel=channel,
+        )
+        return None
+
+    async def _promote_participant(
+        self,
+        conversation_id: str,
+        participant: ParticipantResponse,
+        new_type: str,
+    ) -> ParticipantResponse | None:
+        """PUT a participant to `new_type`.
+
+        Treats 409 as a concurrent-update success: re-lists participants and
+        returns the current server view of this participant id. Other errors
+        return None.
+        """
+        try:
+            updated = await self.tac.conversation_orchestrator_client.update_participant(
+                conversation_id=conversation_id,
+                participant_id=participant.id,
+                participant_type=new_type,  # type: ignore[arg-type]
+            )
+            self.logger.debug(
+                "Promoted participant",
+                conversation_id=conversation_id,
+                participant_id=participant.id,
+                from_type=participant.type,
+                to_type=new_type,
+            )
+            return updated
+        except httpx.HTTPStatusError as e:
+            if e.response is not None and e.response.status_code == 409:
+                # Another worker already updated this participant. Re-fetch to
+                # get the current type; return it only if it matches our target.
+                self.logger.debug(
+                    "Participant update 409; re-fetching after concurrent update",
+                    conversation_id=conversation_id,
+                    participant_id=participant.id,
+                )
+                try:
+                    refreshed = await self.tac.conversation_orchestrator_client.list_participants(
+                        conversation_id
+                    )
+                except Exception as list_err:
+                    self.logger.error(
+                        "Failed to re-list participants after 409",
+                        conversation_id=conversation_id,
+                        error=str(list_err),
+                    )
+                    return None
+                current = next((p for p in refreshed if p.id == participant.id), None)
+                if current is not None and current.type == new_type:
+                    return current
+                self.logger.error(
+                    "Participant not at target type after concurrent update",
+                    conversation_id=conversation_id,
+                    participant_id=participant.id,
+                    target_type=new_type,
+                    current_type=current.type if current else None,
+                )
+                return None
+            self.logger.error(
+                "Failed to promote participant",
+                conversation_id=conversation_id,
+                participant_id=participant.id,
+                target_type=new_type,
+                error=str(e),
+            )
+            return None
+        except Exception as e:
+            self.logger.error(
+                "Failed to promote participant",
+                conversation_id=conversation_id,
+                participant_id=participant.id,
+                target_type=new_type,
+                error=str(e),
+            )
+            return None

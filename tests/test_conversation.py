@@ -495,24 +495,23 @@ class TestConversationClient:
 
     @pytest.mark.asyncio
     @patch("httpx.AsyncClient")
-    async def test_add_participant_success(self, mock_async_client_class):
-        """Test successful participant addition."""
+    async def test_update_participant_success(self, mock_async_client_class):
+        """Test update_participant promotes to AI_AGENT and returns updated record."""
         mock_response = Mock()
         mock_response.json.return_value = {
-            "id": "MB123456",
+            "id": "conv_participant_01",
             "conversationId": "CH123456",
             "accountId": "AC123456",
-            "name": "John Doe",
-            "profileId": "profile_123",
-            "type": "CUSTOMER",
-            "addresses": [],
+            "name": "+15551234567",
+            "type": "AI_AGENT",
+            "addresses": [{"channel": "SMS", "address": "+15551234567"}],
             "createdAt": "2025-01-01T00:00:00Z",
             "updatedAt": "2025-01-01T01:00:00Z",
         }
         mock_response.raise_for_status = Mock()
 
         mock_client = AsyncMock()
-        mock_client.post = AsyncMock(return_value=mock_response)
+        mock_client.put = AsyncMock(return_value=mock_response)
         mock_async_client_class.return_value.__aenter__.return_value = mock_client
 
         client = ConversationClient(
@@ -521,68 +520,31 @@ class TestConversationClient:
             configuration_id="conv_configuration_test123",
         )
 
-        result = await client.add_participant(
+        result = await client.update_participant(
             conversation_id="CH123456",
+            participant_id="conv_participant_01",
+            participant_type="AI_AGENT",
         )
 
-        # Verify API call
-        expected_url = "https://conversations.twilio.com/v2/Conversations/CH123456/Participants"
-        mock_client.post.assert_called_once_with(
+        expected_url = (
+            "https://conversations.twilio.com/v2/Conversations/CH123456"
+            "/Participants/conv_participant_01"
+        )
+        mock_client.put.assert_called_once_with(
             expected_url,
-            json={},  # No default type - API determines participant type
+            json={"type": "AI_AGENT"},
         )
 
-        # Verify response
         assert isinstance(result, ParticipantResponse)
-        assert result.id == "MB123456"
-        assert result.conversation_id == "CH123456"
-        assert result.name == "John Doe"
+        assert result.id == "conv_participant_01"
+        assert result.type == "AI_AGENT"
 
     @pytest.mark.asyncio
     @patch("httpx.AsyncClient")
-    async def test_add_participant_with_minimal_params(self, mock_async_client_class):
-        """Test add_participant with only some optional parameters."""
-        mock_response = Mock()
-        mock_response.json.return_value = {
-            "id": "MB123456",
-            "conversationId": "CH123456",
-            "accountId": "AC123456",
-            "name": "System",
-            "profileId": "profile_123",
-            "type": "CUSTOMER",
-            "addresses": [],
-            "createdAt": "2025-01-01T00:00:00Z",
-            "updatedAt": "2025-01-01T01:00:00Z",
-        }
-        mock_response.raise_for_status = Mock()
-
+    async def test_update_participant_api_error(self, mock_async_client_class):
+        """Test update_participant surfaces API errors."""
         mock_client = AsyncMock()
-        mock_client.post = AsyncMock(return_value=mock_response)
-        mock_async_client_class.return_value.__aenter__.return_value = mock_client
-
-        client = ConversationClient(
-            api_key="SK123456",
-            api_secret="test_token",
-            configuration_id="conv_configuration_test123",
-        )
-
-        result = await client.add_participant(
-            conversation_id="CH123456",
-        )
-
-        # Verify only non-None values are sent
-        assert mock_client.post.call_args[1]["json"] == {}
-
-        # Verify response
-        assert isinstance(result, ParticipantResponse)
-        assert result.id == "MB123456"
-
-    @pytest.mark.asyncio
-    @patch("httpx.AsyncClient")
-    async def test_add_participant_api_error(self, mock_async_client_class):
-        """Test add_participant handles API errors."""
-        mock_client = AsyncMock()
-        mock_client.post = AsyncMock(side_effect=httpx.HTTPError("API Error"))
+        mock_client.put = AsyncMock(side_effect=httpx.HTTPError("API Error"))
         mock_async_client_class.return_value.__aenter__.return_value = mock_client
 
         client = ConversationClient(
@@ -592,83 +554,11 @@ class TestConversationClient:
         )
 
         with pytest.raises(httpx.HTTPError, match="API Error"):
-            await client.add_participant(
+            await client.update_participant(
                 conversation_id="CH123456",
+                participant_id="conv_participant_01",
+                participant_type="CUSTOMER",
             )
-
-    @pytest.mark.asyncio
-    @patch("httpx.AsyncClient")
-    async def test_add_participant_with_agent_type(self, mock_async_client_class):
-        """Test add_participant with participant_type=AGENT."""
-        mock_response = Mock()
-        mock_response.json.return_value = {
-            "id": "MB123456",
-            "conversationId": "CH123456",
-            "accountId": "AC123456",
-            "name": "Agent System",
-            "type": "AGENT",
-            "addresses": [],
-        }
-        mock_response.raise_for_status = Mock()
-
-        mock_client = AsyncMock()
-        mock_client.post = AsyncMock(return_value=mock_response)
-        mock_async_client_class.return_value.__aenter__.return_value = mock_client
-
-        client = ConversationClient(
-            api_key="SK123456",
-            api_secret="test_token",
-            configuration_id="conv_configuration_test123",
-        )
-
-        result = await client.add_participant(
-            conversation_id="CH123456",
-            participant_type="AGENT",
-        )
-
-        # Verify the request payload contains the AGENT type
-        assert mock_client.post.call_args[1]["json"]["type"] == "AGENT"
-
-        # Verify response
-        assert isinstance(result, ParticipantResponse)
-        assert result.type == "AGENT"
-
-    @pytest.mark.asyncio
-    @patch("httpx.AsyncClient")
-    async def test_add_participant_with_unknown_type(self, mock_async_client_class):
-        """Test add_participant with participant_type=UNKNOWN."""
-        mock_response = Mock()
-        mock_response.json.return_value = {
-            "id": "MB123456",
-            "conversationId": "CH123456",
-            "accountId": "AC123456",
-            "name": "Unknown Entity",
-            "type": "UNKNOWN",
-            "addresses": [],
-        }
-        mock_response.raise_for_status = Mock()
-
-        mock_client = AsyncMock()
-        mock_client.post = AsyncMock(return_value=mock_response)
-        mock_async_client_class.return_value.__aenter__.return_value = mock_client
-
-        client = ConversationClient(
-            api_key="SK123456",
-            api_secret="test_token",
-            configuration_id="conv_configuration_test123",
-        )
-
-        result = await client.add_participant(
-            conversation_id="CH123456",
-            participant_type="UNKNOWN",
-        )
-
-        # Verify the request payload contains the UNKNOWN type
-        assert mock_client.post.call_args[1]["json"]["type"] == "UNKNOWN"
-
-        # Verify response
-        assert isinstance(result, ParticipantResponse)
-        assert result.type == "UNKNOWN"
 
     def test_conversation_client_uses_correct_headers(self):
         """Test that ConversationClient stores authentication credentials."""
@@ -710,24 +600,6 @@ class TestConversationClient:
         assert (
             mock_client.post.call_args[0][0] == "https://conversations.twilio.com/v2/Conversations"
         )
-
-        # Test add_participant URL
-        mock_response.json.return_value = {
-            "id": "MB123456",
-            "conversationId": "CH123456",
-            "accountId": "AC123456",
-            "name": "Test",
-            "profileId": "profile_123",
-            "type": "CUSTOMER",
-            "addresses": [],
-            "createdAt": "2025-01-01T00:00:00Z",
-            "updatedAt": "2025-01-01T01:00:00Z",
-        }
-
-        await client.add_participant(conversation_id="CH123456")
-
-        expected_url = "https://conversations.twilio.com/v2/Conversations/CH123456/Participants"
-        assert mock_client.post.call_args[0][0] == expected_url
 
     @pytest.mark.asyncio
     @patch("httpx.AsyncClient")

@@ -13,8 +13,6 @@ from tac.models.conversation import (
     ConversationRequest,
     ConversationResponse,
     ConversationsListResponse,
-    ParticipantAddress,
-    ParticipantRequest,
     ParticipantResponse,
     SendMessageActionRequest,
     UpdateConversationRequest,
@@ -101,41 +99,43 @@ class ConversationClient(BaseAPIClient):
             )
             raise
 
-    async def add_participant(
+    async def update_participant(
         self,
         conversation_id: str,
-        addresses: list[ParticipantAddress] | None = None,
-        participant_type: Literal["HUMAN_AGENT", "CUSTOMER", "AI_AGENT", "AGENT", "UNKNOWN"]
-        | None = None,
+        participant_id: str,
+        participant_type: Literal["HUMAN_AGENT", "CUSTOMER", "AI_AGENT", "AGENT", "UNKNOWN"],
     ) -> ParticipantResponse:
         """
-        Add a new participant to a conversation.
+        Update an existing participant's type.
+
+        Used to reconcile Maestro's captured participants to the correct role
+        (e.g., promote a v1-bridge `UNKNOWN` to `AI_AGENT`). Other fields on the
+        participant (addresses, name, profileId) are preserved by Maestro.
 
         Args:
-            conversation_id: The conversation ID to add participant to
-            addresses: List of communication addresses for the participant (optional)
-            participant_type: Type of participant (e.g., "CUSTOMER", "AGENT"). Optional.
+            conversation_id: Conversation ID containing the participant
+            participant_id: Participant ID to update
+            participant_type: New participant type
 
         Returns:
-            ParticipantResponse object containing the created participant details
+            ParticipantResponse reflecting the updated participant.
 
         Raises:
-            httpx.HTTPError: If the API request fails
+            httpx.HTTPError: If the API request fails.
         """
-        url = f"{self.base_url}/v2/Conversations/{conversation_id}/Participants"
+        url = f"{self.base_url}/v2/Conversations/{conversation_id}/Participants/{participant_id}"
 
-        request_data = ParticipantRequest(addresses=addresses, type=participant_type)
-        request_payload = request_data.model_dump(by_alias=True, exclude_none=True)
+        # Send only `type`; Maestro preserves other fields (addresses, name, profileId).
+        request_payload: dict[str, Any] = {"type": participant_type}
 
         try:
             async with self._get_client() as client:
-                response = await client.post(
+                response = await client.put(
                     url,
                     json=request_payload,
                 )
                 response.raise_for_status()
-                participant = ParticipantResponse(**response.json())
-                return participant
+                return ParticipantResponse(**response.json())
 
         except httpx.HTTPError as e:
             response_text = (
@@ -144,7 +144,7 @@ class ConversationClient(BaseAPIClient):
                 else "No response"
             )
             self.logger.error(
-                f"Failed to add participant: {e}\n"
+                f"Failed to update participant: {e}\n"
                 f"URL: {url}\n"
                 f"Request body: {request_payload}\n"
                 f"Response: {response_text}"
