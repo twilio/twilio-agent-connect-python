@@ -286,8 +286,7 @@ class MessagingChannel(BaseChannel):
         (1) the agent side is created as `UNKNOWN` (so it owns our address but
         has the wrong type), and (2) the agent side is not created at all — on
         inbound SMS the bridge often produces only the customer participant,
-        and TAC must add itself before replying. Decision matrix (coordinated
-        with the Maestro team):
+        and TAC must add itself before replying. Decision matrix:
 
             | Agent side                  | Customer side           | Action                      |
             |-----------------------------|-------------------------|-----------------------------|
