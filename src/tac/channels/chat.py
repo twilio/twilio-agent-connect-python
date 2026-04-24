@@ -105,18 +105,16 @@ class ChatChannel(MessagingChannel):
 
         session = self._conversations.get(conversation_id)
         if not session:
-            self.logger.error(
-                "No active session found",
-                conversation_id=conversation_id,
+            raise RuntimeError(
+                f"No active session for conversation {conversation_id}; "
+                "send_response requires a prior inbound webhook."
             )
-            return
 
         if not session.author_info:
-            self.logger.error(
-                "No author info found - no inbound message received yet",
-                conversation_id=conversation_id,
+            raise RuntimeError(
+                f"No author info on session for conversation {conversation_id}; "
+                "send_response requires a prior inbound webhook."
             )
-            return
 
         # channelId (Chat Channel SID) is required for CHAT delivery — the V1
         # Chat backend uses it to pick the destination thread. Inbound webhooks

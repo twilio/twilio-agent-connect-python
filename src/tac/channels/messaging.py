@@ -144,12 +144,15 @@ class MessagingChannel(BaseChannel):
         For COMMUNICATION_CREATED: require author.channel matches this channel type.
         For CONVERSATION_UPDATED: only process if conversation is tracked locally.
         Other events pass through.
+
+        Callers must ensure `webhook_data["data"]` is a dict before invoking.
         """
         event_type = webhook_data.get("eventType")
-        event_data = webhook_data.get("data") or {}
+        event_data = webhook_data["data"]
 
         if event_type == "COMMUNICATION_CREATED":
-            author_channel = event_data.get("author", {}).get("channel")
+            author = event_data.get("author")
+            author_channel = author.get("channel") if isinstance(author, dict) else None
             if not author_channel:
                 return False
             return bool(author_channel == self.get_channel_type_upper())
@@ -178,9 +181,6 @@ class MessagingChannel(BaseChannel):
             if self._is_duplicate_webhook(idempotency_token):
                 return
 
-        if not self._is_event_for_this_channel(webhook_data):
-            return
-
         event_type = webhook_data.get("eventType")
         event_data = webhook_data.get("data")
 
@@ -189,6 +189,9 @@ class MessagingChannel(BaseChannel):
                 "Webhook missing or malformed data field, skipping",
                 event_type=event_type,
             )
+            return
+
+        if not self._is_event_for_this_channel(webhook_data):
             return
 
         if event_type == "COMMUNICATION_CREATED":
@@ -271,20 +274,40 @@ class MessagingChannel(BaseChannel):
     ) -> tuple[ParticipantResponse, ParticipantResponse | None] | None:
         """Reconcile Maestro's participants to the types TAC needs for sending.
 
-        TAC treats itself strictly as `AI_AGENT` — any participant owning TAC's
-        (channel, address) with a different type is promoted via PUT. When
-        `reconcile_customer_type` is True (e.g. SMS), a channel-matching
-        `UNKNOWN` that does not own TAC's address is promoted to `CUSTOMER`.
+        TAC treats itself strictly as `AI_AGENT`: any participant that owns
+        TAC's (channel, address) but has a different type — including `AGENT`
+        and `HUMAN_AGENT` — is promoted to `AI_AGENT` via `PUT /Participants`.
+        This is deliberate: `HUMAN_AGENT` in particular must never be reused as
+        TAC's `from`, because a real human participant (e.g. a Studio handoff)
+        joins with a *different* address/participant — collisions at our
+        address mean the type is simply wrong, not that a human is speaking.
 
         v1-bridge capture currently creates our Twilio number as `UNKNOWN`,
-        which is why this reconciliation pass is load-bearing.
+        which is why this reconciliation pass is load-bearing. Decision matrix
+        (coordinated with the Maestro team):
+
+            | Agent side                  | Customer side           | Action                      |
+            |-----------------------------|-------------------------|-----------------------------|
+            | AI_AGENT                    | CUSTOMER                | Use as-is.                  |
+            | AI_AGENT                    | UNKNOWN (no CUSTOMER)   | PUT customer → CUSTOMER.    |
+            | other, owns our address     | CUSTOMER                | PUT agent → AI_AGENT.       |
+            | other, owns our address     | UNKNOWN (no CUSTOMER)   | Two PUTs.                   |
+            | nobody owns our address     | any                     | Skip webhook (WARN).        |
+            | AI_AGENT                    | no resolvable customer  | Skip webhook (WARN).        |
+
+        Customer-side reconciliation is gated by `reconcile_customer_type`.
+        Chat sets it to `False` because chat identifies the customer
+        author-driven (via `session.author_info.participant_id`), so promoting
+        some other `UNKNOWN` CHAT participant could pick the wrong recipient.
+
+        PUT 409 is treated as concurrent-update success: re-list and use the
+        current server view of that participant id (see `_promote_participant`).
 
         Returns:
-            Tuple `(agent, customer_or_none)` when the agent side is resolvable.
-            `customer` may be None when `reconcile_customer_type` is False
-            (chat uses author_info-driven customer resolution instead).
-            Returns `None` when the agent cannot be resolved at all — caller
-            should skip the webhook.
+            `(agent, customer_or_none)` when the agent side is resolvable.
+            `customer` is `None` when `reconcile_customer_type` is `False`.
+            `None` overall means the agent cannot be resolved — the caller
+            should skip the webhook without invoking the LLM.
         """
         agent_address = self.get_agent_address(conversation_id)
 
