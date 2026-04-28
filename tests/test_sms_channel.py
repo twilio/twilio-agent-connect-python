@@ -748,18 +748,15 @@ class TestSMSChannel:
 
     @pytest.mark.asyncio
     async def test_send_response_raises_when_no_customer_on_sms(self) -> None:
-        """When listParticipants returns no CUSTOMER with SMS address, raise."""
+        """Cross-instance fallback: no session author_info and listParticipants has no CUSTOMER."""
         from tac.models.conversation import ParticipantAddress, ParticipantResponse
 
         tac = TAC(get_test_config())
         channel = SMSChannel(tac)
 
-        channel._conversations["CH123456"] = ConversationSession(
-            conversation_id="CH123456",
-            channel="sms",
-            author_info=AuthorInfo(address="+12345678901", participant_id="PA_OTHER"),
-        )
-
+        # No session for this conversation (simulates cross-instance reply).
+        # Without author_info, send_response falls back to filtering list_participants,
+        # which returns no CUSTOMER — raise.
         mock_agent = ParticipantResponse(
             **{  # type: ignore[arg-type]
                 "id": "PA_AGENT",
@@ -784,6 +781,71 @@ class TestSMSChannel:
                 RuntimeError, match="Customer participant with SMS address not found"
             ):
                 await channel.send_response("CH123456", "Reply")
+
+    @pytest.mark.asyncio
+    async def test_send_response_uses_author_info_when_list_participants_flaky(self) -> None:
+        """PR 87 scenario: Maestro returns CUSTOMER with type=None or empty addresses.
+
+        The old filter-loop over list_participants would miss the customer and
+        raise RuntimeError, dropping the AI response. Using session.author_info
+        (captured from the COMMUNICATION_CREATED webhook) bypasses the flaky
+        type/addresses fields and sends the reply correctly.
+        """
+        from tac.models.conversation import ParticipantAddress, ParticipantResponse
+
+        tac = TAC(get_test_config())
+        channel = SMSChannel(tac)
+
+        channel._conversations["CH123456"] = ConversationSession(
+            conversation_id="CH123456",
+            channel="sms",
+            author_info=AuthorInfo(address="+12345678901", participant_id="PA_CUSTOMER"),
+        )
+
+        # Maestro returns the customer participant without type or addresses —
+        # the scenario PR 87 flagged. The old code would fail here.
+        flaky_customer = ParticipantResponse(
+            **{  # type: ignore[arg-type]
+                "id": "PA_CUSTOMER",
+                "accountId": "ACtest123",
+                "conversationId": "CH123456",
+                "name": "Customer",
+                "type": None,
+                "addresses": [],
+            }
+        )
+        agent = ParticipantResponse(
+            **{  # type: ignore[arg-type]
+                "id": "PA_AGENT",
+                "accountId": "ACtest123",
+                "conversationId": "CH123456",
+                "name": "AI Agent",
+                "type": "AI_AGENT",
+                "addresses": [
+                    ParticipantAddress(channel="SMS", address="+15551234567").model_dump(
+                        by_alias=True
+                    )
+                ],
+            }
+        )
+
+        with (
+            patch.object(
+                tac.conversation_orchestrator_client,
+                "list_participants",
+                return_value=[flaky_customer, agent],
+            ),
+            patch.object(
+                tac.conversation_orchestrator_client,
+                "create_action",
+                new=AsyncMock(),
+            ) as mock_action,
+        ):
+            await channel.send_response("CH123456", "Reply")
+
+        mock_action.assert_awaited_once()
+        action_request = mock_action.await_args.args[1]
+        assert action_request.payload.to[0].participant_id == "PA_CUSTOMER"
 
     @pytest.mark.asyncio
     async def test_ignores_chat_messages(self) -> None:

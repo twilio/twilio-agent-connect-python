@@ -110,18 +110,28 @@ class SMSChannel(MessagingChannel):
         session = self._conversations.get(conversation_id)
         agent_address = self.tac.config.phone_number
 
-        # Find the CUSTOMER participant by address on the SMS channel
-        customer_participant = None
-        customer_address = None
-        for participant in participants:
-            if participant.type == "CUSTOMER":
-                for address in participant.addresses:
-                    if address.channel == "SMS":
-                        customer_participant = participant
-                        customer_address = address.address
+        # Prefer the participant id captured from the inbound COMMUNICATION_CREATED
+        # webhook. It's the authoritative customer id for this conversation and
+        # doesn't depend on Maestro returning complete type/addresses in
+        # list_participants (which can be flaky — participants sometimes come
+        # back with type=None or empty addresses). Fall back to filtering the
+        # list when author_info is unavailable (e.g. cross-instance reply where
+        # inbound reconciliation happened on a different process).
+        customer_participant_id: str | None = None
+        customer_address: str | None = None
+        if session and session.author_info and session.author_info.participant_id:
+            customer_participant_id = session.author_info.participant_id
+            customer_address = session.author_info.address
+        else:
+            for participant in participants:
+                if participant.type == "CUSTOMER":
+                    for address in participant.addresses:
+                        if address.channel == "SMS":
+                            customer_participant_id = participant.id
+                            customer_address = address.address
+                            break
+                    if customer_participant_id:
                         break
-                if customer_participant:
-                    break
 
         agent_participant = await self._ensure_agent_participant(
             conversation_id,
@@ -133,7 +143,7 @@ class SMSChannel(MessagingChannel):
                 f"Failed to resolve AI_AGENT participant for conversation {conversation_id}"
             )
 
-        if not customer_participant or not customer_address:
+        if not customer_participant_id or not customer_address:
             raise RuntimeError(
                 "Customer participant with SMS address not found for conversation "
                 f"{conversation_id}"
@@ -156,7 +166,7 @@ class SMSChannel(MessagingChannel):
                     to=[
                         ActionParticipantRef(
                             channel="SMS",
-                            participant_id=customer_participant.id,
+                            participant_id=customer_participant_id,
                         )
                     ],
                     content=ActionTextContent(text=response),
