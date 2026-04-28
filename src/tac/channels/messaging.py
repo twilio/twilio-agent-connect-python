@@ -336,6 +336,10 @@ class MessagingChannel(BaseChannel):
             session.metadata[SESSION_META_AGENT_PARTICIPANT_ID] = agent_participant.id
             if customer_participant is not None:
                 session.metadata[SESSION_META_CUSTOMER_PARTICIPANT_ID] = customer_participant.id
+                # Lift the profile resolved/attached during reconciliation onto
+                # the session so retrieve_memory skips its fallback lookup.
+                if customer_participant.profile_id and not session.profile_id:
+                    session.profile_id = customer_participant.profile_id
 
         memory_response = await self._retrieve_memory_if_enabled(session, message_text, conv_id)
 
@@ -602,7 +606,7 @@ class MessagingChannel(BaseChannel):
             | other, owns our address     | CUSTOMER                | PUT agent → AI_AGENT.       |
             | other, owns our address     | UNKNOWN (no CUSTOMER)   | Two PUTs (CUST gets profile)|
             | nobody owns our address     | CUSTOMER or UNKNOWN     | POST AI_AGENT, then proceed.|
-            | any                         | no resolvable customer  | Skip webhook (WARN).        |
+            | any                         | no resolvable customer  | Return None (caller WARNs). |
 
         UNKNOWN → CUSTOMER promotion also attaches a Memora profile: lookup by
         phone first, create on miss (see `_resolve_customer_profile`). Profile
@@ -622,8 +626,10 @@ class MessagingChannel(BaseChannel):
         Returns:
             `(agent, customer_or_none)` when the agent side is resolvable.
             `customer` is `None` when `reconcile_customer_type` is `False`.
-            `None` overall means the agent cannot be resolved — the caller
-            should skip the webhook without invoking the LLM.
+            `None` overall when the agent cannot be resolved. The caller
+            treats this as non-fatal and still invokes the LLM — `send_response`
+            re-resolves the agent live, so session-metadata ids are a
+            performance bonus, not a correctness requirement.
         """
         agent_address = self.get_agent_address(conversation_id)
 

@@ -74,7 +74,17 @@ class SMSChannel(MessagingChannel):
         return author_address == self.tac.config.phone_number
 
     def get_agent_address(self, conversation_id: str) -> ParticipantAddress:
-        return ParticipantAddress(channel="SMS", address=self.tac.config.phone_number)
+        # Outbound-initiated conversations may use a from_ address different
+        # from config.phone_number; prefer the metadata set by
+        # _initiate_messaging_conversation so reconciliation targets the
+        # actual agent participant instead of POSTing a spurious one.
+        session = self._conversations.get(conversation_id)
+        address = self.tac.config.phone_number
+        if session:
+            from_addr = session.metadata.get("from_address")
+            if isinstance(from_addr, str):
+                address = from_addr
+        return ParticipantAddress(channel="SMS", address=address)
 
     async def send_response(
         self,

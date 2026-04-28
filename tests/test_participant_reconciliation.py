@@ -583,3 +583,91 @@ async def test_customer_promotion_proceeds_without_profile_on_errors() -> None:
     kwargs = mock_update.await_args.kwargs
     assert kwargs["profile_id"] is None
     assert kwargs["participant_type"] == "CUSTOMER"
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_lifts_customer_profile_onto_session() -> None:
+    """Reconciled CUSTOMER's profile_id is copied onto session.profile_id.
+
+    Avoids a redundant lookup in retrieve_memory's fallback path when the
+    profile was already resolved/attached during reconciliation.
+    """
+    tac = _tac()
+    channel = SMSChannel(tac)
+
+    agent = _participant("PA_A", "AI_AGENT", "+15551234567")
+    customer = _participant("PA_C", "CUSTOMER", "+12345678901")
+    # Give the CUSTOMER a profile_id the way a prior reconciliation / Memora
+    # identity-resolution would have.
+    customer = customer.model_copy(update={"profile_id": "mem_profile_01abc"})
+
+    webhook_event = {
+        "id": "comms_communication_01test",
+        "conversationId": "CH123",
+        "accountId": "ACtest",
+        "author": {
+            "address": "+12345678901",
+            "channel": "SMS",
+            "participantId": "PA_C",
+        },
+        "content": {"type": "TEXT", "text": "hi"},
+        "recipients": [
+            {
+                "address": "+15551234567",
+                "channel": "SMS",
+                "participantId": "PA_A",
+            }
+        ],
+        "createdAt": "2026-04-27T00:00:00Z",
+    }
+
+    with (
+        patch.object(
+            tac.conversation_orchestrator_client,
+            "list_participants",
+            return_value=[agent, customer],
+        ),
+        patch.object(tac, "trigger_message_ready", new=AsyncMock(return_value=None)),
+    ):
+        await channel._handle_communication_created(webhook_event)
+
+    session = channel._conversations["CH123"]
+    assert session.profile_id == "mem_profile_01abc"
+
+
+@pytest.mark.asyncio
+async def test_outbound_from_address_used_for_agent_lookup() -> None:
+    """Outbound-initiated convs set session from_address; reconciliation honors it.
+
+    Regression guard: before the fix, get_agent_address hardcoded
+    config.phone_number, so reconciling an outbound conv whose AI_AGENT owned
+    a different from_ address would fail to find it and POST a spurious agent.
+    """
+    tac = _tac()
+    channel = SMSChannel(tac)
+
+    # Outbound initiated from +15550001111 (different from config phone).
+    session = channel._start_conversation("CH123")
+    session.metadata["from_address"] = "+15550001111"
+
+    agent = _participant("PA_A", "AI_AGENT", "+15550001111")
+    customer = _participant("PA_C", "CUSTOMER", "+12345678901")
+
+    with (
+        patch.object(
+            tac.conversation_orchestrator_client,
+            "list_participants",
+            return_value=[agent, customer],
+        ),
+        patch.object(
+            tac.conversation_orchestrator_client, "add_participant"
+        ) as mock_add_participant,
+        patch.object(tac.conversation_orchestrator_client, "update_participant") as mock_update,
+    ):
+        result = await channel._reconcile_participants("CH123")
+
+    assert result is not None
+    assert result[0].id == "PA_A"
+    assert result[0].type == "AI_AGENT"
+    mock_add_participant.assert_not_called()
+    mock_update.assert_not_called()

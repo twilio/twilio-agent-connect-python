@@ -69,12 +69,24 @@ class ChatChannel(MessagingChannel):
         return author_address == self.agent_address
 
     def get_agent_address(self, conversation_id: str) -> ParticipantAddress:
+        # Outbound-initiated conversations may use a from_ identity different
+        # from self.agent_address; prefer the metadata set by
+        # _initiate_messaging_conversation so reconciliation targets the
+        # actual agent participant instead of POSTing a spurious one.
         session = self._conversations.get(conversation_id)
-        channel_id = session.metadata.get("channel_id") if session else None
+        address = self.agent_address
+        channel_id = None
+        if session:
+            from_addr = session.metadata.get("from_address")
+            if isinstance(from_addr, str):
+                address = from_addr
+            raw_channel_id = session.metadata.get("channel_id")
+            if isinstance(raw_channel_id, str):
+                channel_id = raw_channel_id
         return ParticipantAddress(
             channel="CHAT",
-            address=self.agent_address,
-            channel_id=channel_id if isinstance(channel_id, str) else None,
+            address=address,
+            channel_id=channel_id,
         )
 
     async def send_response(
