@@ -323,7 +323,7 @@ class VoiceChannel(BaseChannel):
         self.logger.info(
             "Initiating outbound voice conversation",
             to=mask_phone(options.to),
-            from_number=mask_phone(from_number) if from_number else None,
+            from_number=mask_phone(from_number),
         )
 
         try:

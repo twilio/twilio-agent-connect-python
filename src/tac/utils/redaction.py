@@ -3,30 +3,20 @@
 _MASK = "***"
 
 
-def mask_phone(value: str) -> str:
+def mask_phone(value: str | None) -> str:
     """Mask a phone number, preserving the first 2 and last 4 characters.
 
-    Returns ``"***"`` for empty or short (< 7 char) inputs.
-
-    Example::
-
-        >>> mask_phone("+15551234567")
-        '+1***4567'
+    Returns ``"***"`` for ``None``, empty, or short (< 7 char) inputs.
     """
     if not value or not value.strip() or len(value) < 7:
         return _MASK
     return value[:2] + _MASK + value[-4:]
 
 
-def mask_email(value: str) -> str:
+def mask_email(value: str | None) -> str:
     """Mask an email address, preserving the first character and full domain.
 
-    Returns ``"***"`` for empty inputs or strings without ``@``.
-
-    Example::
-
-        >>> mask_email("user@example.com")
-        'u***@example.com'
+    Returns ``"***"`` for ``None``, empty, or strings without ``@``.
     """
     if not value or not value.strip():
         return _MASK
@@ -36,18 +26,11 @@ def mask_email(value: str) -> str:
     return value[0] + _MASK + value[at_index:]
 
 
-def mask_address(value: str) -> str:
+def mask_address(value: str | None) -> str:
     """Auto-detect address type and apply the appropriate mask.
 
     Delegates to :func:`mask_email` if the value contains ``@``,
     otherwise to :func:`mask_phone`.
-
-    Example::
-
-        >>> mask_address("+15551234567")
-        '+1***4567'
-        >>> mask_address("user@example.com")
-        'u***@example.com'
     """
     if not value or not value.strip():
         return _MASK
