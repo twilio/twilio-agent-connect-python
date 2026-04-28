@@ -8,7 +8,10 @@ def mask_phone(value: str | None) -> str:
 
     Returns ``"***"`` for ``None``, empty, or short (< 7 char) inputs.
     """
-    if not value or not value.strip() or len(value) < 7:
+    if not value:
+        return _MASK
+    value = value.strip()
+    if not value or len(value) < 7:
         return _MASK
     return value[:2] + _MASK + value[-4:]
 
@@ -18,7 +21,10 @@ def mask_email(value: str | None) -> str:
 
     Returns ``"***"`` for ``None``, empty, or strings without ``@``.
     """
-    if not value or not value.strip():
+    if not value:
+        return _MASK
+    value = value.strip()
+    if not value:
         return _MASK
     at_index = value.find("@")
     if at_index < 1:

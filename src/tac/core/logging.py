@@ -33,7 +33,13 @@ _RESERVED_LOG_ATTRS = {
 }
 
 
-_PHONE_RE = re.compile(r"\+\d[\d\-\s()]{6,}\d")
+_PHONE_RE = re.compile(
+    r"(?<!\w)"
+    r"(?:\+\d[\d\-\s()]{6,}\d"
+    r"|(?:\(\d{3}\)\s*|\d{3}[\-.\s]?)\d{3}[\-.\s]?\d{4}"
+    r"|\d{10})"
+    r"(?!\w)"
+)
 _EMAIL_RE = re.compile(r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}")
 _REDACTED = "***"
 

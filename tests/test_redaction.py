@@ -177,6 +177,24 @@ class TestFormatterSafetyNet:
         assert "+447911123456" not in output
         assert "***" in output
 
+    def test_json_formatter_scrubs_domestic_phone(self) -> None:
+        formatter = JSONFormatter()
+        record = logging.LogRecord(
+            "tac.test", logging.INFO, "", 0, "Calling 5551234567 now", (), None
+        )
+        output = formatter.format(record)
+        assert "5551234567" not in output
+        assert "***" in output
+
+    def test_json_formatter_scrubs_formatted_phone(self) -> None:
+        formatter = JSONFormatter()
+        record = logging.LogRecord(
+            "tac.test", logging.INFO, "", 0, "Calling (555) 123-4567 now", (), None
+        )
+        output = formatter.format(record)
+        assert "(555) 123-4567" not in output
+        assert "***" in output
+
     def test_formatters_pass_clean_messages_through(self) -> None:
         for formatter in [JSONFormatter(), ConsoleFormatter(fmt="%(message)s")]:
             record = logging.LogRecord(
@@ -194,13 +212,16 @@ class _RecordCapture:
     def __init__(self, logger: logging.Logger) -> None:
         self._logger = logger
         self._handler = logging.Handler()
+        self._prev_level: int = logging.WARNING
         self.records: list[logging.LogRecord] = []
         self._handler.emit = self.records.append  # type: ignore[assignment]
 
     def __enter__(self) -> list[logging.LogRecord]:
+        self._prev_level = self._logger.level
         self._logger.addHandler(self._handler)
         self._logger.setLevel(logging.DEBUG)
         return self.records
 
     def __exit__(self, *args: object) -> None:
         self._logger.removeHandler(self._handler)
+        self._logger.setLevel(self._prev_level)
