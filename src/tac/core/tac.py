@@ -16,6 +16,7 @@ from tac.models.intelligence import OperatorProcessingResult
 from tac.models.memory import ProfileLookupResponse
 from tac.models.session import ConversationSession
 from tac.models.tac import TACMemoryResponse
+from tac.utils.redaction import mask_address
 
 
 class TAC:
@@ -152,7 +153,7 @@ class TAC:
                         conversation_context.profile_id = lookup_response.profiles[0]
                         self.logger.debug(f"Found profile_id: {conversation_context.profile_id}")
                     else:
-                        self.logger.debug(f"No profile found for address {address}")
+                        self.logger.debug(f"No profile found for address {mask_address(address)}")
                         raise ValueError("No profile found for address")
                 else:
                     self.logger.debug(

@@ -22,6 +22,7 @@ from tac.models.voice import (
     TwiMLOptions,
 )
 from tac.session import SessionState
+from tac.utils.redaction import mask_phone
 
 from . import twiml
 from .config import VoiceChannelConfig
@@ -321,8 +322,8 @@ class VoiceChannel(BaseChannel):
 
         self.logger.info(
             "Initiating outbound voice conversation",
-            to=options.to,
-            from_number=from_number,
+            to=mask_phone(options.to),
+            from_number=mask_phone(from_number) if from_number else None,
         )
 
         try:
@@ -344,7 +345,7 @@ class VoiceChannel(BaseChannel):
             self.logger.info(
                 "Outbound voice call placed",
                 call_sid=call.sid,
-                to=options.to,
+                to=mask_phone(options.to),
             )
 
             return InitiateVoiceConversationResult(call_sid=call.sid)
@@ -352,7 +353,7 @@ class VoiceChannel(BaseChannel):
         except Exception as e:
             self.logger.error(
                 "Failed to initiate outbound call",
-                to=options.to,
+                to=mask_phone(options.to),
                 error=str(e),
                 exc_info=True,
             )

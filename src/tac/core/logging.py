@@ -2,6 +2,7 @@
 
 import json
 import logging
+import re
 import sys
 from typing import Any
 
@@ -30,6 +31,37 @@ _RESERVED_LOG_ATTRS = {
     "stack_info",
     "taskName",
 }
+
+
+_PHONE_RE = re.compile(r"\+\d[\d\-\s()]{6,}\d")
+_EMAIL_RE = re.compile(r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}")
+_REDACTED = "***"
+
+
+class PIISafetyFilter(logging.Filter):
+    """Safety-net filter that catches PII missed by per-callsite masking."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.msg = self._scrub(record.msg)
+        if record.args:
+            if isinstance(record.args, dict):
+                record.args = {k: self._scrub(v) for k, v in record.args.items()}
+            elif isinstance(record.args, tuple):
+                record.args = tuple(self._scrub(a) for a in record.args)
+        for key in list(record.__dict__):
+            if key not in _RESERVED_LOG_ATTRS and not key.startswith("_"):
+                val = record.__dict__[key]
+                if isinstance(val, str):
+                    record.__dict__[key] = self._scrub(val)
+        return True
+
+    @staticmethod
+    def _scrub(value: Any) -> Any:
+        if not isinstance(value, str):
+            return value
+        value = _PHONE_RE.sub(_REDACTED, value)
+        value = _EMAIL_RE.sub(_REDACTED, value)
+        return value
 
 
 class JSONFormatter(logging.Formatter):
@@ -240,6 +272,7 @@ def setup_logging(log_level: str = "INFO", log_format: str = "json") -> logging.
         )
 
     handler.setFormatter(formatter)
+    handler.addFilter(PIISafetyFilter())
     logger.addHandler(handler)
 
     # Prevent propagation to root logger to avoid duplicate messages

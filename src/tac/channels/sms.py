@@ -19,6 +19,7 @@ from tac.models.outbound import (
     InitiateConversationResult,
     InitiateMessagingConversationOptions,
 )
+from tac.utils.redaction import mask_phone
 
 
 class SMSChannelConfig(MessagingChannelConfig):
@@ -174,7 +175,7 @@ class SMSChannel(MessagingChannel):
             self.logger.info(
                 "Sent SMS response via Actions API",
                 conversation_id=conversation_id,
-                to_address=customer_address,
+                to_address=mask_phone(customer_address),
             )
         except Exception as e:
             self.logger.error(

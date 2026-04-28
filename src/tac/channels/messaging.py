@@ -22,6 +22,7 @@ from tac.models.conversation import (
 )
 from tac.models.outbound import InitiateConversationResult, InitiateMessagingConversationOptions
 from tac.models.session import AuthorInfo
+from tac.utils.redaction import mask_address
 
 
 class MessagingChannelConfig(BaseModel):
@@ -402,7 +403,7 @@ class MessagingChannel(BaseChannel):
             self.logger.info(
                 f"Outbound {self.get_channel_name()} conversation initiated",
                 conversation_id=conversation_id,
-                to=options.to,
+                to=mask_address(options.to),
             )
             return InitiateConversationResult(conversation_id=conversation_id, session=session)
 
@@ -453,7 +454,7 @@ class MessagingChannel(BaseChannel):
             "No agent participant found, creating AI_AGENT",
             conversation_id=conversation_id,
             channel=agent_address.channel,
-            address=agent_address.address,
+            address=mask_address(agent_address.address),
         )
         try:
             agent = await self.tac.conversation_orchestrator_client.add_participant(
