@@ -204,6 +204,41 @@ async def test_unknown_agent_plus_unknown_customer_promotes_both() -> None:
     assert mock_update.call_count == 2
 
 
+@pytest.mark.parametrize("conflicting_type", ["AGENT", "HUMAN_AGENT", "CUSTOMER"])
+@pytest.mark.asyncio
+async def test_non_unknown_at_our_address_refuses_to_overwrite(
+    conflicting_type: str,
+) -> None:
+    """Participant already typed at TAC's address is someone else's state.
+
+    TAC only rewrites UNKNOWN. An AGENT, HUMAN_AGENT, or CUSTOMER holding
+    our (channel, address) is a real assignment — maybe a Studio handoff,
+    maybe a misconfiguration — and clobbering it could misroute messages
+    or break a human agent's session. Log ERROR and return None so the
+    operator investigates.
+    """
+    tac = _tac()
+    channel = SMSChannel(tac)
+
+    conflicting = _participant("PA_A", conflicting_type, "+15551234567")
+    customer = _participant("PA_C", "CUSTOMER", "+12345678901")
+
+    with (
+        patch.object(
+            tac.conversation_orchestrator_client,
+            "list_participants",
+            return_value=[conflicting, customer],
+        ),
+        patch.object(tac.conversation_orchestrator_client, "update_participant") as mock_update,
+        patch.object(tac.conversation_orchestrator_client, "add_participant") as mock_add,
+    ):
+        result = await channel._reconcile_participants("CH123")
+
+    assert result is None
+    mock_update.assert_not_called()
+    mock_add.assert_not_called()
+
+
 @pytest.mark.asyncio
 async def test_solo_customer_posts_agent() -> None:
     """v1-bridge inbound: only customer participant → POST AI_AGENT, then use."""

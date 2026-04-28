@@ -569,13 +569,12 @@ class MessagingChannel(BaseChannel):
     ) -> tuple[ParticipantResponse, ParticipantResponse | None] | None:
         """Reconcile Maestro's participants to the types TAC needs for sending.
 
-        TAC treats itself strictly as `AI_AGENT`: any participant that owns
-        TAC's (channel, address) but has a different type — including `AGENT`
-        and `HUMAN_AGENT` — is promoted to `AI_AGENT` via `PUT /Participants`.
-        This is deliberate: `HUMAN_AGENT` in particular must never be reused as
-        TAC's `from`, because a real human participant (e.g. a Studio handoff)
-        joins with a *different* address/participant — collisions at our
-        address mean the type is simply wrong, not that a human is speaking.
+        TAC treats itself strictly as `AI_AGENT`. The only participant at
+        TAC's (channel, address) it will rewrite is one typed `UNKNOWN` —
+        an already-typed participant (`AGENT`, `HUMAN_AGENT`, `CUSTOMER`)
+        is someone else's assignment and must not be overwritten. When a
+        conflicting type is found, we log ERROR and return None so the
+        operator can investigate rather than silently clobber state.
 
         v1-bridge capture emits two broken shapes this pass handles:
         (1) the agent side is created as `UNKNOWN` (so it owns our address but
@@ -583,19 +582,21 @@ class MessagingChannel(BaseChannel):
         inbound SMS the bridge often produces only the customer participant,
         and TAC must add itself before replying. Decision matrix:
 
-            | Agent side                  | Customer side           | Action                      |
-            |-----------------------------|-------------------------|-----------------------------|
-            | AI_AGENT                    | CUSTOMER                | Use as-is.                  |
-            | AI_AGENT                    | UNKNOWN (no CUSTOMER)   | Resolve profile, PUT → CUST.|
-            | other, owns our address     | CUSTOMER                | PUT agent → AI_AGENT.       |
-            | other, owns our address     | UNKNOWN (no CUSTOMER)   | Two PUTs (CUST gets profile)|
-            | nobody owns our address     | CUSTOMER or UNKNOWN     | POST AI_AGENT, then proceed.|
-            | any                         | no resolvable customer  | Return None (caller WARNs). |
+            | Agent side           | Customer side       | Action                        |
+            |----------------------|---------------------|-------------------------------|
+            | AI_AGENT             | CUSTOMER            | Use as-is (no profile work).  |
+            | AI_AGENT             | UNKNOWN, no CUST    | Resolve* profile, PUT → CUST. |
+            | UNKNOWN at our addr  | CUSTOMER            | PUT agent → AI_AGENT.         |
+            | UNKNOWN at our addr  | UNKNOWN, no CUST    | PUT agent; resolve*, PUT CUST.|
+            | other at our addr    | any                 | Return None (log ERROR).      |
+            | none at our addr     | CUSTOMER or UNKNOWN | POST AI_AGENT, then proceed.  |
+            | any                  | no resolvable cust  | Return None (caller WARNs).   |
 
-        UNKNOWN → CUSTOMER promotion also attaches a Memora profile: lookup by
-        phone first, create on miss (see `_resolve_customer_profile`). Profile
-        resolution failures are logged but non-fatal — the PUT still runs
-        without a `profile_id` so a broken Memora doesn't block the reply.
+        *Resolve = lookup by phone, create on miss (see
+        `_resolve_customer_profile`). Only runs during the UNKNOWN → CUSTOMER
+        promotion; an already-typed CUSTOMER without a `profile_id` is left
+        alone. Resolution failures are logged but non-fatal — the PUT still
+        runs without a `profile_id` so a broken Memora doesn't block replies.
 
         Customer-side reconciliation is gated by `reconcile_customer_type`.
         Chat sets it to `False` because chat identifies the customer
@@ -611,9 +612,11 @@ class MessagingChannel(BaseChannel):
             `(agent, customer_or_none)` when the agent side is resolvable.
             `customer` is `None` when `reconcile_customer_type` is `False`.
             `None` overall when the agent cannot be resolved. The caller
-            treats this as non-fatal and still invokes the LLM — `send_response`
-            re-resolves the agent live, so session-metadata ids are a
-            performance bonus, not a correctness requirement.
+            treats this as non-fatal and still invokes the LLM —
+            `send_response` re-resolves participants live against
+            `list_participants`, so a successful reconciliation is a
+            correctness bonus (it promotes UNKNOWN → CUSTOMER and attaches a
+            profile), not a requirement for replying.
         """
         agent_address = self.get_agent_address(conversation_id)
 
@@ -647,7 +650,10 @@ class MessagingChannel(BaseChannel):
             )
             if agent_candidate is None:
                 return None
-        elif agent_candidate.type != "AI_AGENT":
+        elif agent_candidate.type == "UNKNOWN":
+            # Only promote UNKNOWN — an already-typed participant at TAC's
+            # address (CUSTOMER / AGENT / HUMAN_AGENT) is someone else's
+            # assignment and must not be overwritten.
             agent_candidate = await self._promote_participant(
                 conversation_id=conversation_id,
                 participant=agent_candidate,
@@ -655,6 +661,18 @@ class MessagingChannel(BaseChannel):
             )
             if agent_candidate is None:
                 return None
+        elif agent_candidate.type != "AI_AGENT":
+            self.logger.error(
+                "Participant at TAC's address has a conflicting type; refusing to "
+                "overwrite. Check Maestro participant state — a non-AI_AGENT "
+                "participant is holding TAC's (channel, address).",
+                conversation_id=conversation_id,
+                participant_id=agent_candidate.id,
+                participant_type=agent_candidate.type,
+                channel=channel,
+                address=agent_address.address,
+            )
+            return None
 
         if not self.reconcile_customer_type:
             return agent_candidate, None
