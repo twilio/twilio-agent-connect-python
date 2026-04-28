@@ -25,10 +25,6 @@ from tac.models.conversation import (
 from tac.models.outbound import InitiateConversationResult, InitiateMessagingConversationOptions
 from tac.models.session import AuthorInfo
 
-# Session metadata keys populated by participant reconciliation.
-SESSION_META_AGENT_PARTICIPANT_ID = "agent_participant_id"
-SESSION_META_CUSTOMER_PARTICIPANT_ID = "customer_participant_id"
-
 
 class MessagingChannelConfig(BaseModel):
     """Base configuration for messaging channels (SMS, Chat).
@@ -328,18 +324,18 @@ class MessagingChannel(BaseChannel):
         # Reconcile participant types pre-LLM so v1-bridge's UNKNOWN gets
         # promoted to CUSTOMER (with a Memora profile attached when possible).
         # Non-fatal: if Maestro is unavailable we still invoke the callback —
-        # `send_response` re-resolves the agent participant from the live
-        # conversation, so session.metadata ids are a bonus, not a requirement.
+        # `send_response` re-resolves participants from the live conversation.
         resolved = await self._reconcile_participants(conv_id)
         if resolved is not None:
-            agent_participant, customer_participant = resolved
-            session.metadata[SESSION_META_AGENT_PARTICIPANT_ID] = agent_participant.id
-            if customer_participant is not None:
-                session.metadata[SESSION_META_CUSTOMER_PARTICIPANT_ID] = customer_participant.id
-                # Lift the profile resolved/attached during reconciliation onto
-                # the session so retrieve_memory skips its fallback lookup.
-                if customer_participant.profile_id and not session.profile_id:
-                    session.profile_id = customer_participant.profile_id
+            _agent_participant, customer_participant = resolved
+            # Lift the profile resolved/attached during reconciliation onto the
+            # session so retrieve_memory skips its fallback lookup.
+            if (
+                customer_participant is not None
+                and customer_participant.profile_id
+                and not session.profile_id
+            ):
+                session.profile_id = customer_participant.profile_id
 
         memory_response = await self._retrieve_memory_if_enabled(session, message_text, conv_id)
 

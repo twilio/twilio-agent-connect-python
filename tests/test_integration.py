@@ -513,4 +513,3 @@ class TestTACIntegration:
         mock_add.assert_called_once()
         assert mock_add.call_args.kwargs["participant_type"] == "AI_AGENT"
         assert callback_invoked
-        assert channel._conversations["CH_SOLO"].metadata["agent_participant_id"] == "PA_AGENT_NEW"
