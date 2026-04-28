@@ -2,7 +2,7 @@
 
 from abc import abstractmethod
 from collections import OrderedDict
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable
 from typing import Any
 
 import httpx
@@ -569,54 +569,31 @@ class MessagingChannel(BaseChannel):
     ) -> tuple[ParticipantResponse, ParticipantResponse | None] | None:
         """Reconcile Maestro's participants to the types TAC needs for sending.
 
-        TAC treats itself strictly as `AI_AGENT`. The only participant at
-        TAC's (channel, address) it will rewrite is one typed `UNKNOWN` —
-        an already-typed participant (`AGENT`, `HUMAN_AGENT`, `CUSTOMER`)
-        is someone else's assignment and must not be overwritten. When a
-        conflicting type is found, we log ERROR and return None so the
-        operator can investigate rather than silently clobber state.
-
-        v1-bridge capture emits two broken shapes this pass handles:
-        (1) the agent side is created as `UNKNOWN` (so it owns our address but
-        has the wrong type), and (2) the agent side is not created at all — on
-        inbound SMS the bridge often produces only the customer participant,
-        and TAC must add itself before replying. Decision matrix:
+        v1-bridge capture can leave TAC's agent participant as `UNKNOWN` (wrong
+        type at our address), or omit it entirely (customer-only conversation).
+        This pass fixes those cases; it refuses to rewrite anything else at our
+        address. Decision matrix:
 
             | Agent side           | Customer side       | Action                        |
             |----------------------|---------------------|-------------------------------|
             | AI_AGENT             | CUSTOMER            | Use as-is (no profile work).  |
-            | AI_AGENT             | UNKNOWN, no CUST    | Resolve* profile, PUT → CUST. |
+            | AI_AGENT             | UNKNOWN, no CUST    | Resolve profile, PUT → CUST.  |
             | UNKNOWN at our addr  | CUSTOMER            | PUT agent → AI_AGENT.         |
-            | UNKNOWN at our addr  | UNKNOWN, no CUST    | PUT agent; resolve*, PUT CUST.|
+            | UNKNOWN at our addr  | UNKNOWN, no CUST    | PUT agent; resolve, PUT CUST. |
             | other at our addr    | any                 | Return None (log ERROR).      |
             | none at our addr     | CUSTOMER or UNKNOWN | POST AI_AGENT, then proceed.  |
             | any                  | no resolvable cust  | Return None (caller WARNs).   |
-
-        *Resolve = lookup by phone, create on miss (see
-        `_resolve_customer_profile`). Only runs during the UNKNOWN → CUSTOMER
-        promotion; an already-typed CUSTOMER without a `profile_id` is left
-        alone. Resolution failures are logged but non-fatal — the PUT still
-        runs without a `profile_id` so a broken Memora doesn't block replies.
 
         Customer-side reconciliation is gated by `reconcile_customer_type`.
         Chat sets it to `False` because chat identifies the customer
         author-driven (via `session.author_info.participant_id`), so promoting
         some other `UNKNOWN` CHAT participant could pick the wrong recipient.
 
-        PUT 409 is treated as concurrent-update success: re-list and use the
-        current server view of that participant id (see `_promote_participant`).
-        POST 409 (another worker added the agent first) is likewise handled by
-        re-listing and picking up the existing AI_AGENT owner.
-
         Returns:
-            `(agent, customer_or_none)` when the agent side is resolvable.
-            `customer` is `None` when `reconcile_customer_type` is `False`.
-            `None` overall when the agent cannot be resolved. The caller
-            treats this as non-fatal and still invokes the LLM —
-            `send_response` re-resolves participants live against
-            `list_participants`, so a successful reconciliation is a
-            correctness bonus (it promotes UNKNOWN → CUSTOMER and attaches a
-            profile), not a requirement for replying.
+            `(agent, customer_or_none)` on success. `customer` is `None` when
+            `reconcile_customer_type` is `False`. `None` overall when the
+            agent cannot be resolved (non-fatal — caller falls through to the
+            callback).
         """
         agent_address = self.get_agent_address(conversation_id)
 
@@ -766,6 +743,43 @@ class MessagingChannel(BaseChannel):
             )
             return None
 
+    async def _refetch_after_409(
+        self,
+        conversation_id: str,
+        predicate: Callable[[ParticipantResponse], bool],
+        *,
+        context: str,
+    ) -> ParticipantResponse | None:
+        """Re-list participants after a 409 and find the one matching `predicate`.
+
+        Used by POST/PUT helpers to recover from concurrent-update races: the
+        other worker already made the change we wanted, so re-fetch and return
+        that participant. Returns None (with an ERROR log) if listing fails or
+        no match remains. `context` is a short label used in the no-match log
+        so the operator can tell which caller gave up.
+        """
+        try:
+            refreshed = await self.tac.conversation_orchestrator_client.list_participants(
+                conversation_id
+            )
+        except Exception as e:
+            self.logger.error(
+                "Failed to re-list participants after 409",
+                conversation_id=conversation_id,
+                context=context,
+                error=str(e),
+            )
+            return None
+
+        match = next((p for p in refreshed if predicate(p)), None)
+        if match is None:
+            self.logger.error(
+                "No matching participant found after 409",
+                conversation_id=conversation_id,
+                context=context,
+            )
+        return match
+
     async def _promote_participant(
         self,
         conversation_id: str,
@@ -777,12 +791,11 @@ class MessagingChannel(BaseChannel):
 
         Maestro's PUT is a full-resource replacement, so we pass the existing
         `name` and `addresses` back unchanged to avoid wiping them. `profile_id`
-        defaults to the participant's current value; pass a non-None override to
-        attach a newly created/looked-up profile during CUSTOMER reconciliation.
+        defaults to the participant's current value; pass a non-None override
+        to attach a newly resolved profile during CUSTOMER reconciliation.
 
-        Treats 409 as a concurrent-update success: re-lists participants and
-        returns the current server view of this participant id. Other errors
-        return None.
+        On 409 (concurrent update), re-fetches and returns the participant iff
+        it's now at `new_type`. Other errors return None.
         """
         effective_profile_id = profile_id if profile_id is not None else participant.profile_id
         try:
@@ -804,35 +817,11 @@ class MessagingChannel(BaseChannel):
             return updated
         except httpx.HTTPStatusError as e:
             if e.response is not None and e.response.status_code == 409:
-                # Another worker already updated this participant. Re-fetch to
-                # get the current type; return it only if it matches our target.
-                self.logger.debug(
-                    "Participant update 409; re-fetching after concurrent update",
-                    conversation_id=conversation_id,
-                    participant_id=participant.id,
+                return await self._refetch_after_409(
+                    conversation_id,
+                    lambda p: p.id == participant.id and p.type == new_type,
+                    context=f"promote to {new_type}",
                 )
-                try:
-                    refreshed = await self.tac.conversation_orchestrator_client.list_participants(
-                        conversation_id
-                    )
-                except Exception as list_err:
-                    self.logger.error(
-                        "Failed to re-list participants after 409",
-                        conversation_id=conversation_id,
-                        error=str(list_err),
-                    )
-                    return None
-                current = next((p for p in refreshed if p.id == participant.id), None)
-                if current is not None and current.type == new_type:
-                    return current
-                self.logger.error(
-                    "Participant not at target type after concurrent update",
-                    conversation_id=conversation_id,
-                    participant_id=participant.id,
-                    target_type=new_type,
-                    current_type=current.type if current else None,
-                )
-                return None
             self.logger.error(
                 "Failed to promote participant",
                 conversation_id=conversation_id,
@@ -858,9 +847,8 @@ class MessagingChannel(BaseChannel):
     ) -> ParticipantResponse | None:
         """POST an `AI_AGENT` participant owning `agent_address`.
 
-        On 409 (another worker added it first), re-lists and returns the
-        existing owner of `agent_address` if one now exists. Other errors
-        return None.
+        On 409 (another worker added it first), re-fetches and returns the
+        AI_AGENT now owning that address. Other errors return None.
         """
         try:
             created = await self.tac.conversation_orchestrator_client.add_participant(
@@ -878,43 +866,18 @@ class MessagingChannel(BaseChannel):
             return created
         except httpx.HTTPStatusError as e:
             if e.response is not None and e.response.status_code == 409:
-                self.logger.debug(
-                    "Add agent participant 409; re-listing after concurrent add",
-                    conversation_id=conversation_id,
-                )
-                try:
-                    refreshed = await self.tac.conversation_orchestrator_client.list_participants(
-                        conversation_id
-                    )
-                except Exception as list_err:
-                    self.logger.error(
-                        "Failed to re-list participants after 409",
-                        conversation_id=conversation_id,
-                        error=str(list_err),
-                    )
-                    return None
-                existing = next(
-                    (
-                        p
-                        for p in refreshed
-                        if p.type == "AI_AGENT"
+                return await self._refetch_after_409(
+                    conversation_id,
+                    lambda p: (
+                        p.type == "AI_AGENT"
                         and any(
                             a.channel == agent_address.channel
                             and a.address == agent_address.address
                             for a in p.addresses
                         )
                     ),
-                    None,
+                    context="add AI_AGENT",
                 )
-                if existing is not None:
-                    return existing
-                self.logger.error(
-                    "No AI_AGENT owner found after add 409",
-                    conversation_id=conversation_id,
-                    channel=agent_address.channel,
-                    address=agent_address.address,
-                )
-                return None
             self.logger.error(
                 "Failed to add AI_AGENT participant",
                 conversation_id=conversation_id,
