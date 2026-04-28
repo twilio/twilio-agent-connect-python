@@ -156,18 +156,25 @@ class ConversationClient(BaseAPIClient):
         conversation_id: str,
         participant_id: str,
         participant_type: Literal["HUMAN_AGENT", "CUSTOMER", "AI_AGENT", "AGENT", "UNKNOWN"],
+        addresses: list[ParticipantAddress],
+        name: str | None = None,
+        profile_id: str | None = None,
     ) -> ParticipantResponse:
         """
-        Update an existing participant's type.
+        Replace an existing participant.
 
-        Used to reconcile Maestro's captured participants to the correct role
-        (e.g., promote a v1-bridge `UNKNOWN` to `AI_AGENT`). Other fields on the
-        participant (addresses, name, profileId) are preserved by Maestro.
+        PUT is a full resource replacement per the Maestro spec — any field
+        omitted from the body is cleared on the server. Callers must pass the
+        current `addresses` (and `name` if set) to preserve them; pass a new
+        `profile_id` to attach a profile during reconciliation.
 
         Args:
             conversation_id: Conversation ID containing the participant
             participant_id: Participant ID to update
             participant_type: New participant type
+            addresses: Current participant addresses (required to avoid wiping)
+            name: Current participant display name (optional)
+            profile_id: Memora profile ID to attach (optional)
 
         Returns:
             ParticipantResponse reflecting the updated participant.
@@ -177,8 +184,13 @@ class ConversationClient(BaseAPIClient):
         """
         url = f"{self.base_url}/v2/Conversations/{conversation_id}/Participants/{participant_id}"
 
-        # Send only `type`; Maestro preserves other fields (addresses, name, profileId).
-        request_payload: dict[str, Any] = {"type": participant_type}
+        request_data = ParticipantRequest(
+            name=name,
+            type=participant_type,
+            profile_id=profile_id,
+            addresses=addresses,
+        )
+        request_payload = request_data.model_dump(by_alias=True, exclude_none=True)
 
         try:
             async with self._get_client() as client:

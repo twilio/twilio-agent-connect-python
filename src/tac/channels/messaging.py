@@ -397,18 +397,28 @@ class MessagingChannel(BaseChannel):
         conversation_id: str,
         participant: ParticipantResponse,
         new_type: str,
+        profile_id: str | None = None,
     ) -> ParticipantResponse | None:
         """PUT a participant to `new_type`.
+
+        Maestro's PUT is a full-resource replacement, so we pass the existing
+        `name` and `addresses` back unchanged to avoid wiping them. `profile_id`
+        defaults to the participant's current value; pass a non-None override to
+        attach a newly created/looked-up profile during CUSTOMER reconciliation.
 
         Treats 409 as a concurrent-update success: re-lists participants and
         returns the current server view of this participant id. Other errors
         return None.
         """
+        effective_profile_id = profile_id if profile_id is not None else participant.profile_id
         try:
             updated = await self.tac.conversation_orchestrator_client.update_participant(
                 conversation_id=conversation_id,
                 participant_id=participant.id,
                 participant_type=new_type,  # type: ignore[arg-type]
+                addresses=participant.addresses,
+                name=participant.name,
+                profile_id=effective_profile_id,
             )
             self.logger.debug(
                 "Promoted participant",

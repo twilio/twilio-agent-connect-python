@@ -525,6 +525,8 @@ class TestConversationClient:
             conversation_id="CH123456",
             participant_id="conv_participant_01",
             participant_type="AI_AGENT",
+            addresses=[ParticipantAddress(channel="SMS", address="+15551234567")],
+            name="+15551234567",
         )
 
         expected_url = (
@@ -533,7 +535,11 @@ class TestConversationClient:
         )
         mock_client.put.assert_called_once_with(
             expected_url,
-            json={"type": "AI_AGENT"},
+            json={
+                "name": "+15551234567",
+                "type": "AI_AGENT",
+                "addresses": [{"channel": "SMS", "address": "+15551234567"}],
+            },
         )
 
         assert isinstance(result, ParticipantResponse)
@@ -559,6 +565,7 @@ class TestConversationClient:
                 conversation_id="CH123456",
                 participant_id="conv_participant_01",
                 participant_type="CUSTOMER",
+                addresses=[ParticipantAddress(channel="SMS", address="+15551234567")],
             )
 
     @pytest.mark.asyncio
