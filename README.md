@@ -12,16 +12,16 @@
   </h2>
 
   <div align="center">
-    <a href="https://github.com/twilio-innovation/twilio-agent-connect-python"><img alt="Python SDK" src="https://img.shields.io/badge/Python-3.10+-3776AB.svg"/></a>
-    <a href="https://github.com/twilio-innovation/twilio-agent-connect-typescript"><img alt="TypeScript SDK" src="https://img.shields.io/badge/TypeScript-5.0+-3178C6.svg"/></a>
+    <a href="https://github.com/twilio/twilio-agent-connect-python"><img alt="Python SDK" src="https://img.shields.io/badge/Python-3.10+-3776AB.svg"/></a>
+    <a href="https://github.com/twilio/twilio-agent-connect-typescript"><img alt="TypeScript SDK" src="https://img.shields.io/badge/TypeScript-5.0+-3178C6.svg"/></a>
     <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache%202.0-green.svg"/></a>
     <a href="https://www.twilio.com/docs/platform/tac/quickstart"><img alt="Getting Started" src="https://img.shields.io/badge/Getting%20Started-Quickstart-F22F46.svg"/></a>
   </div>
   
   <p>
     <a href="https://www.twilio.com/docs/platform/tac/overview">Documentation</a>
-    ◆ <a href="https://github.com/twilio-innovation/twilio-agent-connect-python">Python SDK</a>
-    ◆ <a href="https://github.com/twilio-innovation/twilio-agent-connect-typescript">TypeScript SDK</a>
+    ◆ <a href="https://github.com/twilio/twilio-agent-connect-python">Python SDK</a>
+    ◆ <a href="https://github.com/twilio/twilio-agent-connect-typescript">TypeScript SDK</a>
     ◆ <a href="getting_started/examples">Examples</a>
   </p>
 </div>
@@ -50,10 +50,10 @@ We recommend using [uv](https://docs.astral.sh/uv/) for the best development exp
 
 ```bash
 uv init
-uv add git+https://github.com/twilio-innovation/twilio-agent-connect-python.git
+uv add git+https://github.com/twilio/twilio-agent-connect-python.git
 
 # Install with server support (includes FastAPI and uvicorn for TACFastAPIServer)
-uv add git+https://github.com/twilio-innovation/twilio-agent-connect-python.git --extra server
+uv add git+https://github.com/twilio/twilio-agent-connect-python.git --extra server
 ```
 
 ### pip/venv (Alternative)
@@ -63,10 +63,10 @@ If you prefer using pip and venv:
 ```bash
 python -m venv .venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-pip install git+https://github.com/twilio-innovation/twilio-agent-connect-python.git
+pip install git+https://github.com/twilio/twilio-agent-connect-python.git
 
 # Install with server support
-pip install "git+https://github.com/twilio-innovation/twilio-agent-connect-python.git[server]"
+pip install "git+https://github.com/twilio/twilio-agent-connect-python.git[server]"
 ```
 
 ## Quick Examples
@@ -76,7 +76,7 @@ pip install "git+https://github.com/twilio-innovation/twilio-agent-connect-pytho
 Use the [Twilio Setup Wizard](getting_started/twilio_setup/) to automatically create a Memory Store and Conversation Configuration and generate your `.env` file:
 
 ```bash
-git clone https://github.com/twilio-innovation/twilio-agent-connect-python.git
+git clone https://github.com/twilio/twilio-agent-connect-python.git
 cd twilio-agent-connect-python
 make setup  # Open http://localhost:8080
 ```
