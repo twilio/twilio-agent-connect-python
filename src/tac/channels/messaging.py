@@ -291,11 +291,16 @@ class MessagingChannel(BaseChannel):
             | Agent side                  | Customer side           | Action                      |
             |-----------------------------|-------------------------|-----------------------------|
             | AI_AGENT                    | CUSTOMER                | Use as-is.                  |
-            | AI_AGENT                    | UNKNOWN (no CUSTOMER)   | PUT customer → CUSTOMER.    |
+            | AI_AGENT                    | UNKNOWN (no CUSTOMER)   | Resolve profile, PUT → CUST.|
             | other, owns our address     | CUSTOMER                | PUT agent → AI_AGENT.       |
-            | other, owns our address     | UNKNOWN (no CUSTOMER)   | Two PUTs.                   |
+            | other, owns our address     | UNKNOWN (no CUSTOMER)   | Two PUTs (CUST gets profile)|
             | nobody owns our address     | CUSTOMER or UNKNOWN     | POST AI_AGENT, then proceed.|
             | any                         | no resolvable customer  | Skip webhook (WARN).        |
+
+        UNKNOWN → CUSTOMER promotion also attaches a Memora profile: lookup by
+        phone first, create on miss (see `_resolve_customer_profile`). Profile
+        resolution failures are logged but non-fatal — the PUT still runs
+        without a `profile_id` so a broken Memora doesn't block the reply.
 
         Customer-side reconciliation is gated by `reconcile_customer_type`.
         Chat sets it to `False` because chat identifies the customer
@@ -377,10 +382,12 @@ class MessagingChannel(BaseChannel):
             None,
         )
         if customer_unknown is not None:
+            profile_id = await self._resolve_customer_profile(customer_unknown, channel)
             promoted_customer = await self._promote_participant(
                 conversation_id=conversation_id,
                 participant=customer_unknown,
                 new_type="CUSTOMER",
+                profile_id=profile_id,
             )
             if promoted_customer is not None:
                 return agent_candidate, promoted_customer
@@ -391,6 +398,58 @@ class MessagingChannel(BaseChannel):
             channel=channel,
         )
         return None
+
+    async def _resolve_customer_profile(
+        self,
+        customer: ParticipantResponse,
+        channel: str,
+    ) -> str | None:
+        """Find or mint a Memora profile for a customer being promoted from UNKNOWN.
+
+        Only resolves for phone-based channels (SMS, VOICE). Looks up by phone
+        identifier first; on miss, creates a new profile using the configured
+        phone trait group/field. Returns None on any failure — the caller still
+        promotes the participant, just without a `profile_id` attached.
+        """
+        if channel not in ("SMS", "VOICE"):
+            return None
+
+        phone_address = next(
+            (a.address for a in customer.addresses if a.channel == channel and a.address),
+            None,
+        )
+        if not phone_address:
+            return None
+
+        try:
+            lookup = await self.tac.conversation_memory_client.lookup_profile(
+                id_type="phone",
+                value=phone_address,
+            )
+            if lookup.profiles:
+                return lookup.profiles[0]
+        except Exception as e:
+            self.logger.warning(
+                "Profile lookup failed during reconciliation; falling back to create",
+                conversation_id=customer.conversation_id,
+                error=str(e),
+            )
+
+        memory_config = self.tac.config.memory_config
+        trait_group = memory_config.phone_trait_group if memory_config else "Contact"
+        trait_field = memory_config.phone_trait_field if memory_config else "phone"
+
+        try:
+            return await self.tac.conversation_memory_client.create_profile(
+                traits={trait_group: {trait_field: phone_address}},
+            )
+        except Exception as e:
+            self.logger.warning(
+                "Profile creation failed during reconciliation; promoting without profile",
+                conversation_id=customer.conversation_id,
+                error=str(e),
+            )
+            return None
 
     async def _promote_participant(
         self,

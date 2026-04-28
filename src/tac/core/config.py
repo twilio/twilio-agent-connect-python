@@ -79,10 +79,22 @@ class TwilioMemoryConfig(BaseModel):
         description="Optional list of trait group names to include when retrieving profiles",
     )
 
+    phone_trait_group: str = Field(
+        default="Contact",
+        description="Trait group name that holds the phone identifier on newly created profiles. "
+        "Must match the promoted-to-identifier configuration of the Memora store.",
+    )
+    phone_trait_field: str = Field(
+        default="phone",
+        description="Trait field name within phone_trait_group that holds the phone identifier.",
+    )
+
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
                 "trait_groups": ["Contact", "Preferences"],
+                "phone_trait_group": "Contact",
+                "phone_trait_field": "phone",
             }
         },
     )
@@ -116,7 +128,14 @@ class TwilioMemoryConfig(BaseModel):
         if trait_groups_str:
             trait_groups = [g.strip() for g in trait_groups_str.split(",")]
 
-        return cls(trait_groups=trait_groups)
+        kwargs: dict[str, object] = {"trait_groups": trait_groups}
+        phone_trait_group = os.environ.get("MEMORY_PHONE_TRAIT_GROUP")
+        if phone_trait_group:
+            kwargs["phone_trait_group"] = phone_trait_group
+        phone_trait_field = os.environ.get("MEMORY_PHONE_TRAIT_FIELD")
+        if phone_trait_field:
+            kwargs["phone_trait_field"] = phone_trait_field
+        return cls(**kwargs)
 
 
 class TACConfig(BaseModel):

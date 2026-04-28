@@ -49,6 +49,30 @@ def _tac() -> TAC:
     return TAC(cfg)
 
 
+@pytest.fixture(autouse=True)
+def stub_memory_profile_calls(request):
+    """Stub memory-client profile calls so reconciliation tests don't hit the network.
+
+    Profile lookup/create is invoked during UNKNOWN → CUSTOMER promotion. Tests
+    that specifically exercise the profile resolution path can mark themselves
+    with `no_stub_profile_calls` to manage their own mocks.
+    """
+    if "no_stub_profile_calls" in request.keywords:
+        yield
+        return
+    with (
+        patch(
+            "tac.context.memory.MemoryClient.lookup_profile",
+            new=AsyncMock(side_effect=RuntimeError("lookup_profile not stubbed")),
+        ),
+        patch(
+            "tac.context.memory.MemoryClient.create_profile",
+            new=AsyncMock(side_effect=RuntimeError("create_profile not stubbed")),
+        ),
+    ):
+        yield
+
+
 @pytest.mark.asyncio
 async def test_agent_plus_customer_no_puts() -> None:
     """Happy path: both sides correctly typed → no PUTs."""
@@ -414,3 +438,148 @@ async def test_list_participants_failure_returns_none() -> None:
 
     assert result is None
     mock_update.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.no_stub_profile_calls
+async def test_customer_promotion_reuses_existing_profile() -> None:
+    """Lookup hit: promote UNKNOWN → CUSTOMER with the existing profile_id."""
+    from tac.models.memory import ProfileLookupResponse
+
+    tac = _tac()
+    channel = SMSChannel(tac)
+
+    agent = _participant("PA_A", "AI_AGENT", "+15551234567")
+    unknown_customer = _participant("PA_C", "UNKNOWN", "+12345678901")
+    promoted = _participant("PA_C", "CUSTOMER", "+12345678901")
+
+    with (
+        patch.object(
+            tac.conversation_orchestrator_client,
+            "list_participants",
+            return_value=[agent, unknown_customer],
+        ),
+        patch.object(
+            tac.conversation_orchestrator_client,
+            "update_participant",
+            new=AsyncMock(return_value=promoted),
+        ) as mock_update,
+        patch.object(
+            tac.conversation_memory_client,
+            "lookup_profile",
+            new=AsyncMock(
+                return_value=ProfileLookupResponse(
+                    normalizedValue="+12345678901",
+                    profiles=["mem_profile_01existing"],
+                ),
+            ),
+        ) as mock_lookup,
+        patch.object(
+            tac.conversation_memory_client,
+            "create_profile",
+            new=AsyncMock(),
+        ) as mock_create,
+    ):
+        result = await channel._reconcile_participants("CH123")
+
+    assert result is not None
+    assert result[1] is not None and result[1].id == "PA_C"
+    mock_lookup.assert_awaited_once_with(id_type="phone", value="+12345678901")
+    mock_create.assert_not_called()
+    mock_update.assert_awaited_once()
+    kwargs = mock_update.await_args.kwargs
+    assert kwargs["participant_type"] == "CUSTOMER"
+    assert kwargs["profile_id"] == "mem_profile_01existing"
+    assert kwargs["addresses"] == unknown_customer.addresses
+
+
+@pytest.mark.asyncio
+@pytest.mark.no_stub_profile_calls
+async def test_customer_promotion_creates_profile_on_lookup_miss() -> None:
+    """Lookup miss: create a new profile with configured trait group/field."""
+    from tac.models.memory import ProfileLookupResponse
+
+    tac = _tac()
+    channel = SMSChannel(tac)
+
+    agent = _participant("PA_A", "AI_AGENT", "+15551234567")
+    unknown_customer = _participant("PA_C", "UNKNOWN", "+12345678901")
+    promoted = _participant("PA_C", "CUSTOMER", "+12345678901")
+
+    with (
+        patch.object(
+            tac.conversation_orchestrator_client,
+            "list_participants",
+            return_value=[agent, unknown_customer],
+        ),
+        patch.object(
+            tac.conversation_orchestrator_client,
+            "update_participant",
+            new=AsyncMock(return_value=promoted),
+        ) as mock_update,
+        patch.object(
+            tac.conversation_memory_client,
+            "lookup_profile",
+            new=AsyncMock(
+                return_value=ProfileLookupResponse(
+                    normalizedValue="+12345678901",
+                    profiles=[],
+                ),
+            ),
+        ) as mock_lookup,
+        patch.object(
+            tac.conversation_memory_client,
+            "create_profile",
+            new=AsyncMock(return_value="mem_profile_01new"),
+        ) as mock_create,
+    ):
+        result = await channel._reconcile_participants("CH123")
+
+    assert result is not None
+    mock_lookup.assert_awaited_once()
+    mock_create.assert_awaited_once_with(
+        traits={"Contact": {"phone": "+12345678901"}},
+    )
+    kwargs = mock_update.await_args.kwargs
+    assert kwargs["profile_id"] == "mem_profile_01new"
+
+
+@pytest.mark.asyncio
+@pytest.mark.no_stub_profile_calls
+async def test_customer_promotion_proceeds_without_profile_on_errors() -> None:
+    """Both lookup and create failing still promote the customer (profile_id=None)."""
+    tac = _tac()
+    channel = SMSChannel(tac)
+
+    agent = _participant("PA_A", "AI_AGENT", "+15551234567")
+    unknown_customer = _participant("PA_C", "UNKNOWN", "+12345678901")
+    promoted = _participant("PA_C", "CUSTOMER", "+12345678901")
+
+    with (
+        patch.object(
+            tac.conversation_orchestrator_client,
+            "list_participants",
+            return_value=[agent, unknown_customer],
+        ),
+        patch.object(
+            tac.conversation_orchestrator_client,
+            "update_participant",
+            new=AsyncMock(return_value=promoted),
+        ) as mock_update,
+        patch.object(
+            tac.conversation_memory_client,
+            "lookup_profile",
+            new=AsyncMock(side_effect=httpx.ConnectError("memora down")),
+        ),
+        patch.object(
+            tac.conversation_memory_client,
+            "create_profile",
+            new=AsyncMock(side_effect=httpx.ConnectError("memora down")),
+        ),
+    ):
+        result = await channel._reconcile_participants("CH123")
+
+    assert result is not None
+    kwargs = mock_update.await_args.kwargs
+    assert kwargs["profile_id"] is None
+    assert kwargs["participant_type"] == "CUSTOMER"

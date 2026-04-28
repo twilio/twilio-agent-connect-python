@@ -1,8 +1,9 @@
 """Tests for profile retrieval functionality."""
 
 from typing import Any
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock, patch
 
+import httpx
 import pytest
 
 from tac import TAC, TACConfig
@@ -545,3 +546,76 @@ class TestMemoryClientRegion:
             api_secret="test_api_token",
         )
         assert client.base_url == "https://memory.twilio.com"
+
+
+class TestCreateProfile:
+    """HTTP-level tests for MemoryClient.create_profile."""
+
+    @pytest.mark.asyncio
+    async def test_create_profile_posts_traits_and_returns_id(self) -> None:
+        client = MemoryClient(
+            store_id="mem_store_01abc",
+            api_key="SK123",
+            api_secret="secret",
+        )
+
+        mock_response = Mock()
+        mock_response.json.return_value = {
+            "message": "Profile resolved and accepted for processing.",
+            "id": "mem_profile_01canonical",
+        }
+        mock_response.raise_for_status = Mock()
+
+        mock_http = AsyncMock()
+        mock_http.post = AsyncMock(return_value=mock_response)
+
+        with patch("httpx.AsyncClient") as mock_client_class:
+            mock_client_class.return_value.__aenter__.return_value = mock_http
+
+            profile_id = await client.create_profile(
+                traits={"Contact": {"phone": "+13175551234"}},
+            )
+
+        assert profile_id == "mem_profile_01canonical"
+        mock_http.post.assert_called_once_with(
+            "https://memory.twilio.com/v1/Stores/mem_store_01abc/Profiles",
+            json={"traits": {"Contact": {"phone": "+13175551234"}}},
+        )
+
+    @pytest.mark.asyncio
+    async def test_create_profile_raises_when_id_missing(self) -> None:
+        client = MemoryClient(
+            store_id="mem_store_01abc",
+            api_key="SK123",
+            api_secret="secret",
+        )
+
+        mock_response = Mock()
+        mock_response.json.return_value = {"message": "accepted"}
+        mock_response.raise_for_status = Mock()
+
+        mock_http = AsyncMock()
+        mock_http.post = AsyncMock(return_value=mock_response)
+
+        with patch("httpx.AsyncClient") as mock_client_class:
+            mock_client_class.return_value.__aenter__.return_value = mock_http
+
+            with pytest.raises(ValueError, match="missing 'id'"):
+                await client.create_profile(traits={"Contact": {"phone": "+1"}})
+
+    @pytest.mark.asyncio
+    async def test_create_profile_surfaces_http_errors(self) -> None:
+        client = MemoryClient(
+            store_id="mem_store_01abc",
+            api_key="SK123",
+            api_secret="secret",
+        )
+
+        mock_http = AsyncMock()
+        mock_http.post = AsyncMock(side_effect=httpx.HTTPError("boom"))
+
+        with patch("httpx.AsyncClient") as mock_client_class:
+            mock_client_class.return_value.__aenter__.return_value = mock_http
+
+            with pytest.raises(httpx.HTTPError, match="boom"):
+                await client.create_profile(traits={"Contact": {"phone": "+1"}})
