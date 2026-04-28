@@ -219,34 +219,6 @@ class TestSMSOutbound:
         assert result.session.metadata["direction"] == "outbound"
 
     @pytest.mark.asyncio
-    async def test_custom_from_number(self) -> None:
-        tac = TAC(get_test_config())
-        channel = SMSChannel(tac)
-        _mock_sms_outbound(tac, from_addr="+15550009999")
-
-        result = await channel.initiate_outbound_conversation(
-            InitiateMessagingConversationOptions(
-                to="+15559876543",
-                message="Hello from a different number",
-                **{"from": "+15550009999"},
-            )
-        )
-
-        assert result.session.metadata["from_address"] == "+15550009999"
-
-    @pytest.mark.asyncio
-    async def test_default_from_address_stored(self) -> None:
-        tac = TAC(get_test_config())
-        channel = SMSChannel(tac)
-        _mock_sms_outbound(tac)
-
-        result = await channel.initiate_outbound_conversation(
-            InitiateMessagingConversationOptions(to="+15559876543", message="Hello")
-        )
-
-        assert result.session.metadata["from_address"] == "+15551234567"
-
-    @pytest.mark.asyncio
     async def test_reuses_conversation_on_409(self) -> None:
         tac = TAC(get_test_config())
         channel = SMSChannel(tac)
@@ -318,33 +290,6 @@ class TestSMSOutbound:
 # =============================================================================
 # SMS sendResponse after outbound
 # =============================================================================
-
-
-class TestSMSSendResponseAfterOutbound:
-    @pytest.mark.asyncio
-    async def test_uses_from_address_for_agent_participant(self) -> None:
-        tac = TAC(get_test_config())
-        channel = SMSChannel(tac)
-        _mock_sms_outbound(tac, from_addr="+15550009999")
-
-        await channel.initiate_outbound_conversation(
-            InitiateMessagingConversationOptions(
-                to="+15559876543",
-                message="First",
-                **{"from": "+15550009999"},
-            )
-        )
-
-        # Reset create_action mock for sendResponse call
-        tac.conversation_orchestrator_client.create_action = AsyncMock(
-            return_value=make_action_response("CHsms_out")
-        )
-
-        await channel.send_response("CHsms_out", "Follow-up")
-
-        call_args = tac.conversation_orchestrator_client.create_action.call_args
-        action_request = call_args.args[1]
-        assert action_request.payload.from_.participant_id == "PAagent"
 
 
 # =============================================================================
@@ -475,29 +420,6 @@ class TestVoiceOutbound:
         assert "conversationConfiguration" in call_kwargs["twiml"]
 
     @pytest.mark.asyncio
-    async def test_uses_custom_from_number(self) -> None:
-        tac = TAC(get_test_config())
-        channel = VoiceChannel(tac)
-
-        mock_call = MagicMock()
-        mock_call.sid = "CAtestcall456"
-        mock_client = MagicMock()
-        mock_client.calls.create.return_value = mock_call
-
-        with patch.object(channel, "_get_twilio_client", return_value=mock_client):
-            result = await channel.initiate_outbound_conversation(
-                InitiateVoiceConversationOptions(
-                    to="+15559876543",
-                    websocket_url="wss://example.com/ws",
-                    **{"from": "+15550009999"},
-                )
-            )
-
-        assert result.call_sid == "CAtestcall456"
-        call_kwargs = mock_client.calls.create.call_args.kwargs
-        assert call_kwargs["from_"] == "+15550009999"
-
-    @pytest.mark.asyncio
     async def test_returns_call_sid(self) -> None:
         tac = TAC(get_test_config())
         channel = VoiceChannel(tac)
@@ -533,18 +455,7 @@ class TestIsOwnMessage:
         assert result is True
 
     @pytest.mark.asyncio
-    async def test_tier2_session_from_address(self) -> None:
-        tac = TAC(get_test_config())
-        channel = SMSChannel(tac)
-
-        session = channel._start_conversation("CHtest")
-        session.metadata["from_address"] = "+15550009999"
-
-        result = await channel._is_own_message("+15550009999", "CHtest", None)
-        assert result is True
-
-    @pytest.mark.asyncio
-    async def test_tier3_api_fallback(self) -> None:
+    async def test_tier2_api_fallback(self) -> None:
         tac = TAC(get_test_config())
         channel = SMSChannel(tac)
 
@@ -575,8 +486,8 @@ class TestIsOwnMessage:
         assert result is False
 
     @pytest.mark.asyncio
-    async def test_tier3_fires_when_session_exists_without_from_address(self) -> None:
-        """API fallback should fire even when a session exists but has no from_address."""
+    async def test_tier2_fires_when_session_exists(self) -> None:
+        """API fallback fires when author is not the default agent address."""
         tac = TAC(get_test_config())
         channel = SMSChannel(tac)
         tac.conversation_orchestrator_client.list_participants = AsyncMock(
@@ -598,21 +509,7 @@ class TestIsOwnMessage:
         tac.conversation_orchestrator_client.list_participants.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_tier3_skipped_when_from_address_known(self) -> None:
-        """When the session has from_address set and it doesn't match, skip tier 3."""
-        tac = TAC(get_test_config())
-        channel = SMSChannel(tac)
-        tac.conversation_orchestrator_client.list_participants = AsyncMock()
-
-        session = channel._start_conversation("CHtest")
-        session.metadata["from_address"] = "+15550009999"
-
-        result = await channel._is_own_message("+15559876543", "CHtest", "PAcustomer")
-        assert result is False
-        tac.conversation_orchestrator_client.list_participants.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_tier3_handles_api_error_gracefully(self) -> None:
+    async def test_tier2_handles_api_error_gracefully(self) -> None:
         tac = TAC(get_test_config())
         channel = SMSChannel(tac)
 
@@ -630,31 +527,6 @@ class TestIsOwnMessage:
 
 
 class TestChatSendResponseAfterOutbound:
-    @pytest.mark.asyncio
-    async def test_uses_from_address_for_agent_participant(self) -> None:
-        tac = TAC(get_test_config())
-        channel = ChatChannel(tac)
-        _mock_chat_outbound(tac, from_addr="custom-bot")
-
-        await channel.initiate_outbound_conversation(
-            InitiateChatConversationOptions(
-                to="customer@example.com",
-                channel_id="CHSIDabc",
-                message="First",
-                **{"from": "custom-bot"},
-            )
-        )
-
-        tac.conversation_orchestrator_client.create_action = AsyncMock(
-            return_value=make_action_response("CHchat_out")
-        )
-
-        await channel.send_response("CHchat_out", "Follow-up")
-
-        call_args = tac.conversation_orchestrator_client.create_action.call_args
-        action_request = call_args.args[1]
-        assert action_request.payload.from_.participant_id == "PAchatagent"
-
     @pytest.mark.asyncio
     async def test_send_response_includes_channel_settings(self) -> None:
         tac = TAC(get_test_config())

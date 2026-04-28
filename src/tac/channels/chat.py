@@ -69,24 +69,12 @@ class ChatChannel(MessagingChannel):
         return author_address == self.agent_address
 
     def get_agent_address(self, conversation_id: str) -> ParticipantAddress:
-        # Outbound-initiated conversations may use a from_ identity different
-        # from self.agent_address; prefer the metadata set by
-        # _initiate_messaging_conversation so reconciliation targets the
-        # actual agent participant instead of POSTing a spurious one.
         session = self._conversations.get(conversation_id)
-        address = self.agent_address
-        channel_id = None
-        if session:
-            from_addr = session.metadata.get("from_address")
-            if isinstance(from_addr, str):
-                address = from_addr
-            raw_channel_id = session.metadata.get("channel_id")
-            if isinstance(raw_channel_id, str):
-                channel_id = raw_channel_id
+        channel_id = session.metadata.get("channel_id") if session else None
         return ParticipantAddress(
             channel="CHAT",
-            address=address,
-            channel_id=channel_id,
+            address=self.agent_address,
+            channel_id=channel_id if isinstance(channel_id, str) else None,
         )
 
     async def send_response(
@@ -149,17 +137,12 @@ class ChatChannel(MessagingChannel):
             )
             return
 
-        # Use from_address from session metadata (set during outbound initiation),
-        # falling back to the configured agent_address for inbound conversations
-        from_addr = session.metadata.get("from_address")
-        agent_addr = from_addr if isinstance(from_addr, str) else self.agent_address
-
         agent_participant = await self._ensure_agent_participant(
             conversation_id,
             existing_participants=participants,
             agent_address=ParticipantAddress(
                 channel="CHAT",
-                address=agent_addr,
+                address=self.agent_address,
                 channel_id=chat_channel_sid,
             ),
         )
@@ -224,7 +207,6 @@ class ChatChannel(MessagingChannel):
         If an active conversation with the same addresses already exists
         (group-by dedup), CO returns 409 and the existing conversation is reused.
         """
-        from_address = options.from_ or self.agent_address
         chat_service_sid = self.tac.conversations_v1_service_sid
         if not chat_service_sid:
             raise RuntimeError(
@@ -234,7 +216,7 @@ class ChatChannel(MessagingChannel):
 
         return await self._initiate_messaging_conversation(
             options=options,
-            from_address=from_address,
+            from_address=self.agent_address,
             customer_address_kwargs={"channel_id": options.channel_id},
             agent_address_kwargs={"channel_id": options.channel_id},
             extra_metadata={"channel_id": options.channel_id},

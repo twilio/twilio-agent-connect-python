@@ -74,17 +74,7 @@ class SMSChannel(MessagingChannel):
         return author_address == self.tac.config.phone_number
 
     def get_agent_address(self, conversation_id: str) -> ParticipantAddress:
-        # Outbound-initiated conversations may use a from_ address different
-        # from config.phone_number; prefer the metadata set by
-        # _initiate_messaging_conversation so reconciliation targets the
-        # actual agent participant instead of POSTing a spurious one.
-        session = self._conversations.get(conversation_id)
-        address = self.tac.config.phone_number
-        if session:
-            from_addr = session.metadata.get("from_address")
-            if isinstance(from_addr, str):
-                address = from_addr
-        return ParticipantAddress(channel="SMS", address=address)
+        return ParticipantAddress(channel="SMS", address=self.tac.config.phone_number)
 
     async def send_response(
         self,
@@ -117,14 +107,8 @@ class SMSChannel(MessagingChannel):
             )
             return
 
-        # Use from_address from session metadata (set during outbound initiation),
-        # falling back to the configured phone number for inbound conversations
         session = self._conversations.get(conversation_id)
         agent_address = self.tac.config.phone_number
-        if session:
-            from_addr = session.metadata.get("from_address")
-            if isinstance(from_addr, str):
-                agent_address = from_addr
 
         # Find the CUSTOMER participant by address on the SMS channel
         customer_participant = None
@@ -208,10 +192,9 @@ class SMSChannel(MessagingChannel):
         If an active conversation with the same addresses already exists
         (group-by dedup), CO returns 409 and the existing conversation is reused.
         """
-        from_address = options.from_ or self.tac.config.phone_number
         return await self._initiate_messaging_conversation(
             options=options,
-            from_address=from_address,
+            from_address=self.tac.config.phone_number,
             customer_address_kwargs={},
             agent_address_kwargs={},
         )

@@ -101,24 +101,13 @@ class MessagingChannel(BaseChannel):
         conversation_id: str,
         author_participant_id: str | None,
     ) -> bool:
-        """Check if a message is from the bot itself (3-tier).
+        """Check if a message is from the bot itself (2-tier).
 
         1. Default agent address (stateless, no API call)
-        2. Session metadata from_address (same-process, for custom from)
-        3. API fallback via listParticipants (cross-process / multi-worker)
+        2. API fallback via listParticipants (cross-process / multi-worker)
         """
         if self.is_default_agent_address(author_address):
             return True
-
-        session = self._conversations.get(conversation_id)
-        from_address = session.metadata.get("from_address") if session else None
-        if from_address == author_address:
-            return True
-
-        # If this process knows the outbound sender (from_address is set) and it
-        # didn't match, this is a customer message — skip the API call.
-        if session and from_address:
-            return False
 
         if author_participant_id:
             try:
@@ -461,7 +450,6 @@ class MessagingChannel(BaseChannel):
                     **(options.metadata or {}),
                     **(extra_metadata or {}),
                     "direction": "outbound",
-                    "from_address": from_address,
                 }
             )
 

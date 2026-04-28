@@ -317,7 +317,7 @@ class VoiceChannel(BaseChannel):
         where TACServer sets this automatically, outbound calls require it
         explicitly since there is no incoming HTTP request to derive the host from.
         """
-        from_number = options.from_ or self.tac.config.phone_number
+        from_number = self.tac.config.phone_number
 
         self.logger.info(
             "Initiating outbound voice conversation",
