@@ -72,6 +72,10 @@ class TestProfileLookupInMemoryRetrieval:
             profile_id="mem_profile_existing",
             conversation_id="conv_test_123",
             query="test query",
+            observations_limit=20,
+            summaries_limit=5,
+            communications_limit=0,
+            relevance_threshold=0.0,
         )
 
     @pytest.mark.asyncio
@@ -126,6 +130,10 @@ class TestProfileLookupInMemoryRetrieval:
             profile_id="mem_profile_00000000000000000000000001",
             conversation_id="conv_test_123",
             query="test query",
+            observations_limit=20,
+            summaries_limit=5,
+            communications_limit=0,
+            relevance_threshold=0.0,
         )
 
         # Result is wrapped in TACMemoryResponse
@@ -175,6 +183,10 @@ class TestProfileLookupInMemoryRetrieval:
             profile_id="mem_profile_00000000000000000000000001",
             conversation_id="conv_test_123",
             query=None,
+            observations_limit=20,
+            summaries_limit=5,
+            communications_limit=0,
+            relevance_threshold=0.0,
         )
 
     @pytest.mark.asyncio

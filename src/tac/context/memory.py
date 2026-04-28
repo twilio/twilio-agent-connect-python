@@ -40,33 +40,39 @@ class MemoryClient(BaseAPIClient):
         profile_id: str,
         conversation_id: str | None = None,
         query: str | None = None,
+        observations_limit: int | None = None,
+        summaries_limit: int | None = None,
+        communications_limit: int | None = None,
+        relevance_threshold: float | None = None,
     ) -> MemoryRetrievalResponse:
         """
-        Retrieve conversation memories including observations, sessions, and summaries.
-        Supports semantic search and uses default limits for different memory types.
-        This endpoint is optimized for conversational AI and memory retrieval use cases.
+        Retrieve conversation memories with semantic search and configurable limits.
 
         Args:
-            profile_id: Profile ID using Twilio Type ID (TTID) format
-            conversation_id: Optional conversation ID using Twilio Type ID (TTID) format
-            query: Optional semantic search query for finding relevant memories (1-1024 characters)
+            profile_id: Profile ID (TTID format)
+            conversation_id: Optional conversation ID (TTID format)
+            query: Optional semantic search query (1-1024 characters)
+            observations_limit: Max observations to return (0-100)
+            summaries_limit: Max summaries to return (0-100)
+            communications_limit: Max communications to return (0-100)
+            relevance_threshold: Min relevance score (0.0-1.0)
 
         Returns:
-            MemoryRetrievalResponse containing observations, summaries, sessions, and metadata
-
-        Raises:
-            requests.RequestException: If the API request fails
-            ValueError: If the response cannot be parsed
+            MemoryRetrievalResponse with observations, summaries, communications, and metadata.
+            Returns empty MemoryRetrievalResponse() if API request fails or response cannot be
+            parsed.
         """
 
-        # Use the correct endpoint from the API spec
         endpoint = f"/v1/Stores/{self.store_id}/Profiles/{profile_id}/Recall"
         url = f"{self.base_url}{endpoint}"
 
-        # Create the request payload with default values
         request_data = MemoryRetrievalRequest(
             conversation_id=conversation_id,
             query=query,
+            observations_limit=observations_limit,
+            summaries_limit=summaries_limit,
+            communications_limit=communications_limit,
+            relevance_threshold=relevance_threshold,
         )
         request_payload = request_data.model_dump(by_alias=True, exclude_none=True)
 

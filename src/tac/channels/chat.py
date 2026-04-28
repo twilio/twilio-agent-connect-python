@@ -6,11 +6,7 @@ from typing import Any
 from pydantic import Field
 
 from tac import TAC
-from tac.channels.messaging import (
-    SESSION_META_AGENT_PARTICIPANT_ID,
-    MessagingChannel,
-    MessagingChannelConfig,
-)
+from tac.channels.messaging import MessagingChannel, MessagingChannelConfig
 from tac.models.conversation import (
     ActionChannelSettings,
     ActionParticipantRef,
@@ -18,6 +14,10 @@ from tac.models.conversation import (
     ParticipantAddress,
     SendMessageActionPayload,
     SendMessageActionRequest,
+)
+from tac.models.outbound import (
+    InitiateChatConversationOptions,
+    InitiateConversationResult,
 )
 
 
@@ -37,12 +37,10 @@ class ChatChannelConfig(MessagingChannelConfig):
 class ChatChannel(MessagingChannel):
     """Chat Channel for handling web chat conversations.
 
-    Uses identity-based addressing instead of phone numbers. Customer-side
-    resolution is author-driven (from the inbound communication), so
-    reconciliation only promotes the agent participant.
+    Uses identity-based addressing instead of phone numbers.
+    Automatically creates AI_AGENT participant if needed (lazy creation)
+    and manages conversation lifecycle through Conversation Orchestrator webhooks.
     """
-
-    reconcile_customer_type = False
 
     def __init__(
         self,
@@ -67,7 +65,7 @@ class ChatChannel(MessagingChannel):
     def get_channel_type_upper(self) -> str:
         return "CHAT"
 
-    def is_own_message(self, author_address: str) -> bool:
+    def is_default_agent_address(self, author_address: str) -> bool:
         return author_address == self.agent_address
 
     def get_agent_address(self, conversation_id: str) -> ParticipantAddress:
@@ -87,9 +85,7 @@ class ChatChannel(MessagingChannel):
     ) -> None:
         """Send chat response using the Conversation Orchestrator Send API.
 
-        Reads the agent participant id resolved by `_reconcile_participants`
-        from the session; the customer (recipient) remains author-driven from
-        the inbound communication's `author_info`.
+        Lazily creates an AI_AGENT participant if one doesn't exist yet.
 
         Args:
             conversation_id: Conversation ID to send response to
@@ -98,23 +94,24 @@ class ChatChannel(MessagingChannel):
 
         Raises:
             TypeError: If response is not a string
-            RuntimeError: If no inbound webhook has populated the session state
         """
         if not isinstance(response, str):
             raise TypeError("Chat channel only supports string responses")
 
         session = self._conversations.get(conversation_id)
         if not session:
-            raise RuntimeError(
-                f"No active session for conversation {conversation_id}; "
-                "send_response requires a prior inbound webhook."
+            self.logger.error(
+                "No active session found",
+                conversation_id=conversation_id,
             )
+            return
 
         if not session.author_info:
-            raise RuntimeError(
-                f"No author info on session for conversation {conversation_id}; "
-                "send_response requires a prior inbound webhook."
+            self.logger.error(
+                "No author info found - no inbound message received yet",
+                conversation_id=conversation_id,
             )
+            return
 
         # channelId (Chat Channel SID) is required for CHAT delivery — the V1
         # Chat backend uses it to pick the destination thread. Inbound webhooks
@@ -128,11 +125,35 @@ class ChatChannel(MessagingChannel):
                 "session.metadata['channel_id'] explicitly in advanced usage."
             )
 
-        agent_id = session.metadata.get(SESSION_META_AGENT_PARTICIPANT_ID)
-        if not isinstance(agent_id, str):
+        try:
+            participants = await self.tac.conversation_orchestrator_client.list_participants(
+                conversation_id
+            )
+        except Exception as e:
+            self.logger.error(
+                "Failed to list participants",
+                conversation_id=conversation_id,
+                error=str(e),
+            )
+            return
+
+        # Use from_address from session metadata (set during outbound initiation),
+        # falling back to the configured agent_address for inbound conversations
+        from_addr = session.metadata.get("from_address")
+        agent_addr = from_addr if isinstance(from_addr, str) else self.agent_address
+
+        agent_participant = await self._ensure_agent_participant(
+            conversation_id,
+            existing_participants=participants,
+            agent_address=ParticipantAddress(
+                channel="CHAT",
+                address=agent_addr,
+                channel_id=chat_channel_sid,
+            ),
+        )
+        if not agent_participant:
             raise RuntimeError(
-                f"Agent participant id not resolved for conversation {conversation_id}; "
-                "reconciliation must run via an inbound webhook before send_response."
+                f"Failed to resolve AI_AGENT participant for conversation {conversation_id}"
             )
 
         # TODO(maestro): Drop `chat_service` here once the Actions API resolves the
@@ -148,7 +169,10 @@ class ChatChannel(MessagingChannel):
         try:
             action_request = SendMessageActionRequest(
                 payload=SendMessageActionPayload(
-                    from_=ActionParticipantRef(channel="CHAT", participant_id=agent_id),
+                    from_=ActionParticipantRef(
+                        channel="CHAT",
+                        participant_id=agent_participant.id,
+                    ),
                     to=[
                         ActionParticipantRef(
                             channel="CHAT",
@@ -176,3 +200,34 @@ class ChatChannel(MessagingChannel):
                 error=str(e),
                 exc_info=True,
             )
+
+    async def initiate_outbound_conversation(
+        self,
+        options: InitiateChatConversationOptions,
+    ) -> InitiateConversationResult:
+        """Initiate an outbound Chat conversation.
+
+        Creates a conversation via Conversation Orchestrator with inline
+        participants, then sends the initial message via the Actions API.
+        If an active conversation with the same addresses already exists
+        (group-by dedup), CO returns 409 and the existing conversation is reused.
+        """
+        from_address = options.from_ or self.agent_address
+        chat_service_sid = self.tac.conversations_v1_service_sid
+        if not chat_service_sid:
+            raise RuntimeError(
+                "conversations_v1_service_sid is not set — the Conversation Orchestrator "
+                "configuration has no Conversations V1 bridge. Chat outbound requires it."
+            )
+
+        return await self._initiate_messaging_conversation(
+            options=options,
+            from_address=from_address,
+            customer_address_kwargs={"channel_id": options.channel_id},
+            agent_address_kwargs={"channel_id": options.channel_id},
+            extra_metadata={"channel_id": options.channel_id},
+            channel_settings=ActionChannelSettings(
+                channel_id=options.channel_id,
+                chat_service=chat_service_sid,
+            ),
+        )

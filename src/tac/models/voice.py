@@ -43,6 +43,9 @@ class SetupMessage(BaseModel):
     call_type: str | None = Field(None, alias="callType", description="Call type (e.g., PSTN)")
     call_status: str | None = Field(None, alias="callStatus", description="Call status")
     account_sid: str | None = Field(None, alias="accountSid")
+    custom_parameters: dict[str, Any] | None = Field(
+        None, alias="customParameters", description="Custom parameters passed via TwiML"
+    )
 
     model_config = {"populate_by_name": True}
 

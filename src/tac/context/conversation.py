@@ -20,6 +20,8 @@ from tac.models.conversation import (
     UpdateConversationRequest,
 )
 
+_HEADER_CONFLICTING_RESOURCE_ID = "x-conflicting-resource-id"
+
 
 class ConversationClient(BaseAPIClient):
     """Client for interacting with Conversation Orchestrator API."""
@@ -239,12 +241,19 @@ class ConversationClient(BaseAPIClient):
     async def create_conversation(
         self,
         name: str | None = None,
+        participants: list[ParticipantRequest] | None = None,
     ) -> ConversationResponse:
         """
-        Create a new conversation.
+        Create a new conversation, optionally with inline participants.
+
+        When participants are provided, CO creates them atomically with the
+        conversation. If an active conversation with the same participant
+        addresses already exists (respecting the configuration's group-by
+        rules), CO returns 409 with a pointer to the existing conversation.
 
         Args:
             name: Conversation name (optional)
+            participants: Optional list of participants to create with the conversation
 
         Returns:
             ConversationResponse object containing the created conversation details
@@ -254,7 +263,9 @@ class ConversationClient(BaseAPIClient):
         """
         url = f"{self.base_url}/v2/Conversations"
 
-        request_data = ConversationRequest(configuration_id=self.configuration_id, name=name)
+        request_data = ConversationRequest(
+            configuration_id=self.configuration_id, name=name, participants=participants
+        )
         request_payload = request_data.model_dump(by_alias=True, exclude_none=True)
 
         try:
@@ -267,6 +278,17 @@ class ConversationClient(BaseAPIClient):
                 conversation = ConversationResponse(**response.json())
                 return conversation
 
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 409:
+                self.logger.info(f"Conversation creation returned 409 (dedup): {e}\nURL: {url}")
+            else:
+                self.logger.error(
+                    f"Failed to create conversation: {e}\n"
+                    f"URL: {url}\n"
+                    f"Request body: {request_payload}\n"
+                    f"Response: {e.response.text}"
+                )
+            raise
         except httpx.HTTPError as e:
             response_text = (
                 getattr(e.response, "text", "No response body")
@@ -280,6 +302,38 @@ class ConversationClient(BaseAPIClient):
                 f"Response: {response_text}"
             )
             raise
+
+    async def create_or_reuse_conversation(
+        self,
+        participants: list[ParticipantRequest],
+    ) -> tuple[str, bool]:
+        """Create a conversation with inline participants, reusing an existing one on 409.
+
+        On 409 CO returns the existing conversation ID in the
+        X-Conflicting-Resource-Id response header.
+
+        Returns:
+            Tuple of (conversation_id, reused) where reused is True if an
+            existing conversation was found via 409 dedup.
+
+        Raises:
+            httpx.HTTPStatusError: If the API returns a non-409 error
+            RuntimeError: If 409 is returned without X-Conflicting-Resource-Id header
+        """
+        try:
+            conversation = await self.create_conversation(participants=participants)
+            return conversation.id, False
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code != 409:
+                raise
+            conflict_id = e.response.headers.get(_HEADER_CONFLICTING_RESOURCE_ID)
+            if not conflict_id:
+                raise RuntimeError(
+                    "Received 409 from create_conversation but "
+                    f"{_HEADER_CONFLICTING_RESOURCE_ID} header is missing"
+                ) from e
+            self.logger.info(f"Reusing existing active conversation (409 dedup): {conflict_id}")
+            return conflict_id, True
 
     async def update_conversation(
         self,

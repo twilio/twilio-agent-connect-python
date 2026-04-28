@@ -1,12 +1,19 @@
+from __future__ import annotations
+
 import asyncio
 import json
 from collections.abc import AsyncGenerator
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from twilio.rest import Client
 
 from tac.channels.base import BaseChannel
 from tac.channels.websocket_manager import WebSocketManager
 from tac.channels.websocket_protocol import WebSocketDisconnectError, WebSocketProtocol
 from tac.core.tac import TAC
+from tac.models.outbound import InitiateVoiceConversationOptions, InitiateVoiceConversationResult
+from tac.models.session import AuthorInfo
 from tac.models.voice import (
     ConversationRelayCallbackPayload,
     InterruptMessage,
@@ -19,6 +26,9 @@ from tac.session import SessionState
 from . import twiml
 from .config import VoiceChannelConfig
 
+_POLL_ATTEMPTS = 5
+_POLL_BASE_DELAY = 0.25
+
 
 class VoiceChannel(BaseChannel):
     """
@@ -29,6 +39,7 @@ class VoiceChannel(BaseChannel):
     - WebSocket connection management for real-time voice streaming
     - Conversation lifecycle management (inherited from BaseChannel)
     - ConversationRelay callback webhook handling
+    - Outbound call initiation
 
     This channel is framework-agnostic and accepts any WebSocket implementation
     satisfying WebSocketProtocol. For a batteries-included FastAPI server, use
@@ -62,6 +73,18 @@ class VoiceChannel(BaseChannel):
         super().__init__(tac, auto_retrieve_memory=config.auto_retrieve_memory)
         self.session_manager = config.session_manager
         self._websocket_manager = WebSocketManager()
+        self._twilio_client: Client | None = None
+
+    def _get_twilio_client(self) -> Client:
+        if self._twilio_client is None:
+            from twilio.rest import Client
+
+            self._twilio_client = Client(
+                self.tac.config.api_key,
+                self.tac.config.api_secret,
+                self.tac.config.account_sid,
+            )
+        return self._twilio_client
 
     async def handle_incoming_call(
         self,
@@ -120,7 +143,8 @@ class VoiceChannel(BaseChannel):
         Handle ConversationRelay callback webhook from Twilio.
 
         This method processes the callback sent by Twilio when a ConversationRelay
-        session ends, and closes associated conversations if the call status is "completed".
+        session ends. Conversation lifecycle is managed by CO — the SDK does not
+        manually close conversations.
 
         Args:
             payload_dict: Raw form data dict from the webhook request.
@@ -139,48 +163,77 @@ class VoiceChannel(BaseChannel):
             f"Status: {payload.call_status}"
         )
 
-        # If call is completed, close associated conversations
-        if payload.call_status == "completed":
-            conversations = await self.tac.conversation_orchestrator_client.list_conversations(
-                channel_id=payload.call_sid, status=["ACTIVE", "INACTIVE"]
-            )
-
-            self.logger.debug(
-                f"\n{'=' * 80}\nCALL ENDED | Closing {len(conversations)} conversation(s)",
-                call_sid=payload.call_sid,
-            )
-
-            # Close each conversation
-            for conversation in conversations:
-                try:
-                    # Only handle conversations from our configuration
-                    config_id = self.tac.config.conversation_configuration_id
-                    if conversation.configuration_id != config_id:
-                        continue
-
-                    await self.tac.conversation_orchestrator_client.update_conversation(
-                        conversation_id=conversation.id, status="CLOSED"
-                    )
-
-                    # Clean up local session if it exists and is a voice channel
-                    if (
-                        conversation.id in self._conversations
-                        and self._conversations[conversation.id].channel == "voice"
-                    ):
-                        await self._end_conversation(conversation.id)
-
-                    self.logger.debug(
-                        "Closed conversation",
-                        conversation_id=conversation.id,
-                        call_sid=payload.call_sid,
-                    )
-                except Exception as e:
-                    self.logger.error(
-                        f"Failed to close conversation {conversation.id}: {e}",
-                        exc_info=True,
-                    )
-
         return None
+
+    async def _initialize_conversation(
+        self,
+        call_sid: str,
+        setup_msg: SetupMessage,
+        websocket: WebSocketProtocol,
+    ) -> tuple[str, SessionState | None]:
+        """Poll CO for the conversation created by ConversationRelay, resolve
+        the customer participant, and initialize the local session."""
+        conversations: list[Any] = []
+        for attempt in range(_POLL_ATTEMPTS):
+            conversations = await self.tac.conversation_orchestrator_client.list_conversations(
+                channel_id=call_sid,
+                status=["ACTIVE"],
+            )
+            if len(conversations) == 1:
+                break
+            if attempt < _POLL_ATTEMPTS - 1:
+                self.logger.debug(
+                    "Conversation not ready yet, polling again",
+                    call_sid=call_sid,
+                    attempt=attempt + 1,
+                    found=len(conversations),
+                )
+                await asyncio.sleep(_POLL_BASE_DELAY * (2**attempt))
+
+        if len(conversations) != 1:
+            raise RuntimeError(
+                f"Expected exactly 1 conversation for "
+                f"call_sid {call_sid}, but found "
+                f"{len(conversations)} after "
+                f"{_POLL_ATTEMPTS} attempts."
+            )
+
+        conversation = conversations[0]
+        conv_id = conversation.id
+
+        participants = await self.tac.conversation_orchestrator_client.list_participants(conv_id)
+
+        customer_participant = next(
+            (p for p in participants if p.type == "CUSTOMER"),
+            None,
+        )
+        customer_address = (
+            next(
+                (a.address for a in customer_participant.addresses if a.channel == "VOICE"),
+                None,
+            )
+            if customer_participant and customer_participant.addresses
+            else None
+        )
+        fallback_address = (
+            setup_msg.to_number
+            if setup_msg.direction and setup_msg.direction.upper() == "OUTBOUND"
+            else setup_msg.from_number
+        )
+        profile_lookup_address = customer_address or fallback_address
+        profile_id = customer_participant.profile_id if customer_participant else None
+
+        self._websocket_manager.add_websocket(conv_id, websocket)
+        session = self._start_conversation(conv_id, profile_id)
+
+        session_state = None
+        if self.session_manager is not None:
+            session_state = self.session_manager.get_or_create_session(conv_id)
+
+        if profile_lookup_address:
+            session.author_info = AuthorInfo(address=profile_lookup_address)
+
+        return conv_id, session_state
 
     async def handle_websocket(self, websocket: WebSocketProtocol) -> None:
         """
@@ -207,7 +260,6 @@ class VoiceChannel(BaseChannel):
             if data.get("type") == "setup":
                 setup_msg = SetupMessage(**data)
                 call_sid = setup_msg.call_sid
-                from_number = setup_msg.from_number
 
                 # Don't initialize conversation yet - wait for first prompt
                 # when ConversationRelay has created the conversation
@@ -218,50 +270,10 @@ class VoiceChannel(BaseChannel):
                     msg_type = data.get("type")
 
                     if msg_type == "prompt":
-                        # First prompt? Initialize conversation from ConversationRelay
                         if not conv_id and call_sid:
-                            conversations = (
-                                await self.tac.conversation_orchestrator_client.list_conversations(
-                                    channel_id=call_sid,
-                                    status=["ACTIVE"],
-                                )
+                            conv_id, session_state = await self._initialize_conversation(
+                                call_sid, setup_msg, websocket
                             )
-
-                            if len(conversations) != 1:
-                                raise RuntimeError(
-                                    f"Expected exactly 1 conversation for call_sid {call_sid}, "
-                                    f"but found {len(conversations)}. "
-                                    "ConversationRelay should have created exactly one."
-                                )
-
-                            conversation = conversations[0]
-                            conv_id = conversation.id
-
-                            # Get profile_id from participants
-                            participants = (
-                                await self.tac.conversation_orchestrator_client.list_participants(
-                                    conv_id
-                                )
-                            )
-                            profile_id = None
-                            for participant in participants:
-                                if from_number and participant.addresses:
-                                    for address in participant.addresses:
-                                        if (
-                                            address.channel == "VOICE"
-                                            and address.address == from_number
-                                            and participant.profile_id
-                                        ):
-                                            profile_id = participant.profile_id
-                                            break
-                                if profile_id:
-                                    break
-
-                            self._websocket_manager.add_websocket(conv_id, websocket)
-                            self._start_conversation(conv_id, profile_id)
-
-                            if self.session_manager is not None:
-                                session_state = self.session_manager.get_or_create_session(conv_id)
 
                         if conv_id:
                             await self._handle_prompt_async(conv_id, data, session_state)
@@ -288,6 +300,63 @@ class VoiceChannel(BaseChannel):
             if conv_id:
                 self.logger.debug("Cleanup - removing WebSocket", conversation_id=conv_id)
                 await self._cleanup_connection(conv_id)
+
+    async def initiate_outbound_conversation(
+        self,
+        options: InitiateVoiceConversationOptions,
+    ) -> InitiateVoiceConversationResult:
+        """Initiate an outbound voice conversation.
+
+        Places an outbound call with inline TwiML that connects to ConversationRelay.
+        The conversationConfiguration attribute tells CO to create and manage the
+        conversation during passive hydration. The session is initialized lazily
+        on the first prompt when the conversation is discovered by callSid.
+
+        ``options.websocket_url`` must be the publicly accessible WebSocket
+        endpoint (e.g., ``wss://your-domain.ngrok.app/ws``). Unlike inbound calls
+        where TACServer sets this automatically, outbound calls require it
+        explicitly since there is no incoming HTTP request to derive the host from.
+        """
+        from_number = options.from_ or self.tac.config.phone_number
+
+        self.logger.info(
+            "Initiating outbound voice conversation",
+            to=options.to,
+            from_number=from_number,
+        )
+
+        try:
+            twiml_xml = twiml.generate_twiml(
+                TwiMLOptions(
+                    websocket_url=options.websocket_url,
+                    welcome_greeting=options.welcome_greeting,
+                    action_url=options.action_url,
+                    conversation_configuration=self.tac.config.conversation_configuration_id,
+                    custom_parameters=options.custom_parameters,
+                )
+            )
+
+            client = self._get_twilio_client()
+            call = await asyncio.to_thread(
+                client.calls.create, to=options.to, from_=from_number, twiml=twiml_xml
+            )
+
+            self.logger.info(
+                "Outbound voice call placed",
+                call_sid=call.sid,
+                to=options.to,
+            )
+
+            return InitiateVoiceConversationResult(call_sid=call.sid)
+
+        except Exception as e:
+            self.logger.error(
+                "Failed to initiate outbound call",
+                to=options.to,
+                error=str(e),
+                exc_info=True,
+            )
+            raise
 
     async def _handle_prompt_async(
         self,

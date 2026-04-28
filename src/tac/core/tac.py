@@ -161,15 +161,9 @@ class TAC:
 
             if conversation_context.profile_id and not conversation_context.profile:
                 try:
-                    trait_groups = (
-                        self.config.memory_config.trait_groups
-                        if self.config.memory_config
-                        else None
-                    )
-
                     profile_response = await self.conversation_memory_client.get_profile(
                         profile_id=conversation_context.profile_id,
-                        trait_groups=trait_groups,
+                        trait_groups=self.config.memory_config.trait_groups,
                     )
                     conversation_context.profile = profile_response
                 except asyncio.CancelledError:
@@ -181,10 +175,16 @@ class TAC:
                         exc_info=True,
                     )
 
+            # Get memory retrieval configuration
+            cfg = self.config.memory_config
             memory_response = await self.conversation_memory_client.retrieve_memory(
                 profile_id=conversation_context.profile_id,
                 conversation_id=conversation_context.conversation_id,
                 query=query,
+                observations_limit=cfg.observations_limit,
+                summaries_limit=cfg.summaries_limit,
+                communications_limit=cfg.communications_limit,
+                relevance_threshold=cfg.relevance_threshold,
             )
             return TACMemoryResponse(memory_response)
 

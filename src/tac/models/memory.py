@@ -1,6 +1,6 @@
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class MemoryRetrievalRequest(BaseModel):
@@ -36,26 +36,36 @@ class MemoryRetrievalRequest(BaseModel):
     observations_limit: int | None = Field(
         default=20,
         alias="observationsLimit",
-        ge=1,
+        ge=0,
         le=100,
-        description="Maximum number of observation memories to return",
+        description="Max observations to return (0-100). Set to 0 to disable.",
         json_schema_extra={"example": 20},
     )
     summaries_limit: int | None = Field(
         default=5,
         alias="summariesLimit",
-        ge=1,
+        ge=0,
         le=100,
-        description="Maximum number of summary memories to return",
+        description="Max summaries to return (0-100). Set to 0 to disable.",
         json_schema_extra={"example": 5},
     )
     communications_limit: int | None = Field(
-        default=10,
+        default=0,
         alias="communicationsLimit",
-        ge=1,
+        ge=0,
         le=100,
-        description="Maximum number of communication memories to return",
-        json_schema_extra={"example": 10},
+        description="Max communications to return (0-100). Set to 0 to disable.",
+        json_schema_extra={"example": 0},
+    )
+    relevance_threshold: float | None = Field(
+        default=0.0,
+        alias="relevanceThreshold",
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Min relevance score (0.0-1.0). Only applies when results are ranked by relevance."
+        ),
+        json_schema_extra={"example": 0.5},
     )
 
     model_config = {"populate_by_name": True}
@@ -398,10 +408,16 @@ class ProfileLookupResponse(BaseModel):
         json_schema_extra={"example": "+13175556789"},
     )
     profiles: list[str] = Field(
-        ...,
+        default_factory=list,
         max_length=100,
         description="Array of profile IDs matching the identifier",
         json_schema_extra={"example": ["mem_profile_00000000000000000000000000"]},
     )
 
     model_config = {"populate_by_name": True}
+
+    @field_validator("profiles", mode="before")
+    @classmethod
+    def _coerce_null_profiles(cls, v: Any) -> Any:
+        # Memora's Lookup response omits or nulls `profiles` when no match; treat both as [].
+        return [] if v is None else v

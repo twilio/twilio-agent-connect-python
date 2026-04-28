@@ -38,6 +38,13 @@ from tac.models.memory import (
     ProfileResponse,
     SummaryInfo,
 )
+from tac.models.outbound import (
+    InitiateChatConversationOptions,
+    InitiateConversationResult,
+    InitiateMessagingConversationOptions,
+    InitiateVoiceConversationOptions,
+    InitiateVoiceConversationResult,
+)
 from tac.models.pagination import PaginationMeta
 from tac.models.session import AuthorInfo, ConversationSession
 from tac.models.tac import (
@@ -55,7 +62,6 @@ __all__ = [
     "ActionTextContent",
     "AuthorInfo",
     "Communication",
-    "HandoffPayload",
     "CommunicationContent",
     "CommunicationParticipant",
     "CommunicationRequest",
@@ -64,6 +70,12 @@ __all__ = [
     "ConversationResponse",
     "ConversationSession",
     "ExecutionDetails",
+    "HandoffPayload",
+    "InitiateChatConversationOptions",
+    "InitiateConversationResult",
+    "InitiateMessagingConversationOptions",
+    "InitiateVoiceConversationOptions",
+    "InitiateVoiceConversationResult",
     "IntelligenceConfiguration",
     "Knowledge",
     "KnowledgeBase",

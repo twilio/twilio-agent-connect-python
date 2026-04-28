@@ -1,7 +1,7 @@
 """Tests for Voice Channel."""
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -1142,58 +1142,22 @@ class TestHandleConversationRelayCallback:
         return base
 
     @pytest.mark.asyncio
-    async def test_completed_call_closes_conversations(self) -> None:
-        """Test that completed call status closes matching conversations."""
+    async def test_completed_call_does_not_close_conversations(self) -> None:
+        """Test that completed call status does not manually close conversations.
+
+        Conversation lifecycle is managed by CO, not the SDK.
+        """
         tac = TAC(get_test_config())
         channel = VoiceChannel(tac)
 
-        # Add a local session to verify cleanup
-        channel._start_conversation("conv123", "profile123")
-
-        mock_conversation = ConversationResponse(
-            id="conv123",
-            accountId="ACtest123",
-            configuration_id="conv_configuration_test123",
-            status="ACTIVE",
-        )
-        tac.conversation_orchestrator_client.list_conversations = AsyncMock(
-            return_value=[mock_conversation]
-        )
+        tac.conversation_orchestrator_client.list_conversations = AsyncMock()
         tac.conversation_orchestrator_client.update_conversation = AsyncMock()
 
         payload = self._make_payload(CallStatus="completed")
         result = await channel.handle_conversation_relay_callback(payload)
 
         assert result is None
-        tac.conversation_orchestrator_client.list_conversations.assert_called_once_with(
-            channel_id="CA123", status=["ACTIVE", "INACTIVE"]
-        )
-        tac.conversation_orchestrator_client.update_conversation.assert_called_once_with(
-            conversation_id="conv123", status="CLOSED"
-        )
-        assert "conv123" not in channel._conversations
-
-    @pytest.mark.asyncio
-    async def test_completed_call_skips_other_configurations(self) -> None:
-        """Test that conversations from other configurations are not closed."""
-        tac = TAC(get_test_config())
-        channel = VoiceChannel(tac)
-
-        mock_conversation = ConversationResponse(
-            id="conv456",
-            accountId="ACtest123",
-            configuration_id="conv_configuration_other999",
-            status="ACTIVE",
-        )
-        tac.conversation_orchestrator_client.list_conversations = AsyncMock(
-            return_value=[mock_conversation]
-        )
-        tac.conversation_orchestrator_client.update_conversation = AsyncMock()
-
-        payload = self._make_payload(CallStatus="completed")
-        result = await channel.handle_conversation_relay_callback(payload)
-
-        assert result is None
+        tac.conversation_orchestrator_client.list_conversations.assert_not_called()
         tac.conversation_orchestrator_client.update_conversation.assert_not_called()
 
     @pytest.mark.asyncio
@@ -1233,9 +1197,11 @@ class TestConversationInitializationFlow:
 
         # Track conversation initialization via callback
         initialized_conversations = []
+        observed_author_info = []
 
         async def on_message(user_message, context, memory_response):
             initialized_conversations.append(context.conversation_id)
+            observed_author_info.append(context.author_info)
 
         tac.on_message_ready(on_message)
 
@@ -1283,6 +1249,11 @@ class TestConversationInitializationFlow:
             status=["ACTIVE"],
         )
         co_client.list_participants.assert_called_once_with("CH_relay_123")
+
+        # author_info is populated from setup's `from` — parity with SMS so that
+        # memory lookup-by-address and Studio handoff's `To` both work on voice.
+        assert observed_author_info[0] is not None
+        assert observed_author_info[0].address == "+15551234567"
 
     @pytest.mark.asyncio
     async def test_profile_id_retrieval_filters_by_voice_channel(self) -> None:
@@ -1348,6 +1319,7 @@ class TestConversationInitializationFlow:
         assert profile_id == "profile_voice_correct"
 
     @pytest.mark.asyncio
+    @patch("tac.channels.voice.channel._POLL_BASE_DELAY", 0)
     async def test_error_when_no_conversations_found(self, capsys: pytest.CaptureFixture) -> None:
         """Test RuntimeError when ConversationRelay creates 0 conversations."""
         from tac.channels.websocket_protocol import WebSocketDisconnectError
@@ -1373,20 +1345,18 @@ class TestConversationInitializationFlow:
         # Capture output
         captured = capsys.readouterr()
 
-        # Verify error was logged with correct message
+        # Verify error was logged with correct message (now includes poll attempt count)
         assert "Expected exactly 1 conversation" in captured.out
         assert "but found 0" in captured.out
 
-        # Verify Conversation Orchestrator was called
-        tac.conversation_orchestrator_client.list_conversations.assert_called_once_with(
-            channel_id="CA_test_call",
-            status=["ACTIVE"],
-        )
+        # Verify Conversation Orchestrator was polled (up to 5 attempts)
+        assert tac.conversation_orchestrator_client.list_conversations.call_count == 5
 
         # Verify no conversation was initialized
         assert len(channel._conversations) == 0
 
     @pytest.mark.asyncio
+    @patch("tac.channels.voice.channel._POLL_BASE_DELAY", 0)
     async def test_error_when_multiple_conversations_found(
         self, capsys: pytest.CaptureFixture
     ) -> None:
@@ -1433,11 +1403,8 @@ class TestConversationInitializationFlow:
         assert "Expected exactly 1 conversation" in captured.out
         assert "but found 2" in captured.out
 
-        # Verify CO was called
-        co_client.list_conversations.assert_called_once_with(
-            channel_id="CA_test_call",
-            status=["ACTIVE"],
-        )
+        # Verify CO was polled (up to 5 attempts since count != 1)
+        assert co_client.list_conversations.call_count == 5
 
         # Verify no conversation was initialized
         assert len(channel._conversations) == 0

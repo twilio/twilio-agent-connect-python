@@ -88,7 +88,7 @@ class BaseChannel(ABC):
         self,
         conv_id: str,
         profile_id: str | None = None,
-    ) -> None:
+    ) -> ConversationSession:
         """
         Initialize new conversation session with optional profile_id.
 
@@ -97,6 +97,9 @@ class BaseChannel(ABC):
         Args:
             conv_id: Conversation ID
             profile_id: Profile ID for the conversation (optional)
+
+        Returns:
+            The new or existing ConversationSession.
         """
         if conv_id in self._conversations:
             self.logger.debug(
@@ -104,7 +107,7 @@ class BaseChannel(ABC):
                 conversation_id=conv_id,
                 channel=self.get_channel_name(),
             )
-            return
+            return self._conversations[conv_id]
 
         # Store conversation session
         self._conversations[conv_id] = ConversationSession(
@@ -118,6 +121,7 @@ class BaseChannel(ABC):
             conversation_id=conv_id,
             profile_id=profile_id,
         )
+        return self._conversations[conv_id]
 
     async def _end_conversation(self, conv_id: str) -> None:
         """

@@ -96,6 +96,10 @@ class TestMemoryFallback:
             profile_id="profile_123",
             conversation_id="CH123",
             query="test query",
+            observations_limit=20,
+            summaries_limit=5,
+            communications_limit=0,
+            relevance_threshold=0.0,
         )
 
         # Result should be wrapped in TACMemoryResponse

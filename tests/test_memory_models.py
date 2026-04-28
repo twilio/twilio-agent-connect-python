@@ -1,6 +1,6 @@
 """Tests for Memory API models."""
 
-from tac.models.memory import MemoryParticipant
+from tac.models.memory import MemoryParticipant, ProfileLookupResponse
 
 
 class TestMemoryModels:
@@ -136,3 +136,27 @@ class TestMemoryModels:
         assert payload["type"] == "AGENT"
         assert payload["profileId"] == "mem_profile_agent"
         assert "profile_id" not in payload  # Should use alias
+
+
+class TestProfileLookupResponse:
+    """Memora's Lookup endpoint returns `profiles` as optional per its OpenAPI
+    spec, so null and omitted variants must both parse to an empty list."""
+
+    def test_accepts_null_profiles(self):
+        response = ProfileLookupResponse.model_validate(
+            {"normalizedValue": "+13175556789", "profiles": None}
+        )
+        assert response.profiles == []
+
+    def test_accepts_missing_profiles(self):
+        response = ProfileLookupResponse.model_validate({"normalizedValue": "+13175556789"})
+        assert response.profiles == []
+
+    def test_accepts_populated_profiles(self):
+        response = ProfileLookupResponse.model_validate(
+            {
+                "normalizedValue": "+13175556789",
+                "profiles": ["mem_profile_00000000000000000000000000"],
+            }
+        )
+        assert response.profiles == ["mem_profile_00000000000000000000000000"]

@@ -198,6 +198,10 @@ class ConversationRequest(BaseModel):
         description="Configuration ID settings to use for this conversation",
     )
     name: str | None = Field(default=None, description="Conversation name")
+    participants: list["ParticipantRequest"] | None = Field(
+        default=None,
+        description="Optional inline participants created atomically with the conversation",
+    )
 
     model_config = {"populate_by_name": True}
 

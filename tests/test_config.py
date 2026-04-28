@@ -24,7 +24,12 @@ class TestTACConfig:
         assert config.api_key == "SK123"
         assert config.api_secret == "test_api_token"
         assert config.log_level == "INFO"  # Default value
-        assert config.memory_config is None  # Optional memory config
+        assert config.memory_config is not None  # Always initialized with defaults
+        assert config.memory_config.observations_limit == 20  # Default value
+        assert config.memory_config.summaries_limit == 5  # Default value
+        assert config.memory_config.communications_limit == 0  # Default value
+        assert config.memory_config.relevance_threshold == 0.0  # Default value
+        assert config.memory_config.trait_groups is None  # Default value
 
     def test_config_with_custom_log_level(self):
         """Test config with custom log level."""

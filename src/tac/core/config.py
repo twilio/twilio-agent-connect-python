@@ -38,19 +38,7 @@ class ConversationIntelligenceConfig(BaseModel):
 
     @classmethod
     def from_env(cls) -> "ConversationIntelligenceConfig | None":
-        """
-        Create ConversationIntelligenceConfig from environment variables.
-
-        Loads configuration from the following environment variables:
-        - CONVERSATION_INTELLIGENCE_CONFIGURATION_ID: CI Configuration ID (required)
-        - CONVERSATION_INTELLIGENCE_OBSERVATION_OPERATOR_SID: Operator SID for
-          observations (optional)
-        - CONVERSATION_INTELLIGENCE_SUMMARY_OPERATOR_SID: Operator SID for summaries (optional)
-
-        Returns:
-            ConversationIntelligenceConfig instance if configuration_id is set,
-            None otherwise.
-        """
+        """Create ConversationIntelligenceConfig from CONVERSATION_INTELLIGENCE_* env vars."""
         configuration_id = os.environ.get("CONVERSATION_INTELLIGENCE_CONFIGURATION_ID")
 
         if not configuration_id:
@@ -69,14 +57,44 @@ class TwilioMemoryConfig(BaseModel):
     """
     Configuration for Twilio Memory Store integration.
 
-    Note: Memory client is always initialized automatically by fetching memory_store_id
-    from the Conversation Orchestrator configuration. This config only controls optional memory
-    settings like which trait groups to include when fetching profiles.
+    Controls memory retrieval limits, relevance filtering, and profile trait groups.
+    Memory client is auto-initialized from Conversation Orchestrator configuration.
     """
 
     trait_groups: list[str] | None = Field(
         default=None,
-        description="Optional list of trait group names to include when retrieving profiles",
+        description=(
+            "Trait groups to include when retrieving profiles. "
+            "If None, all trait groups are included."
+        ),
+    )
+
+    observations_limit: int = Field(
+        default=20,
+        ge=0,
+        le=100,
+        description="Max observations to return (0-100). Set to 0 to disable.",
+    )
+
+    summaries_limit: int = Field(
+        default=5,
+        ge=0,
+        le=100,
+        description="Max summaries to return (0-100). Set to 0 to disable.",
+    )
+
+    communications_limit: int = Field(
+        default=0,
+        ge=0,
+        le=100,
+        description="Max communications to return (0-100). Set to 0 to disable.",
+    )
+
+    relevance_threshold: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=1.0,
+        description="Min relevance score for observations and summaries (0.0-1.0).",
     )
 
     phone_trait_group: str = Field(
@@ -95,47 +113,86 @@ class TwilioMemoryConfig(BaseModel):
                 "trait_groups": ["Contact", "Preferences"],
                 "phone_trait_group": "Contact",
                 "phone_trait_field": "phone",
+                "observations_limit": 20,
+                "summaries_limit": 5,
+                "communications_limit": 0,
+                "relevance_threshold": 0.0,
             }
         },
     )
 
     @classmethod
     def from_env(cls) -> "TwilioMemoryConfig":
-        """
-        Create TwilioMemoryConfig from environment variables.
+        """Create TwilioMemoryConfig from TWILIO_MEMORY_* environment variables."""
+        # Get defaults from model to avoid duplication
+        defaults = cls()
 
-        Loads configuration from the following environment variables:
-        - MEMORY_PROFILE_TRAIT_GROUPS: Comma-separated list of trait groups (optional)
+        trait_groups_str = os.environ.get("TWILIO_MEMORY_PROFILE_TRAIT_GROUPS")
 
-        Returns:
-            TwilioMemoryConfig instance with parsed trait groups from environment,
-            or default values if no environment variables are set.
-
-        Example:
-            >>> # With trait groups from environment
-            >>> config = TwilioMemoryConfig.from_env()
-
-            >>> # Or manually construct
-            >>> config = TwilioMemoryConfig(trait_groups=["Contact", "Preferences"])
-
-            >>> # Without trait groups (all traits included)
-            >>> config = TwilioMemoryConfig()
-        """
-        trait_groups_str = os.environ.get("MEMORY_PROFILE_TRAIT_GROUPS")
-
-        # Parse trait groups from environment variable
+        # Parse trait groups from environment variable, filtering out empty strings
         trait_groups = None
         if trait_groups_str:
-            trait_groups = [g.strip() for g in trait_groups_str.split(",")]
+            parsed_groups = [g.strip() for g in trait_groups_str.split(",") if g.strip()]
+            trait_groups = parsed_groups or None
 
-        kwargs: dict[str, object] = {"trait_groups": trait_groups}
-        phone_trait_group = os.environ.get("MEMORY_PHONE_TRAIT_GROUP")
-        if phone_trait_group:
-            kwargs["phone_trait_group"] = phone_trait_group
-        phone_trait_field = os.environ.get("MEMORY_PHONE_TRAIT_FIELD")
-        if phone_trait_field:
-            kwargs["phone_trait_field"] = phone_trait_field
-        return cls(**kwargs)
+        # Parse retrieval limits from environment variables
+        # Treat empty strings and whitespace-only strings as unset so model defaults
+        # are applied consistently.
+        # Note: Pydantic will validate that limits are 0-100 and threshold is 0.0-1.0
+        def _get_int_env(name: str, default: int) -> int:
+            value = os.environ.get(name)
+            if value is None:
+                return default
+            value = value.strip()
+            if not value:
+                return default
+            return int(value)
+
+        def _get_float_env(name: str, default: float) -> float:
+            value = os.environ.get(name)
+            if value is None:
+                return default
+            value = value.strip()
+            if not value:
+                return default
+            return float(value)
+
+        try:
+            observations_limit = _get_int_env(
+                "TWILIO_MEMORY_OBSERVATIONS_LIMIT", defaults.observations_limit
+            )
+            summaries_limit = _get_int_env(
+                "TWILIO_MEMORY_SUMMARIES_LIMIT", defaults.summaries_limit
+            )
+            communications_limit = _get_int_env(
+                "TWILIO_MEMORY_COMMUNICATIONS_LIMIT", defaults.communications_limit
+            )
+            relevance_threshold = _get_float_env(
+                "TWILIO_MEMORY_RELEVANCE_THRESHOLD", defaults.relevance_threshold
+            )
+        except ValueError as e:
+            raise ValueError(
+                "Invalid memory configuration in environment variables. "
+                "Ensure TWILIO_MEMORY_*_LIMIT values are integers "
+                f"and TWILIO_MEMORY_RELEVANCE_THRESHOLD is a float. Error: {e}"
+            ) from e
+
+        phone_trait_group = (
+            os.environ.get("TWILIO_MEMORY_PHONE_TRAIT_GROUP") or defaults.phone_trait_group
+        )
+        phone_trait_field = (
+            os.environ.get("TWILIO_MEMORY_PHONE_TRAIT_FIELD") or defaults.phone_trait_field
+        )
+
+        return cls(
+            trait_groups=trait_groups,
+            observations_limit=observations_limit,
+            summaries_limit=summaries_limit,
+            communications_limit=communications_limit,
+            relevance_threshold=relevance_threshold,
+            phone_trait_group=phone_trait_group,
+            phone_trait_field=phone_trait_field,
+        )
 
 
 class TACConfig(BaseModel):
@@ -143,12 +200,11 @@ class TACConfig(BaseModel):
 
     conversation_configuration_id: str = Field(description="Twilio Conversation Configuration ID")
 
-    memory_config: TwilioMemoryConfig | None = Field(
-        default=None,
-        description="Optional Twilio Memory configuration for controlling which trait groups "
-        "to include when fetching profiles. Note: Memory client is always initialized "
-        "automatically from Conversation Orchestrator configuration - "
-        "this only configures trait group filtering.",
+    memory_config: TwilioMemoryConfig = Field(
+        default_factory=TwilioMemoryConfig,
+        description="Twilio Memory configuration for controlling retrieval limits, relevance "
+        "threshold, and trait groups. Memory client is always initialized automatically from "
+        "Conversation Orchestrator configuration.",
     )
 
     account_sid: str = Field(description="Twilio Account SID")
@@ -236,40 +292,40 @@ class TACConfig(BaseModel):
         """
         Create TACConfig from environment variables.
 
-        Loads configuration from the following environment variables:
-        - TWILIO_CONVERSATION_CONFIGURATION_ID: Twilio Conversation Configuration ID
+        Required:
+        - TWILIO_CONVERSATION_CONFIGURATION_ID: Conversation Orchestrator configuration ID
         - TWILIO_ACCOUNT_SID: Twilio Account SID
-        - TWILIO_AUTH_TOKEN: Twilio Auth Token
+        - TWILIO_AUTH_TOKEN: Twilio Auth Token for API authentication
         - TWILIO_API_KEY: Twilio API Key SID (starts with SK)
-        - TWILIO_API_SECRET: Twilio API Key Secret
-        - TWILIO_PHONE_NUMBER: Twilio Phone Number for Voice and SMS channels
-        - TWILIO_KNOWLEDGE_BASE_ID: Knowledge Base ID (optional)
-        - TWILIO_LOG_LEVEL: Logging level (optional, defaults to INFO)
-        - TWILIO_REGION: Twilio region for data residency (optional, e.g., 'au1', 'ie1')
-        - TWILIO_STUDIO_HANDOFF_FLOW_SID: Studio Flow SID for handoff (optional)
+        - TWILIO_API_SECRET: Twilio API Secret for API Key authentication
+        - TWILIO_PHONE_NUMBER: Phone number for voice and SMS channels
 
-        Memory configuration is automatically loaded via TwilioMemoryConfig.from_env()
-        from these environment variables (all optional):
-        - MEMORY_PROFILE_TRAIT_GROUPS: Comma-separated list of trait groups
+        Optional:
+        - TWILIO_KNOWLEDGE_BASE_ID: Knowledge Base ID for RAG search functionality
+        - TWILIO_LOG_LEVEL: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL).
+          Default: INFO
+        - TWILIO_REGION: Twilio region for data residency (e.g., 'au1', 'ie1')
+        - TWILIO_STUDIO_HANDOFF_FLOW_SID: Studio Flow SID (FWxxx...) for handoff tool
 
-        Conversation Intelligence configuration is automatically loaded via
-        ConversationIntelligenceConfig.from_env() from these environment variables (all optional):
-        - CONVERSATION_INTELLIGENCE_CONFIGURATION_ID: CI Configuration ID (TTID format)
-        - CONVERSATION_INTELLIGENCE_OBSERVATION_OPERATOR_SID: Operator SID for observations
-        - CONVERSATION_INTELLIGENCE_SUMMARY_OPERATOR_SID: Operator SID for summaries
+        Memory Configuration:
+        - TWILIO_MEMORY_PROFILE_TRAIT_GROUPS: Trait groups to include
+          (comma-separated, e.g., "Contact,Preferences")
+        - TWILIO_MEMORY_OBSERVATIONS_LIMIT: Max observations in memory retrieval.
+          Default: 20
+        - TWILIO_MEMORY_SUMMARIES_LIMIT: Max summaries in memory retrieval. Default: 5
+        - TWILIO_MEMORY_COMMUNICATIONS_LIMIT: Max communications in memory retrieval.
+          Default: 0
+        - TWILIO_MEMORY_RELEVANCE_THRESHOLD: Min relevance score (0.0-1.0). Default: 0.0
 
-        Returns:
-
-        Raises:
-            KeyError: If required environment variables are not set.
-            ValidationError: If environment variable values are invalid.
-
-        Example:
-            >>> # With all env vars set in .env file
-            >>> config = TACConfig.from_env()
-            >>> tac = TAC(config=config)
+        Conversation Intelligence:
+        - CONVERSATION_INTELLIGENCE_CONFIGURATION_ID: CI Service configuration ID
+          for webhook filtering
+        - CONVERSATION_INTELLIGENCE_OBSERVATION_OPERATOR_SID: Operator SID for
+          observation extraction
+        - CONVERSATION_INTELLIGENCE_SUMMARY_OPERATOR_SID: Operator SID for summary
+          extraction
         """
-        # Load optional memory configuration
+        # Load memory configuration from optional env vars (config object is always present)
         memory_config = TwilioMemoryConfig.from_env()
 
         # Load optional conversation intelligence configuration
