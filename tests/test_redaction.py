@@ -195,6 +195,29 @@ class TestFormatterSafetyNet:
         assert "(555) 123-4567" not in output
         assert "***" in output
 
+    def test_json_formatter_output_remains_valid_json(self) -> None:
+        import json
+
+        formatter = JSONFormatter()
+        record = logging.LogRecord(
+            "tac.test", logging.INFO, "", 0, "Calling +15559876543", (), None
+        )
+        record.to = "+447911123456"  # type: ignore[attr-defined]
+        output = formatter.format(record)
+        parsed = json.loads(output)
+        assert "+15559876543" not in parsed["message"]
+        assert "+447911123456" not in str(parsed.get("to", ""))
+
+    def test_json_formatter_int_field_not_corrupted(self) -> None:
+        import json
+
+        formatter = JSONFormatter()
+        record = logging.LogRecord("tac.test", logging.INFO, "", 0, "call placed", (), None)
+        record.retry_count = 5551234567  # type: ignore[attr-defined]
+        output = formatter.format(record)
+        parsed = json.loads(output)
+        assert isinstance(parsed["retry_count"], int)
+
     def test_formatters_pass_clean_messages_through(self) -> None:
         for formatter in [JSONFormatter(), ConsoleFormatter(fmt="%(message)s")]:
             record = logging.LogRecord(

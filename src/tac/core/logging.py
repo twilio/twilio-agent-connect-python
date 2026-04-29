@@ -68,27 +68,27 @@ class JSONFormatter(logging.Formatter):
         Returns:
             JSON-formatted log string
         """
-        log_data = {
+        log_data: dict[str, Any] = {
             "timestamp": self.formatTime(record, self.datefmt),
             "level": record.levelname,
             "logger": record.name,
             "module": record.module,
             "function": record.funcName,
             "line": record.lineno,
-            "message": record.getMessage(),
+            "message": _scrub_pii(record.getMessage()),
         }
 
         # Add exception info if present
         if record.exc_info:
-            log_data["exception"] = self.formatException(record.exc_info)
+            log_data["exception"] = _scrub_pii(self.formatException(record.exc_info))
 
         # Add extra fields from LogRecord
         # Skip standard fields and internal fields
         for key, value in record.__dict__.items():
             if key not in _RESERVED_LOG_ATTRS and not key.startswith("_"):
-                log_data[key] = value
+                log_data[key] = _scrub_pii(str(value)) if isinstance(value, str) else value
 
-        return _scrub_pii(json.dumps(log_data, default=str))
+        return json.dumps(log_data, default=str)
 
 
 class ConsoleFormatter(logging.Formatter):
