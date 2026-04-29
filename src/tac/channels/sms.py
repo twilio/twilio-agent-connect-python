@@ -105,16 +105,17 @@ class SMSChannel(MessagingChannel):
         session = self._conversations.get(conversation_id)
         if session is None or not session.author_info or not session.ai_agent_info:
             raise RuntimeError(
-                "send_response called without a reconciled session for "
-                f"conversation {conversation_id}; wait for an inbound webhook or "
-                "call initiate_outbound_conversation first."
+                f"Unable to send SMS: send_response called without a reconciled "
+                f"session for conversation {conversation_id}. Wait for an inbound "
+                "webhook or call initiate_outbound_conversation first."
             )
 
         customer_participant_id = session.author_info.participant_id
         agent_participant_id = session.ai_agent_info.participant_id
         if not customer_participant_id or not agent_participant_id:
             raise RuntimeError(
-                f"Session for conversation {conversation_id} is missing participant ids."
+                f"Unable to send SMS: session for conversation {conversation_id} is "
+                "missing participant ids."
             )
 
         channel_id = session.metadata.get("channel_id")
