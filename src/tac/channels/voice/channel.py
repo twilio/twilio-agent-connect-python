@@ -15,7 +15,6 @@ from tac.core.tac import TAC
 from tac.models.outbound import InitiateVoiceConversationOptions, InitiateVoiceConversationResult
 from tac.models.session import AuthorInfo
 from tac.models.voice import (
-    ConversationRelayCallbackPayload,
     InterruptMessage,
     PromptMessage,
     SetupMessage,
@@ -38,7 +37,6 @@ class VoiceChannel(BaseChannel):
     - TwiML generation for incoming calls (see twiml module)
     - WebSocket connection management for real-time voice streaming
     - Conversation lifecycle management (inherited from BaseChannel)
-    - ConversationRelay callback webhook handling
     - Outbound call initiation
 
     This channel is framework-agnostic and accepts any WebSocket implementation
@@ -134,36 +132,6 @@ class VoiceChannel(BaseChannel):
                 conversation_configuration=self.tac.config.conversation_configuration_id,
             )
         )
-
-    async def handle_conversation_relay_callback(
-        self,
-        payload_dict: dict[str, str],
-    ) -> str | None:
-        """
-        Handle ConversationRelay callback webhook from Twilio.
-
-        This method processes the callback sent by Twilio when a ConversationRelay
-        session ends. Conversation lifecycle is managed by CO — the SDK does not
-        manually close conversations.
-
-        Args:
-            payload_dict: Raw form data dict from the webhook request.
-                Validated internally into ConversationRelayCallbackPayload.
-
-        Returns:
-            None for simple acknowledgment.
-
-        Raises:
-            ValidationError: If the payload dict fails validation.
-        """
-        payload = ConversationRelayCallbackPayload(**payload_dict)
-
-        self.logger.info(
-            f"[ConversationRelay Callback] CallSid: {payload.call_sid}, "
-            f"Status: {payload.call_status}"
-        )
-
-        return None
 
     async def _initialize_conversation(
         self,
