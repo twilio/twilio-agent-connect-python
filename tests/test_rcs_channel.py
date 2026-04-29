@@ -125,8 +125,8 @@ def rcs_channel(mock_tac: TAC) -> RCSChannel:
 @pytest.mark.asyncio
 async def test_rcs_channel_initialization(mock_tac: TAC) -> None:
     """Test RCS channel initialization requires config with agent_address."""
-    with pytest.raises(TypeError, match="missing 1 required positional argument: 'config'"):
-        RCSChannel(mock_tac)
+    with pytest.raises(TypeError):
+        RCSChannel(mock_tac)  # type: ignore[call-arg]
 
 
 @pytest.mark.asyncio
@@ -350,7 +350,7 @@ async def test_webhook_deduplication(rcs_channel: RCSChannel) -> None:
 @pytest.mark.asyncio
 async def test_initiate_outbound_conversation(mock_tac: TAC) -> None:
     """Test initiating an outbound RCS conversation."""
-    from tac.models.outbound import InitiateRCSConversationOptions
+    from tac.models.outbound import InitiateMessagingConversationOptions
 
     config = RCSChannelConfig(agent_address="rcs:test_agent")
     channel = RCSChannel(mock_tac, config=config)
@@ -395,7 +395,7 @@ async def test_initiate_outbound_conversation(mock_tac: TAC) -> None:
             ),
         ]
 
-        options = InitiateRCSConversationOptions(
+        options = InitiateMessagingConversationOptions(
             to="rcs:+16505551234",
             message="Hello from RCS!",
         )

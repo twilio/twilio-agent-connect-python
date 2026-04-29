@@ -35,7 +35,6 @@ from tac.channels.sms import SMSChannel, SMSChannelConfig
 from tac.channels.voice import VoiceChannel, VoiceChannelConfig
 from tac.models.outbound import (
     InitiateMessagingConversationOptions,
-    InitiateRCSConversationOptions,
     InitiateVoiceConversationOptions,
 )
 from tac.models.session import ConversationSession
@@ -75,10 +74,13 @@ SYSTEM_INSTRUCTIONS = (
 tac = TAC(config=TACConfig.from_env())
 voice_channel = VoiceChannel(tac, config=VoiceChannelConfig(auto_retrieve_memory=True))
 sms_channel = SMSChannel(tac, config=SMSChannelConfig(auto_retrieve_memory=True))
+
+# RCS channel requires agent_address - use env var or will be validated at runtime
+rcs_agent_id = os.environ.get("TWILIO_RCS_AGENT_ID", "")
 rcs_channel = RCSChannel(
     tac,
     config=RCSChannelConfig(
-        agent_address=os.environ.get("TWILIO_RCS_AGENT_ID", "rcs:default_agent"),
+        agent_address=rcs_agent_id or "rcs:placeholder",  # Will validate at runtime
         auto_retrieve_memory=True,
     ),
 )
@@ -126,8 +128,18 @@ async def initiate_outbound(args: argparse.Namespace) -> None:
             print("\nWaiting for replies... (Ctrl+C to exit)\n")
 
         elif args.channel == "rcs":
+            # Validate RCS configuration
+            if not args.from_ and not os.environ.get("TWILIO_RCS_AGENT_ID"):
+                print(
+                    "Error: RCS requires either TWILIO_RCS_AGENT_ID environment variable "
+                    "or --from flag to specify the agent address."
+                )
+                sys.exit(1)
+
             rcs_result = await rcs_channel.initiate_outbound_conversation(
-                InitiateRCSConversationOptions(to=args.to, from_=args.from_, message=args.message)
+                InitiateMessagingConversationOptions(
+                    to=args.to, from_=args.from_, message=args.message
+                )
             )
             print(f"RCS message sent to {args.to} (conversation: {rcs_result.conversation_id})")
             print(f"[{rcs_result.conversation_id}] Agent: {args.message}")

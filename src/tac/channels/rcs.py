@@ -18,7 +18,6 @@ from tac.models.conversation import (
 from tac.models.outbound import (
     InitiateConversationResult,
     InitiateMessagingConversationOptions,
-    InitiateRCSConversationOptions,
 )
 from tac.utils.redaction import mask_address
 
@@ -110,11 +109,17 @@ class RCSChannel(MessagingChannel):
             )
             return
 
-        # Use configured or auto-detected agent address
-        agent_address = self.agent_address
-
-        # Get session for channel_id metadata
+        # Get session for per-conversation metadata
         session = self._conversations.get(conversation_id)
+
+        # Use from_address from session metadata (set during outbound initiation),
+        # falling back to the configured agent_address for inbound conversations
+        session_from_address = session.metadata.get("from_address") if session else None
+        agent_address = (
+            session_from_address
+            if isinstance(session_from_address, str) and session_from_address
+            else self.agent_address
+        )
 
         # Find the CUSTOMER participant by address on the RCS channel
         customer_participant = None
@@ -189,7 +194,7 @@ class RCSChannel(MessagingChannel):
 
     async def initiate_outbound_conversation(
         self,
-        options: InitiateRCSConversationOptions | InitiateMessagingConversationOptions,
+        options: InitiateMessagingConversationOptions,
     ) -> InitiateConversationResult:
         """Initiate an outbound RCS conversation.
 
@@ -197,10 +202,6 @@ class RCSChannel(MessagingChannel):
         participants, then sends the initial message via the Actions API.
         If an active conversation with the same addresses already exists
         (group-by dedup), CO returns 409 and the existing conversation is reused.
-
-        Args:
-            options: RCS conversation options (supports both InitiateRCSConversationOptions
-                     and base InitiateMessagingConversationOptions for backward compatibility)
         """
         from_address = options.from_ or self.agent_address
         return await self._initiate_messaging_conversation(

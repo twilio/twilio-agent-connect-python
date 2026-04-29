@@ -8,7 +8,12 @@ from tac.models.session import ConversationSession
 
 
 class InitiateMessagingConversationOptions(BaseModel):
-    """Options for initiating an outbound SMS conversation."""
+    """Shared options for initiating an outbound messaging conversation.
+
+    This base model is used for messaging-style outbound conversations,
+    including SMS, Chat, and RCS. Each channel may extend this with
+    channel-specific requirements (e.g., Chat requires channel_id).
+    """
 
     to: str = Field(..., min_length=1)
     from_: str | None = Field(default=None, alias="from")
@@ -16,16 +21,6 @@ class InitiateMessagingConversationOptions(BaseModel):
     metadata: dict[str, Any] | None = Field(default=None)
 
     model_config = {"populate_by_name": True}
-
-
-class InitiateRCSConversationOptions(InitiateMessagingConversationOptions):
-    """Options for initiating an outbound RCS conversation.
-
-    Inherits from InitiateMessagingConversationOptions. RCS uses the same
-    base fields (to, from_, message, metadata) without additional requirements.
-    """
-
-    pass
 
 
 class InitiateChatConversationOptions(InitiateMessagingConversationOptions):
