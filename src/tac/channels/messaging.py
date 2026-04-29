@@ -276,15 +276,19 @@ class MessagingChannel(BaseChannel):
         # `send_response` re-resolves participants from the live conversation.
         resolved = await self._reconcile_participants(conv_id)
         if resolved is not None:
-            _agent_participant, customer_participant = resolved
-            # Lift the profile resolved/attached during reconciliation onto the
-            # session so retrieve_memory skips its fallback lookup.
-            if (
-                customer_participant is not None
-                and customer_participant.profile_id
-                and not session.profile_id
-            ):
-                session.profile_id = customer_participant.profile_id
+            agent_participant, customer_participant = resolved
+            session.ai_agent_info = AuthorInfo(
+                address=self.get_agent_address(conv_id).address,
+                participant_id=agent_participant.id,
+            )
+            # When reconcile resolved a customer (SMS path — chat disables
+            # customer reconciliation and uses the author_info captured from
+            # the webhook above), use its authoritative participant id and
+            # lift any resolved profile.
+            if customer_participant is not None and session.author_info is not None:
+                session.author_info.participant_id = customer_participant.id
+                if customer_participant.profile_id and not session.profile_id:
+                    session.profile_id = customer_participant.profile_id
 
         memory_response = await self._retrieve_memory_if_enabled(session, message_text, conv_id)
 
@@ -406,6 +410,7 @@ class MessagingChannel(BaseChannel):
 
             session = self._start_conversation(conversation_id)
             session.author_info = AuthorInfo(address=options.to, participant_id=customer.id)
+            session.ai_agent_info = AuthorInfo(address=from_address, participant_id=agent.id)
             session.metadata.update(
                 {
                     **(options.metadata or {}),
