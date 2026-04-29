@@ -306,58 +306,21 @@ class TestChatChannel:
         assert captured[0].channel == "chat"
 
     @pytest.mark.asyncio
-    async def test_send_response_reuses_existing_agent(self) -> None:
-        from tac.models.conversation import ParticipantAddress, ParticipantResponse
-
+    async def test_send_response_uses_stashed_ids(self) -> None:
+        """send_response reads both participant ids from the session stash."""
         tac = TAC(get_test_config())
         channel = ChatChannel(tac)
 
-        # Set up session with author_info and channel_id
+        # Session is pre-populated as if reconcile (or outbound initiation) ran.
         channel._conversations["CH123"] = ConversationSession(
             conversation_id="CH123",
             channel="chat",
             author_info=AuthorInfo(address="user@example.com", participant_id="PA_USER"),
+            ai_agent_info=AuthorInfo(address="ai-assistant", participant_id="PA_AGENT"),
             metadata={"channel_id": "CH_CHAT_SID_123"},
         )
 
-        mock_agent = ParticipantResponse(
-            **{  # type: ignore[arg-type]
-                "id": "PA_AGENT",
-                "accountId": "ACtest123",
-                "conversationId": "CH123",
-                "name": "AI Agent",
-                "type": "AI_AGENT",
-                "addresses": [
-                    ParticipantAddress(
-                        channel="CHAT", address="ai-assistant", channel_id="CH_CHAT_SID_123"
-                    ).model_dump(by_alias=True)
-                ],
-            }
-        )
-
-        mock_customer = ParticipantResponse(
-            **{  # type: ignore[arg-type]
-                "id": "PA_USER",
-                "accountId": "ACtest123",
-                "conversationId": "CH123",
-                "name": "user@example.com",
-                "type": "CUSTOMER",
-                "addresses": [
-                    ParticipantAddress(
-                        channel="CHAT", address="user@example.com", channel_id="CH_CHAT_SID_123"
-                    ).model_dump(by_alias=True)
-                ],
-            }
-        )
-
-        with (
-            patch.object(
-                tac.conversation_orchestrator_client,
-                "list_participants",
-                return_value=[mock_agent, mock_customer],
-            ),
-            patch.object(tac.conversation_orchestrator_client, "create_action") as mock_send,
-        ):
+        with patch.object(tac.conversation_orchestrator_client, "create_action") as mock_send:
             await channel.send_response("CH123", "Hello from bot!")
 
             mock_send.assert_called_once()
@@ -382,8 +345,6 @@ class TestChatChannel:
 
         TODO(maestro): Drop this test when the chatService workaround is removed.
         """
-        from tac.models.conversation import ParticipantAddress, ParticipantResponse
-
         tac = TAC(get_test_config())
         tac.conversations_v1_service_sid = "ISabcdef1234567890abcdef1234567890"
         channel = ChatChannel(tac)
@@ -392,46 +353,11 @@ class TestChatChannel:
             conversation_id="CH123",
             channel="chat",
             author_info=AuthorInfo(address="user@example.com", participant_id="PA_USER"),
+            ai_agent_info=AuthorInfo(address="ai-assistant", participant_id="PA_AGENT"),
             metadata={"channel_id": "CH_CHAT_SID_123"},
         )
 
-        mock_agent = ParticipantResponse(
-            **{  # type: ignore[arg-type]
-                "id": "PA_AGENT",
-                "accountId": "ACtest123",
-                "conversationId": "CH123",
-                "name": "AI Agent",
-                "type": "AI_AGENT",
-                "addresses": [
-                    ParticipantAddress(
-                        channel="CHAT", address="ai-assistant", channel_id="CH_CHAT_SID_123"
-                    ).model_dump(by_alias=True)
-                ],
-            }
-        )
-        mock_customer = ParticipantResponse(
-            **{  # type: ignore[arg-type]
-                "id": "PA_USER",
-                "accountId": "ACtest123",
-                "conversationId": "CH123",
-                "name": "user@example.com",
-                "type": "CUSTOMER",
-                "addresses": [
-                    ParticipantAddress(
-                        channel="CHAT", address="user@example.com", channel_id="CH_CHAT_SID_123"
-                    ).model_dump(by_alias=True)
-                ],
-            }
-        )
-
-        with (
-            patch.object(
-                tac.conversation_orchestrator_client,
-                "list_participants",
-                return_value=[mock_agent, mock_customer],
-            ),
-            patch.object(tac.conversation_orchestrator_client, "create_action") as mock_send,
-        ):
+        with patch.object(tac.conversation_orchestrator_client, "create_action") as mock_send:
             await channel.send_response("CH123", "Hello!")
 
             mock_send.assert_called_once()
@@ -444,220 +370,12 @@ class TestChatChannel:
             assert request.payload.channel_settings.channel_id == "CH_CHAT_SID_123"
 
     @pytest.mark.asyncio
-    async def test_send_response_recognizes_agent_type(self) -> None:
-        """Test that participant with type='AGENT' is recognized and reused."""
-        from tac.models.conversation import ParticipantAddress, ParticipantResponse
-
-        tac = TAC(get_test_config())
-        channel = ChatChannel(tac)
-
-        # Set up session with author_info and channel_id
-        channel._conversations["CH123"] = ConversationSession(
-            conversation_id="CH123",
-            channel="chat",
-            author_info=AuthorInfo(address="user@example.com", participant_id="PA_USER"),
-            metadata={"channel_id": "CH_CHAT_SID_123"},
-        )
-
-        # Mock agent with new "AGENT" type (not "AI_AGENT") at the channel's
-        # configured agent_address ("ai-assistant") — matcher must accept it.
-        mock_agent = ParticipantResponse(
-            **{  # type: ignore[arg-type]
-                "id": "PA_AGENT",
-                "accountId": "ACtest123",
-                "conversationId": "CH123",
-                "name": "AI Agent",
-                "type": "AGENT",  # New AGENT type
-                "addresses": [
-                    ParticipantAddress(
-                        channel="CHAT", address="ai-assistant", channel_id="CH_CHAT_SID_123"
-                    ).model_dump(by_alias=True)
-                ],
-            }
-        )
-
-        mock_customer = ParticipantResponse(
-            **{  # type: ignore[arg-type]
-                "id": "PA_USER",
-                "accountId": "ACtest123",
-                "conversationId": "CH123",
-                "name": "user@example.com",
-                "type": "CUSTOMER",
-                "addresses": [
-                    ParticipantAddress(
-                        channel="CHAT", address="user@example.com", channel_id="CH_CHAT_SID_123"
-                    ).model_dump(by_alias=True)
-                ],
-            }
-        )
-
-        with (
-            patch.object(
-                tac.conversation_orchestrator_client,
-                "list_participants",
-                return_value=[mock_agent, mock_customer],
-            ),
-            patch.object(tac.conversation_orchestrator_client, "create_action") as mock_send,
-            patch.object(
-                tac.conversation_orchestrator_client, "add_participant"
-            ) as mock_add_participant,
-        ):
-            await channel.send_response("CH123", "Response from agent!")
-
-            # Verify create_action was called with AGENT participant
-            mock_send.assert_called_once()
-            request = mock_send.call_args[0][1]
-            assert request.payload.from_.participant_id == "PA_AGENT"
-            assert request.payload.from_.channel == "CHAT"
-            assert request.payload.from_.address is None
-
-            # Verify add_participant was NOT called (AGENT participant reused)
-            mock_add_participant.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_send_response_creates_agent_lazily(self) -> None:
-        from tac.models.conversation import ParticipantAddress, ParticipantResponse
-
-        tac = TAC(get_test_config())
-        channel = ChatChannel(tac)
-
-        channel._conversations["CH123"] = ConversationSession(
-            conversation_id="CH123",
-            channel="chat",
-            author_info=AuthorInfo(address="user@example.com", participant_id="PA_USER"),
-            metadata={"channel_id": "CH_CHAT_SID_123"},
-        )
-
-        mock_customer = ParticipantResponse(
-            **{  # type: ignore[arg-type]
-                "id": "PA_USER",
-                "accountId": "ACtest123",
-                "conversationId": "CH123",
-                "name": "user@example.com",
-                "type": "CUSTOMER",
-                "addresses": [
-                    ParticipantAddress(channel="CHAT", address="user@example.com").model_dump(
-                        by_alias=True
-                    )
-                ],
-            }
-        )
-
-        mock_new_agent = ParticipantResponse(
-            **{  # type: ignore[arg-type]
-                "id": "PA_NEW_AGENT",
-                "accountId": "ACtest123",
-                "conversationId": "CH123",
-                "name": "AI Agent",
-                "type": "AI_AGENT",
-                "addresses": [
-                    ParticipantAddress(
-                        channel="CHAT", address="ai-assistant", channel_id="CH_CHAT_SID_123"
-                    ).model_dump(by_alias=True)
-                ],
-            }
-        )
-
-        with (
-            patch.object(
-                tac.conversation_orchestrator_client,
-                "list_participants",
-                return_value=[mock_customer],  # No AI_AGENT
-            ),
-            patch.object(
-                tac.conversation_orchestrator_client,
-                "add_participant",
-                return_value=mock_new_agent,
-            ) as mock_add,
-            patch.object(tac.conversation_orchestrator_client, "create_action") as mock_send,
-        ):
-            await channel.send_response("CH123", "Hello!")
-
-            mock_add.assert_called_once()
-            add_args = mock_add.call_args
-            assert add_args[1]["participant_type"] == "AI_AGENT"
-            addresses = add_args[1]["addresses"]
-            assert addresses[0].channel == "CHAT"
-            assert addresses[0].address == "ai-assistant"
-
-            mock_send.assert_called_once()
-            request = mock_send.call_args[0][1]
-            assert request.payload.from_.participant_id == "PA_NEW_AGENT"
-
-    @pytest.mark.asyncio
-    async def test_send_response_race_condition(self) -> None:
-        """If add_participant fails, retry listing to find existing agent."""
-        from tac.models.conversation import ParticipantAddress, ParticipantResponse
-
-        tac = TAC(get_test_config())
-        channel = ChatChannel(tac)
-
-        channel._conversations["CH123"] = ConversationSession(
-            conversation_id="CH123",
-            channel="chat",
-            author_info=AuthorInfo(address="user@example.com", participant_id="PA_USER"),
-            metadata={"channel_id": "CH_CHAT_SID_123"},
-        )
-
-        mock_customer = ParticipantResponse(
-            **{  # type: ignore[arg-type]
-                "id": "PA_USER",
-                "accountId": "ACtest123",
-                "conversationId": "CH123",
-                "name": "user@example.com",
-                "type": "CUSTOMER",
-                "addresses": [
-                    ParticipantAddress(channel="CHAT", address="user@example.com").model_dump(
-                        by_alias=True
-                    )
-                ],
-            }
-        )
-
-        mock_agent = ParticipantResponse(
-            **{  # type: ignore[arg-type]
-                "id": "PA_AGENT",
-                "accountId": "ACtest123",
-                "conversationId": "CH123",
-                "name": "AI Agent",
-                "type": "AI_AGENT",
-                "addresses": [
-                    ParticipantAddress(channel="CHAT", address="ai-assistant").model_dump(
-                        by_alias=True
-                    )
-                ],
-            }
-        )
-
-        # First list returns no agent, add_participant fails, retry list finds agent
-        with (
-            patch.object(
-                tac.conversation_orchestrator_client,
-                "list_participants",
-                side_effect=[
-                    [mock_customer],  # First call: no agent
-                    [mock_customer, mock_agent],  # Retry: agent exists
-                ],
-            ),
-            patch.object(
-                tac.conversation_orchestrator_client,
-                "add_participant",
-                side_effect=Exception("409 Conflict"),
-            ),
-            patch.object(tac.conversation_orchestrator_client, "create_action") as mock_send,
-        ):
-            await channel.send_response("CH123", "Hello!")
-
-            mock_send.assert_called_once()
-            request = mock_send.call_args[0][1]
-            assert request.payload.from_.participant_id == "PA_AGENT"
-
-    @pytest.mark.asyncio
     async def test_send_response_no_session(self) -> None:
+        """Missing session → send_response raises (no conversation to reply to)."""
         tac = TAC(get_test_config())
         channel = ChatChannel(tac)
-        # No session — should log error and return without raising
-        await channel.send_response("CH999", "Hello!")
+        with pytest.raises(RuntimeError, match="without a reconciled session"):
+            await channel.send_response("CH999", "Hello!")
 
     @pytest.mark.asyncio
     async def test_send_response_no_channel_id(self) -> None:
@@ -669,6 +387,7 @@ class TestChatChannel:
             conversation_id="CH123",
             channel="chat",
             author_info=AuthorInfo(address="user@example.com", participant_id="PA_USER"),
+            ai_agent_info=AuthorInfo(address="ai-assistant", participant_id="PA_AGENT"),
             metadata={},  # No channel_id
         )
 
@@ -678,10 +397,9 @@ class TestChatChannel:
             mock_send.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_send_response_raises_when_ensure_agent_fails(self) -> None:
-        """If no AI_AGENT exists and add_participant + retry both fail, raise."""
-        from tac.models.conversation import ParticipantAddress, ParticipantResponse
-
+    async def test_send_response_raises_when_missing_ai_agent_info(self) -> None:
+        """If author_info is stashed but ai_agent_info is not (reconcile failed),
+        send_response raises — it will not invent ids."""
         tac = TAC(get_test_config())
         channel = ChatChannel(tac)
 
@@ -689,38 +407,14 @@ class TestChatChannel:
             conversation_id="CH123",
             channel="chat",
             author_info=AuthorInfo(address="user@example.com", participant_id="PA_USER"),
+            # ai_agent_info is intentionally missing
             metadata={"channel_id": "CH_CHAT_SID_123"},
         )
 
-        mock_customer = ParticipantResponse(
-            **{  # type: ignore[arg-type]
-                "id": "PA_USER",
-                "accountId": "ACtest123",
-                "conversationId": "CH123",
-                "name": "user@example.com",
-                "type": "CUSTOMER",
-                "addresses": [
-                    ParticipantAddress(channel="CHAT", address="user@example.com").model_dump(
-                        by_alias=True
-                    )
-                ],
-            }
-        )
-
-        with (
-            patch.object(
-                tac.conversation_orchestrator_client,
-                "list_participants",
-                return_value=[mock_customer],
-            ),
-            patch.object(
-                tac.conversation_orchestrator_client,
-                "add_participant",
-                side_effect=Exception("500 Internal Server Error"),
-            ),
-        ):
-            with pytest.raises(RuntimeError, match="Failed to resolve AI_AGENT participant"):
+        with patch.object(tac.conversation_orchestrator_client, "create_action") as mock_send:
+            with pytest.raises(RuntimeError, match="without a reconciled session"):
                 await channel.send_response("CH123", "Hello!")
+            mock_send.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_send_response_rejects_non_string(self) -> None:
@@ -804,6 +498,8 @@ class TestChatChannel:
     @pytest.mark.asyncio
     async def test_callback_auto_send_response(self) -> None:
         """Test callback returning string automatically sends response via create_action."""
+        from tac.models.conversation import ParticipantAddress, ParticipantResponse
+
         tac = TAC(get_test_config())
         channel = ChatChannel(tac, config={"auto_retrieve_memory": False})
 
@@ -817,8 +513,6 @@ class TestChatChannel:
 
         tac.on_message_ready(message_callback)
 
-        from tac.models.conversation import ParticipantAddress, ParticipantResponse
-
         # Start conversation via participant added
         await channel.process_webhook(
             create_participant_added_webhook(
@@ -829,9 +523,10 @@ class TestChatChannel:
             )
         )
 
-        # Mock agent participant registered at the channel's agent_address so
-        # the lazy-create matcher picks it up instead of creating a new one.
-        mock_agent_participant = ParticipantResponse(
+        # Mock reconcile to return an agent (customer is None for chat —
+        # ChatChannel has reconcile_customer_type=False and identifies the
+        # customer author-driven from the webhook).
+        mock_agent = ParticipantResponse(
             **{  # type: ignore[arg-type]
                 "id": "PA_AGENT",
                 "accountId": "ACtest123",
@@ -848,9 +543,9 @@ class TestChatChannel:
 
         with (
             patch.object(
-                tac.conversation_orchestrator_client,
-                "list_participants",
-                return_value=[mock_agent_participant],
+                channel,
+                "_reconcile_participants",
+                new=AsyncMock(return_value=(mock_agent, None)),
             ),
             patch.object(
                 tac.conversation_orchestrator_client, "create_action"

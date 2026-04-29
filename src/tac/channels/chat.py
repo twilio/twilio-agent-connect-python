@@ -85,7 +85,11 @@ class ChatChannel(MessagingChannel):
     ) -> None:
         """Send chat response using the Conversation Orchestrator Send API.
 
-        Lazily creates an AI_AGENT participant if one doesn't exist yet.
+        Reads the agent and customer participant ids stashed on the session
+        by inbound reconciliation or outbound initiation. Missing ids are a
+        misuse — send_response is only expected to be called after an inbound
+        webhook (COMMUNICATION_CREATED → reconcile) or after
+        `initiate_outbound_conversation`, both of which populate the session.
 
         Args:
             conversation_id: Conversation ID to send response to
@@ -94,24 +98,25 @@ class ChatChannel(MessagingChannel):
 
         Raises:
             TypeError: If response is not a string
+            RuntimeError: If the session, channel_id, or participant ids are missing
         """
         if not isinstance(response, str):
             raise TypeError("Chat channel only supports string responses")
 
         session = self._conversations.get(conversation_id)
-        if not session:
-            self.logger.error(
-                "No active session found",
-                conversation_id=conversation_id,
+        if session is None or not session.author_info or not session.ai_agent_info:
+            raise RuntimeError(
+                "send_response called without a reconciled session for "
+                f"conversation {conversation_id}; wait for an inbound webhook or "
+                "call initiate_outbound_conversation first."
             )
-            return
 
-        if not session.author_info:
-            self.logger.error(
-                "No author info found - no inbound message received yet",
-                conversation_id=conversation_id,
+        customer_participant_id = session.author_info.participant_id
+        agent_participant_id = session.ai_agent_info.participant_id
+        if not customer_participant_id or not agent_participant_id:
+            raise RuntimeError(
+                f"Session for conversation {conversation_id} is missing participant ids."
             )
-            return
 
         # channelId (Chat Channel SID) is required for CHAT delivery — the V1
         # Chat backend uses it to pick the destination thread. Inbound webhooks
@@ -123,32 +128,6 @@ class ChatChannel(MessagingChannel):
                 "this is normally populated by an inbound webhook. Ensure an inbound "
                 "message has been processed before calling send_response, or set "
                 "session.metadata['channel_id'] explicitly in advanced usage."
-            )
-
-        try:
-            participants = await self.tac.conversation_orchestrator_client.list_participants(
-                conversation_id
-            )
-        except Exception as e:
-            self.logger.error(
-                "Failed to list participants",
-                conversation_id=conversation_id,
-                error=str(e),
-            )
-            return
-
-        agent_participant = await self._ensure_agent_participant(
-            conversation_id,
-            existing_participants=participants,
-            agent_address=ParticipantAddress(
-                channel="CHAT",
-                address=self.agent_address,
-                channel_id=chat_channel_sid,
-            ),
-        )
-        if not agent_participant:
-            raise RuntimeError(
-                f"Failed to resolve AI_AGENT participant for conversation {conversation_id}"
             )
 
         # TODO(maestro): Drop `chat_service` here once the Actions API resolves the
@@ -166,12 +145,12 @@ class ChatChannel(MessagingChannel):
                 payload=SendMessageActionPayload(
                     from_=ActionParticipantRef(
                         channel="CHAT",
-                        participant_id=agent_participant.id,
+                        participant_id=agent_participant_id,
                     ),
                     to=[
                         ActionParticipantRef(
                             channel="CHAT",
-                            participant_id=session.author_info.participant_id,
+                            participant_id=customer_participant_id,
                         )
                     ],
                     content=ActionTextContent(text=response),
