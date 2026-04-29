@@ -42,6 +42,7 @@ from tac.models.outbound import (
     InitiateChatConversationOptions,
     InitiateConversationResult,
     InitiateMessagingConversationOptions,
+    InitiateRCSConversationOptions,
     InitiateVoiceConversationOptions,
     InitiateVoiceConversationResult,
 )
@@ -74,6 +75,7 @@ __all__ = [
     "InitiateChatConversationOptions",
     "InitiateConversationResult",
     "InitiateMessagingConversationOptions",
+    "InitiateRCSConversationOptions",
     "InitiateVoiceConversationOptions",
     "InitiateVoiceConversationResult",
     "IntelligenceConfiguration",

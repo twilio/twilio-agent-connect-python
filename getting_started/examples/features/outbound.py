@@ -1,21 +1,25 @@
 """
-Feature: Outbound Conversations (SMS and Voice)
+Feature: Outbound Conversations (SMS, RCS, and Voice)
 
-Demonstrates agent-initiated (outbound) conversations using TAC. Sends an SMS
-or places a voice call, then handles the full conversation loop with the
-OpenAI Agents SDK.
+Demonstrates agent-initiated (outbound) conversations using TAC. Sends an SMS,
+RCS message, or places a voice call, then handles the full conversation loop with
+the OpenAI Agents SDK.
 
 Usage:
     python outbound.py --to +16505551234 --channel sms --message "Hello!"
+    python outbound.py --to rcs:+16505551234 --channel rcs --message "Hello!"
+    python outbound.py --to rcs:+16505551234 --channel rcs --message "Hello!" --from rcs:my_agent
     python outbound.py --to +16505551234 --channel voice
     python outbound.py --to +16505551234 --channel voice --welcome-greeting "Hi there!"
 
 Requires ``OPENAI_API_KEY`` in addition to the usual TAC env vars.
 For voice calls, ``TWILIO_VOICE_PUBLIC_DOMAIN`` must also be set (e.g. via ngrok).
+For RCS, either ``TWILIO_RCS_AGENT_ID`` must be set OR ``--from`` flag must be provided.
 """
 
 import argparse
 import asyncio
+import os
 import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -26,10 +30,12 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 
 from tac import TAC, TACConfig
+from tac.channels.rcs import RCSChannel, RCSChannelConfig
 from tac.channels.sms import SMSChannel, SMSChannelConfig
 from tac.channels.voice import VoiceChannel, VoiceChannelConfig
 from tac.models.outbound import (
     InitiateMessagingConversationOptions,
+    InitiateRCSConversationOptions,
     InitiateVoiceConversationOptions,
 )
 from tac.models.session import ConversationSession
@@ -43,11 +49,14 @@ set_tracing_disabled(True)
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Outbound conversations with TAC")
-    parser.add_argument("--to", required=True, help="Destination phone number")
+    parser.add_argument("--to", required=True, help="Destination phone number or RCS address")
     parser.add_argument(
-        "--channel", required=True, choices=["sms", "voice"], help="Channel (sms or voice)"
+        "--channel",
+        required=True,
+        choices=["sms", "rcs", "voice"],
+        help="Channel (sms, rcs, or voice)",
     )
-    parser.add_argument("--message", help="Initial message (required for SMS)")
+    parser.add_argument("--message", help="Initial message (required for SMS and RCS)")
     parser.add_argument("--from", dest="from_", help="Optional sender address override")
     parser.add_argument("--welcome-greeting", help="Optional voice welcome greeting")
     return parser.parse_args()
@@ -66,6 +75,13 @@ SYSTEM_INSTRUCTIONS = (
 tac = TAC(config=TACConfig.from_env())
 voice_channel = VoiceChannel(tac, config=VoiceChannelConfig(auto_retrieve_memory=True))
 sms_channel = SMSChannel(tac, config=SMSChannelConfig(auto_retrieve_memory=True))
+rcs_channel = RCSChannel(
+    tac,
+    config=RCSChannelConfig(
+        agent_address=os.environ.get("TWILIO_RCS_AGENT_ID", "rcs:default_agent"),
+        auto_retrieve_memory=True,
+    ),
+)
 
 conversation_history: dict[str, list[Any]] = {}
 
@@ -109,6 +125,14 @@ async def initiate_outbound(args: argparse.Namespace) -> None:
             print(f"[{sms_result.conversation_id}] Agent: {args.message}")
             print("\nWaiting for replies... (Ctrl+C to exit)\n")
 
+        elif args.channel == "rcs":
+            rcs_result = await rcs_channel.initiate_outbound_conversation(
+                InitiateRCSConversationOptions(to=args.to, from_=args.from_, message=args.message)
+            )
+            print(f"RCS message sent to {args.to} (conversation: {rcs_result.conversation_id})")
+            print(f"[{rcs_result.conversation_id}] Agent: {args.message}")
+            print("\nWaiting for replies... (Ctrl+C to exit)\n")
+
         elif args.channel == "voice":
             server_config = TACServerConfig.from_env()
             public_domain = server_config.public_domain
@@ -136,8 +160,8 @@ async def initiate_outbound(args: argparse.Namespace) -> None:
 if __name__ == "__main__":
     args = parse_args()
 
-    if args.channel == "sms" and not args.message:
-        print("--message is required for SMS channel.")
+    if args.channel in ("sms", "rcs") and not args.message:
+        print(f"--message is required for {args.channel.upper()} channel.")
         sys.exit(1)
 
     @asynccontextmanager
@@ -150,7 +174,7 @@ if __name__ == "__main__":
     server = TACFastAPIServer(
         tac=tac,
         voice_channel=voice_channel,
-        messaging_channels=[sms_channel],
+        messaging_channels=[sms_channel, rcs_channel],
         app=app,
     )
 

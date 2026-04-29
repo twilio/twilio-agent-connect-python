@@ -54,6 +54,9 @@ Production-ready examples using partner SDK adapters:
 
 - **`voice_streaming.py`**: Stream LLM responses token-by-token for ~40-50% faster time-to-first-audio
 - **`handoff.py`**: Hand the conversation off to a human agent via a Twilio Studio Flow (works on voice and SMS)
+- **`rcs.py`**: RCS (Rich Communication Services) channel with automatic memory retrieval
+- **`outbound.py`**: Agent-initiated outbound conversations via SMS, RCS, or Voice channels
+- **`chat/`**: Twilio Conversations (Chat) channel examples
 
 ## Step 3: Run an Example
 
@@ -113,8 +116,10 @@ See `examples/.env.example` for all available configuration options. Key variabl
 ### Optional (OpenAI Example)
 - `OPENAI_API_KEY`: Your OpenAI API key (only needed to run OpenAI examples)
 
-### Optional (Handoff Example)
+### Optional (Channel-Specific)
 - `TWILIO_STUDIO_HANDOFF_FLOW_SID`: Studio Flow SID used by `create_studio_handoff_tool` (required for `features/handoff.py`)
+- `TWILIO_RCS_AGENT_ID`: RCS agent address (required for `features/rcs.py`)
+- `TWILIO_CONVERSATIONS_SERVICE_SID`: Conversations Service SID (required for Chat channel examples)
 
 ## Next Steps
 

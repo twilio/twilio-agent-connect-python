@@ -8,7 +8,7 @@ from tac.models.session import ConversationSession
 
 
 class InitiateMessagingConversationOptions(BaseModel):
-    """Options for initiating an outbound SMS or Chat conversation."""
+    """Options for initiating an outbound SMS conversation."""
 
     to: str = Field(..., min_length=1)
     from_: str | None = Field(default=None, alias="from")
@@ -16,6 +16,16 @@ class InitiateMessagingConversationOptions(BaseModel):
     metadata: dict[str, Any] | None = Field(default=None)
 
     model_config = {"populate_by_name": True}
+
+
+class InitiateRCSConversationOptions(InitiateMessagingConversationOptions):
+    """Options for initiating an outbound RCS conversation.
+
+    Inherits from InitiateMessagingConversationOptions. RCS uses the same
+    base fields (to, from_, message, metadata) without additional requirements.
+    """
+
+    pass
 
 
 class InitiateChatConversationOptions(InitiateMessagingConversationOptions):
