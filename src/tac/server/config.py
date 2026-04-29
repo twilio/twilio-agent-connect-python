@@ -22,15 +22,11 @@ class TACServerConfig(BaseModel):
         description="Initial greeting message for callers",
     )
 
-    messaging_webhook_path: str = Field(
-        default="/webhook", description="Path for messaging webhook endpoint"
+    conversation_webhook_path: str = Field(
+        default="/webhook", description="Path for conversation webhook endpoint (for all channels)"
     )
     twiml_path: str = Field(default="/twiml", description="Path for TwiML generation endpoint")
     websocket_path: str = Field(default="/ws", description="Path for voice WebSocket endpoint")
-    conversation_relay_callback_path: str = Field(
-        default="/conversation-relay-callback",
-        description="Path for ConversationRelay callback endpoint",
-    )
     cintel_webhook_path: str | None = Field(
         default=None,
         description="Path for Conversation Intelligence webhook endpoint. "

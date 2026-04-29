@@ -1,14 +1,20 @@
 """
-Example: Using OpenAI Responses API with TAC Memory Injection
+Example: Using OpenAI Chat Completions API with TAC Memory Injection
 
-Demonstrates how to use with_tac_memory with the Responses API.
-For the Chat Completions API, see chat_completions.py.
+Demonstrates how to use with_tac_memory with the Chat Completions API.
+For the Responses API, see responses_api.py.
 """
 
 import os
 
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
+from openai.types.chat import (
+    ChatCompletionAssistantMessageParam,
+    ChatCompletionMessageParam,
+    ChatCompletionSystemMessageParam,
+    ChatCompletionUserMessageParam,
+)
 
 from tac import TAC, TACConfig
 from tac.adapters.openai import with_tac_memory
@@ -24,27 +30,27 @@ load_dotenv()
 logger = get_logger(__name__)
 
 # Initialize TAC with configuration from environment variables
-# TAC handles conversation orchestration and optional memory retrieval
 tac = TAC(config=TACConfig.from_env())
 
 # Create channel handlers for Voice and SMS
-# Channels process Twilio webhooks and manage conversation lifecycle
 voice_channel = VoiceChannel(tac, config=VoiceChannelConfig(auto_retrieve_memory=True))
 sms_channel = SMSChannel(tac, config=SMSChannelConfig(auto_retrieve_memory=True))
 
-# Initialize your LLM client (OpenAI in this example)
+# Initialize OpenAI client
 openai_client = AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
 # Store conversation history per conversation
-# This maintains context across multiple turns in a conversation
-conversation_history: dict[str, list[dict[str, str]]] = {}
+conversation_history: dict[str, list[ChatCompletionMessageParam]] = {}
 
-SYSTEM_INSTRUCTIONS = (
-    "You are a customer service agent speaking with a user over voice or SMS. "
-    "Keep responses short and conversational — a sentence or two. "
-    "Do not use markdown, asterisks, bullets, or emojis; your words will be "
-    "spoken aloud or sent as plain text."
-)
+SYSTEM_MESSAGE: ChatCompletionSystemMessageParam = {
+    "role": "system",
+    "content": (
+        "You are a customer service agent speaking with a user over voice or SMS. "
+        "Keep responses short and conversational — a sentence or two. "
+        "Do not use markdown, asterisks, bullets, or emojis; your words will be "
+        "spoken aloud or sent as plain text."
+    ),
+}
 
 
 async def handle_message_ready(
@@ -55,7 +61,7 @@ async def handle_message_ready(
     """
     Callback invoked when a message is ready to be processed.
 
-    This example uses the Responses API with automatic memory injection.
+    This example uses the Chat Completions API with automatic memory injection.
 
     Args:
         user_message: The customer's message text
@@ -70,26 +76,30 @@ async def handle_message_ready(
     try:
         # Initialize conversation history for new conversations
         if conv_id not in conversation_history:
-            conversation_history[conv_id] = []
+            conversation_history[conv_id] = [SYSTEM_MESSAGE]
 
         # Add user message to conversation history
-        conversation_history[conv_id].append({"role": "user", "content": user_message})
+        user_msg: ChatCompletionUserMessageParam = {"role": "user", "content": user_message}
+        conversation_history[conv_id].append(user_msg)
 
         # Wrap OpenAI client with TAC adapter for automatic memory injection
-        # The adapter prepends memory context to the instructions parameter
+        # The adapter injects memory as a system message at the start of the messages array
         client = with_tac_memory(openai_client, memory_response, context)
 
-        # Call OpenAI Responses API - memory is automatically injected
-        response = await client.responses.create(
+        # Call OpenAI Chat Completions API - memory is automatically injected
+        response = await client.chat.completions.create(
             model="gpt-5.4-mini",
-            instructions=SYSTEM_INSTRUCTIONS,
-            input=conversation_history[conv_id],
+            messages=conversation_history[conv_id],
         )
 
-        llm_response = str(response.output_text)
+        llm_response = response.choices[0].message.content or ""
 
         # Save assistant response to conversation history
-        conversation_history[conv_id].append({"role": "assistant", "content": llm_response})
+        assistant_msg: ChatCompletionAssistantMessageParam = {
+            "role": "assistant",
+            "content": llm_response,
+        }
+        conversation_history[conv_id].append(assistant_msg)
 
         return llm_response
 
@@ -99,15 +109,13 @@ async def handle_message_ready(
 
 
 # Register the message handler callback
-# TAC will invoke this function whenever a message needs processing
 tac.on_message_ready(handle_message_ready)
 
 if __name__ == "__main__":
     # TACFastAPIServer creates a FastAPI app with all required endpoints:
     # - /twiml: Voice call webhook (returns TwiML with ConversationRelay)
     # - /ws: WebSocket endpoint for Voice channel
-    # - /webhook: SMS webhook endpoint
-    # - /conversation-relay-callback: Voice status callback
+    # - /webhook: Conversation webhook for all channels
     server = TACFastAPIServer(
         tac=tac, voice_channel=voice_channel, messaging_channels=[sms_channel]
     )

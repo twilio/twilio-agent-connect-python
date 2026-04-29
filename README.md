@@ -1,13 +1,34 @@
-# Twilio Agent Connect (TAC)
+<div align="center">
+  <div>
+    <img src="logo.svg" alt="TAC Logo" width="120" height="120">
+  </div>
 
-Twilio Agent Connect (TAC) is a powerful Python library designed to simplify the development of intelligent,
-context-aware applications using Twilio's communication technologies. TAC provides seamless integration with Twilio's
-Memory Store and Conversation Configuration, enabling you to build LLM-powered agents with persistent memory and conversation context.
+  <h1>
+    Twilio Agent Connect
+  </h1>
 
-> [!NOTE]
-> Looking for the JavaScript/TypeScript version? Check out [TAC SDK JS/TS](https://github.com/twilio-innovation/twilio-agent-connect-typescript).
+  <h2>
+    A powerful SDK for building intelligent, context-aware AI agents with Twilio's communication technologies.
+  </h2>
 
-Explore the [getting_started](getting_started) directory to see the SDK in action.
+  <div align="center">
+    <a href="https://github.com/twilio-innovation/twilio-agent-connect-python"><img alt="Python SDK" src="https://img.shields.io/badge/Python-3.10+-3776AB.svg"/></a>
+    <a href="https://github.com/twilio-innovation/twilio-agent-connect-typescript"><img alt="TypeScript SDK" src="https://img.shields.io/badge/TypeScript-5.0+-3178C6.svg"/></a>
+    <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache%202.0-green.svg"/></a>
+    <a href="https://www.twilio.com/docs/platform/tac/quickstart"><img alt="Getting Started" src="https://img.shields.io/badge/Getting%20Started-Quickstart-F22F46.svg"/></a>
+  </div>
+  
+  <p>
+    <a href="https://www.twilio.com/docs/platform/tac/overview">Documentation</a>
+    ◆ <a href="https://github.com/twilio-innovation/twilio-agent-connect-python">Python SDK</a>
+    ◆ <a href="https://github.com/twilio-innovation/twilio-agent-connect-typescript">TypeScript SDK</a>
+    ◆ <a href="getting_started/examples">Examples</a>
+  </p>
+</div>
+
+Seamlessly integrate with Twilio's Memory Store and Conversation Orchestrator to build LLM-powered agents with persistent memory and conversation context.
+
+---
 
 ## Key Features
 
@@ -140,30 +161,6 @@ TACFastAPIServer(tac=tac, voice_channel=voice_channel, messaging_channels=[sms_c
 
 For configuration details and environment variables, see the [getting started guide](getting_started/README.md).
 
-### Customizing the Server
-
-`TACFastAPIServer` exposes its underlying FastAPI app as `server.app` so you can add middleware, exception handlers, or extra routes (e.g. a health check for your load balancer):
-
-```python
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-
-# Optional: pass your own FastAPI instance to customize title, lifespan, etc.
-app = FastAPI(title="My TAC App", version="1.0.0")
-app.add_middleware(CORSMiddleware, allow_origins=["*"])
-
-server = TACFastAPIServer(
-    tac=tac, voice_channel=voice_channel, messaging_channels=[sms_channel], app=app
-)
-
-# Add routes alongside TAC's voice/messaging/CI webhooks
-@server.app.get("/health")
-async def health() -> dict[str, str]:
-    return {"status": "ok"}
-
-server.start()
-```
-
 ## How It Works
 
 TAC simplifies building AI agents by handling the integration between Twilio's communication channels and your LLM:
@@ -182,7 +179,7 @@ For detailed architecture and advanced usage, see [CLAUDE.md](CLAUDE.md).
 
 **Examples & Guides:**
 - **[Getting Started Guide](getting_started/)** - Setup wizard, examples, and comprehensive documentation
-- **[OpenAI SDK Example](getting_started/examples/openai/)** - Complete multi-channel example with Voice and SMS
+- **[Partner SDK Examples](getting_started/examples/partners/)** - OpenAI Chat Completions and Responses API examples
 - More examples coming soon
 
 **Documentation:**

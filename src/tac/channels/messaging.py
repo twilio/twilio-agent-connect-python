@@ -1,7 +1,6 @@
 """MessagingChannel base class for messaging channels (SMS, Chat)."""
 
 from abc import abstractmethod
-from collections import OrderedDict
 from collections.abc import AsyncGenerator, Callable
 from typing import Any
 
@@ -77,9 +76,9 @@ class MessagingChannel(BaseChannel):
         dedup_capacity: int = 10000,
         auto_retrieve_memory: bool = False,
     ):
-        super().__init__(tac, auto_retrieve_memory=auto_retrieve_memory)
-        self._processed_tokens: OrderedDict[str, bool] = OrderedDict()
-        self._max_tracked_tokens = dedup_capacity
+        super().__init__(
+            tac, auto_retrieve_memory=auto_retrieve_memory, dedup_capacity=dedup_capacity
+        )
 
     @abstractmethod
     def is_default_agent_address(self, author_address: str) -> bool:
@@ -162,52 +161,6 @@ class MessagingChannel(BaseChannel):
     ) -> None:
         pass
 
-    def _is_duplicate_webhook(self, idempotency_token: str) -> bool:
-        """Check if a webhook has already been processed using Twilio's idempotency token.
-
-        Uses a sliding window approach with fixed capacity to track tokens.
-
-        Args:
-            idempotency_token: Twilio's i-twilio-idempotency-token header value
-
-        Returns:
-            True if the webhook has already been processed
-        """
-        if idempotency_token in self._processed_tokens:
-            return True
-
-        if len(self._processed_tokens) >= self._max_tracked_tokens:
-            self._processed_tokens.popitem(last=False)
-
-        self._processed_tokens[idempotency_token] = True
-        return False
-
-    def _is_event_for_this_channel(self, webhook_data: dict[str, Any]) -> bool:
-        """Self-filtering: check if webhook event belongs to this channel.
-
-        For COMMUNICATION_CREATED: require author.channel matches this channel type.
-        For CONVERSATION_UPDATED: only process if conversation is tracked locally.
-        Other events pass through.
-
-        Callers must ensure `webhook_data["data"]` is a dict before invoking.
-        """
-        event_type = webhook_data.get("eventType")
-        event_data = webhook_data["data"]
-
-        if event_type == "COMMUNICATION_CREATED":
-            author = event_data.get("author")
-            author_channel = author.get("channel") if isinstance(author, dict) else None
-            if not author_channel:
-                return False
-            return bool(author_channel == self.get_channel_type_upper())
-
-        if event_type == "CONVERSATION_UPDATED":
-            conv_id = event_data.get("id")
-            if conv_id and conv_id not in self._conversations:
-                return False
-
-        return True
-
     async def process_webhook(
         self, webhook_data: dict[str, Any], idempotency_token: str | None = None
     ) -> None:
@@ -218,10 +171,17 @@ class MessagingChannel(BaseChannel):
         - COMMUNICATION_CREATED: Process incoming messages from customers
         - CONVERSATION_UPDATED: Clean up when conversation is closed
 
+        Note: Conversation tracking uses instance-local memory. In multi-instance
+        deployments, webhooks may route to a different instance, preventing cleanup.
+        See CLAUDE.md for horizontal scaling considerations.
+
         Args:
             webhook_data: Raw webhook event data from Twilio
             idempotency_token: Optional Twilio idempotency token from request headers
         """
+        if not self._is_event_for_this_channel(webhook_data):
+            return
+
         if idempotency_token:
             if self._is_duplicate_webhook(idempotency_token):
                 return
@@ -348,14 +308,15 @@ class MessagingChannel(BaseChannel):
         """
         conversation_data = ConversationResponse.model_validate(event_data)
         conv_id = conversation_data.id
+        status = conversation_data.status
 
         if (
             conversation_data.configuration_id == self.tac.config.conversation_configuration_id
-            and conversation_data.status == "CLOSED"
-            and conv_id in self._conversations
-            and self._conversations[conv_id].channel == self.get_channel_name()
+            and status == "CLOSED"
         ):
-            await self._end_conversation(conv_id)
+            session = self._conversations.get(conv_id)
+            if session and session.channel == self.get_channel_name():
+                await self._end_conversation(conv_id)
 
     async def _initiate_messaging_conversation(
         self,

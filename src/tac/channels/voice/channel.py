@@ -433,9 +433,47 @@ class VoiceChannel(BaseChannel):
         except Exception as e:
             self.logger.error(f"Failed to handle interrupt: {str(e)}")
 
-    # todo: voice does not support webhooks yet
-    async def process_webhook(self, webhook_data: dict[str, Any]) -> None:
-        pass
+    async def process_webhook(
+        self, webhook_data: dict[str, Any], idempotency_token: str | None = None
+    ) -> None:
+        """Process conversation webhooks for cleanup.
+
+        Voice channel only processes CONVERSATION_UPDATED events with CLOSED status
+        to clean up local session state. All other events are ignored.
+
+        Note: Conversation tracking uses instance-local memory. In multi-instance
+        deployments, webhooks may route to a different instance, preventing cleanup.
+        See CLAUDE.md for horizontal scaling considerations.
+
+        Args:
+            webhook_data: Raw webhook event data from Twilio
+            idempotency_token: Optional Twilio idempotency token from request headers
+        """
+        if not self._is_event_for_this_channel(webhook_data):
+            return
+
+        if idempotency_token:
+            if self._is_duplicate_webhook(idempotency_token):
+                return
+
+        event_type = webhook_data.get("eventType")
+        event_data = webhook_data.get("data")
+
+        if not isinstance(event_data, dict):
+            self.logger.warning(
+                "Webhook missing or malformed data field, skipping",
+                event_type=event_type,
+            )
+            return
+
+        if event_type == "CONVERSATION_UPDATED":
+            conv_id = event_data.get("id")
+            status = event_data.get("status")
+
+            if status == "CLOSED" and conv_id:
+                session = self._conversations.get(conv_id)
+                if session and session.channel == self.get_channel_name():
+                    await self._end_conversation(conv_id)
 
     async def send_response(
         self,
@@ -623,7 +661,11 @@ class VoiceChannel(BaseChannel):
 
     async def _cleanup_connection(self, conv_id: str) -> None:
         """
-        Clean up all resources for a conversation (WebSocket, session, conversation state).
+        Clean up WebSocket and session resources when connection closes.
+
+        Note: Does NOT clean up conversation state. The conversation remains tracked
+        in self._conversations until we receive CONVERSATION_UPDATED webhook with
+        CLOSED status from Maestro.
 
         Args:
             conv_id: Conversation ID
@@ -639,5 +681,7 @@ class VoiceChannel(BaseChannel):
             await session_state.cancel_stream_task()
             self.session_manager.remove_session(conv_id)
 
-        # Clean up conversation state from BaseChannel
-        await self._end_conversation(conv_id)
+        self.logger.debug(
+            "Cleaned up WebSocket and session resources",
+            conversation_id=conv_id,
+        )

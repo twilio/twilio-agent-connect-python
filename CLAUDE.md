@@ -56,6 +56,7 @@ Tests are in `tests/` — one test file per module (e.g., `test_tac.py`, `test_s
 - **Memory auto-init**: Memory client is always initialized from Conversation Orchestrator configuration's `memory_store_id`
 - **Auth**: All API clients use HTTP Basic Auth (API Key as username, API Token as password)
 - **BaseAPIClient**: All API clients (ConversationClient, MemoryClient, KnowledgeClient) inherit from `BaseAPIClient`, which provides shared HTTP client configuration, authentication, and User-Agent header management following Twilio SDK conventions
+- **Horizontal scaling limitation**: Channels track active conversations in instance-local memory (`self._conversations`). Works perfectly for single-instance deployments. In multi-instance deployments behind a load balancer, webhooks may route to a different instance than the one that handled the connection/message, preventing proper conversation cleanup and causing memory leaks. Recommended solutions: sticky sessions (route by conversation_id) or shared state store (Redis/database).
 
 ## OpenAI Adapter
 

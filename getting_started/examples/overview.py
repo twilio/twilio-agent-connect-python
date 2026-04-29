@@ -10,7 +10,7 @@ Key Concepts:
 3. Inject the formatted prompt into your agent's system prompt or context
 4. Works with any LLM or agent framework
 
-For SDK-specific examples with more detail, see the openai/ directory.
+For SDK-specific examples with more detail, see the `partners/` directory.
 """
 
 from typing import Any
@@ -52,7 +52,7 @@ async def handle_message_ready(
     Process incoming messages using manual memory injection.
 
     This pattern works with ANY agent framework:
-    - OpenAI (see openai/ example for adapter)
+    - OpenAI (see partners/ examples for adapter)
     - AWS Bedrock (upcoming example)
     - Azure AI (upcoming example)
     - GCP Vertex AI (upcoming example)
@@ -88,7 +88,7 @@ async def handle_message_ready(
 
         # Now use system_prompt with your agent/LLM
         # Add it to your agent's messages, system parameter, or context
-        # See SDK-specific examples (openai/, aws/, azure/, gcp/) for detailed usage
+        # See SDK-specific examples in partners/ for detailed usage
         #
         # Example usage patterns:
         # - OpenAI: messages=[{"role": "system", "content": system_prompt}, ...]
@@ -132,8 +132,8 @@ if __name__ == "__main__":
     This approach is framework-agnostic and works with ANY agent or LLM.
 
     For automatic injection with zero config, see the OpenAI adapter examples:
-    - `examples/openai/chat_completions.py` - Chat Completions API
-    - `examples/openai/responses_api.py` - Responses API
+    - `examples/partners/openai_chat_completions.py` - Chat Completions API
+    - `examples/partners/openai_responses_api.py` - Responses API
     """
     server = TACFastAPIServer(
         tac=tac, voice_channel=voice_channel, messaging_channels=[sms_channel]

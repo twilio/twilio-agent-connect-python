@@ -42,11 +42,11 @@ Learn the core pattern for manually extracting and injecting TAC memory into **a
 - Uses TAC's official `MemoryPromptBuilder` utility
 - **Start here** to understand how TAC memory works
 
-### `openai/` - OpenAI SDK with Adapter
+### `partners/` - Partner SDK Examples
 
-Production-ready examples using the OpenAI adapter:
-- **`chat_completions.py`**: Chat Completions API
-- **`responses_api.py`**: Responses API
+Production-ready examples using partner SDK adapters:
+- **`openai_chat_completions.py`**: OpenAI Chat Completions API
+- **`openai_responses_api.py`**: OpenAI Responses API
 - Automatic memory injection with `with_tac_memory()`
 - Less boilerplate, more convention-based
 
@@ -76,8 +76,8 @@ walks up from the script's directory, so it'll find
 
 ```bash
 uv run getting_started/examples/overview.py
-uv run getting_started/examples/openai/chat_completions.py
-uv run getting_started/examples/openai/responses_api.py
+uv run getting_started/examples/partners/openai_chat_completions.py
+uv run getting_started/examples/partners/openai_responses_api.py
 uv run getting_started/examples/features/voice_streaming.py
 uv run getting_started/examples/features/handoff.py
 ```
@@ -119,7 +119,7 @@ See `examples/.env.example` for all available configuration options. Key variabl
 ## Next Steps
 
 - Start with `examples/overview.py` to learn the core memory injection pattern
-- Try the `examples/openai/` examples for production-ready OpenAI integration
+- Try the `examples/partners/` examples for production-ready partner SDK integration
 - Customize the agent's behavior by modifying the message handler
 - Add tool calling to enable agent actions beyond text responses
 - Explore the main [README](../README.md) for advanced features

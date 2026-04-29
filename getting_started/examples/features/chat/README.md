@@ -16,7 +16,7 @@ Example demonstrating ChatChannel integration with Twilio Agent Connect. Uses th
 
 3. Start the server:
    ```bash
-   uv run python getting_started/examples/chat/app.py
+   uv run python getting_started/examples/features/chat/app.py
    ```
 
 4. Open http://localhost:8000 in your browser

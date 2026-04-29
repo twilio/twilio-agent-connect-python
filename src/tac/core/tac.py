@@ -5,6 +5,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from tac.context.base import BaseAPIClient, PartnerConnector
 from tac.context.conversation import ConversationClient
 from tac.context.knowledge import KnowledgeClient
 from tac.context.memory import MemoryClient
@@ -292,6 +293,41 @@ class TAC:
             callback: Function to call with conversation context. Supports sync and async.
         """
         self._conversation_ended_callback = callback
+
+    def register_partner_connector(
+        self,
+        connector: PartnerConnector,
+        package_version: str,
+    ) -> None:
+        """Tag outbound Twilio requests with a partner connector identifier.
+
+        Partner packages built on top of TAC (e.g. ``tac_aws``, ``tac_azure``)
+        call this from their connector's ``__init__`` to append a suffix to
+        the User-Agent header of every outbound Twilio request.
+
+        Args:
+            connector: A :class:`PartnerConnector` enum value identifying the
+                partner package and connector.
+            package_version: Version string of the partner package (e.g.
+                ``"0.1.0"``).
+
+        Example:
+            ```python
+            from tac import PartnerConnector
+
+            tac.register_partner_connector(PartnerConnector.AZURE_AGENT_FRAMEWORK, "0.1.0")
+            ```
+        """
+        if not isinstance(connector, PartnerConnector):
+            raise TypeError(
+                f"connector must be a PartnerConnector enum value, got {type(connector).__name__}"
+            )
+        if not package_version:
+            raise ValueError("package_version must be a non-empty string")
+
+        for attr in vars(self).values():
+            if isinstance(attr, BaseAPIClient):
+                attr._set_partner_connector(connector, package_version)
 
     async def trigger_message_ready(
         self,

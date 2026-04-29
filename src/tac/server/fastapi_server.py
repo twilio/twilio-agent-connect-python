@@ -12,8 +12,7 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING, Any
 
-from pydantic import ValidationError
-
+from tac.channels.base import BaseChannel
 from tac.channels.websocket_protocol import WebSocketDisconnectError
 from tac.core.logging import get_logger
 from tac.core.tac import TAC
@@ -107,35 +106,70 @@ class TACFastAPIServer:
         self.config = config or TACServerConfig.from_env()
         self.voice_channel = voice_channel
         self.messaging_channels: list[MessagingChannel] = messaging_channels or []
+
+        # Gather all channels that need webhook processing
+        self.webhook_channels: list[BaseChannel] = []
+        if self.voice_channel:
+            self.webhook_channels.append(self.voice_channel)
+        self.webhook_channels.extend(self.messaging_channels)
+
         self.app: FastAPI = app if app is not None else FastAPI(title="TAC Server")
         self._register_routes(self.app)
 
     def _register_routes(self, app: FastAPI) -> None:
-        """Register TAC routes (messaging, voice, CI) onto the given FastAPI app."""
+        """Register TAC routes (conversation webhook, voice, CI) onto the given FastAPI app."""
         config = self.config
 
-        if self.messaging_channels:
-            channels = self.messaging_channels
+        if self.webhook_channels:
+            channels = self.webhook_channels
 
-            @app.post(config.messaging_webhook_path)
-            async def messaging_webhook(request: Request) -> JSONResponse:
-                """Handle incoming messaging webhooks from Twilio."""
+            async def _process_webhook_with_error_handling(
+                channel: BaseChannel, webhook_data: dict[str, Any], idempotency_token: str | None
+            ) -> None:
+                """Wrapper to handle exceptions in background webhook processing tasks."""
                 try:
-                    form_data = await request.json()
-                    webhook_data = dict(form_data)
+                    await channel.process_webhook(webhook_data, idempotency_token)
+                except Exception as e:
+                    logger.error(
+                        "Error processing webhook in channel",
+                        channel=channel.get_channel_name(),
+                        error=str(e),
+                        exc_info=True,
+                    )
+
+            @app.post(config.conversation_webhook_path)
+            async def conversation_webhook(request: Request) -> JSONResponse:
+                """Handle incoming conversation webhooks from Twilio (all channels)."""
+                try:
+                    webhook_data = await request.json()
+                    if not isinstance(webhook_data, dict):
+                        logger.error(
+                            "Conversation webhook payload must be a JSON object",
+                            payload_type=type(webhook_data).__name__,
+                        )
+                        return JSONResponse(
+                            content={
+                                "status": "error",
+                                "message": "Webhook payload must be a JSON object",
+                            },
+                            status_code=400,
+                        )
                     idempotency_token = request.headers.get("i-twilio-idempotency-token")
                     for channel in channels:
                         asyncio.create_task(
-                            channel.process_webhook(webhook_data, idempotency_token)
+                            _process_webhook_with_error_handling(
+                                channel, webhook_data, idempotency_token
+                            )
                         )
                     return JSONResponse(content={"status": "ok"}, status_code=200)
                 except Exception as e:
-                    logger.error("Messaging webhook error", error=str(e), exc_info=True)
+                    logger.error("Conversation webhook error", error=str(e), exc_info=True)
                     return JSONResponse(
-                        content={"status": "error", "message": str(e)}, status_code=400
+                        content={"status": "error", "message": "Failed to process webhook"},
+                        status_code=400,
                     )
         else:
-            logger.warning("No messaging channels configured — messaging webhook route disabled")
+            logger.warning("No channels configured — conversation webhook route disabled")
 
         if self.voice_channel is not None:
             vc = self.voice_channel
@@ -156,9 +190,7 @@ class TACFastAPIServer:
                         self.tac.config.studio_handoff_flow_sid,
                     )
                 else:
-                    action_url = (
-                        f"https://{config.public_domain}{config.conversation_relay_callback_path}"
-                    )
+                    action_url = None
 
                 twiml = await vc.handle_incoming_call(
                     options={
@@ -174,30 +206,6 @@ class TACFastAPIServer:
                 """Handle voice WebSocket connections."""
                 adapter = FastAPIWebSocketAdapter(websocket)
                 await vc.handle_websocket(adapter)
-
-            @app.post(config.conversation_relay_callback_path)
-            async def conversation_relay_callback(request: Request) -> Response:
-                """Handle ConversationRelay callback webhook from Twilio."""
-                form_data = await request.form()
-                payload_dict = {key: str(value) for key, value in form_data.items()}
-                try:
-                    result = await vc.handle_conversation_relay_callback(payload_dict)
-                    if result is not None:
-                        return Response(content=result, media_type="text/xml")
-                    return Response(content="OK", media_type="text/plain")
-                except ValidationError as e:
-                    logger.error("Invalid callback payload", error=str(e))
-                    return Response(content=str(e), media_type="text/plain", status_code=400)
-                except ValueError as e:
-                    logger.error("Callback error", error=str(e))
-                    return Response(content=str(e), media_type="text/plain", status_code=400)
-                except Exception as e:
-                    logger.error(f"Error handling callback: {e}", exc_info=True)
-                    return Response(
-                        content="Internal Server Error",
-                        media_type="text/plain",
-                        status_code=500,
-                    )
 
         if config.cintel_webhook_path is not None:
             tac = self.tac
