@@ -167,6 +167,8 @@ class TestSMSChannel:
     @pytest.mark.asyncio
     async def test_process_message_auto_initialize(self) -> None:
         """Test processing message auto-initializes conversation if not started."""
+        from tac.models.conversation import ParticipantAddress, ParticipantResponse
+
         tac = TAC(get_test_config())
 
         # Manually create memory_client for this test
@@ -206,7 +208,42 @@ class TestSMSChannel:
         )
         tac.conversation_memory_client.retrieve_memory = AsyncMock(return_value=empty_response)
 
-        await channel.process_webhook(webhook_data)
+        # Mock reconcile to return (agent, customer) so the callback fires.
+        mock_agent = ParticipantResponse(
+            **{  # type: ignore[arg-type]
+                "id": "PA_AGENT",
+                "accountId": "ACtest123",
+                "conversationId": "CH123456",
+                "name": "Test Agent",
+                "type": "AI_AGENT",
+                "addresses": [
+                    ParticipantAddress(channel="SMS", address="+15551234567").model_dump(
+                        by_alias=True
+                    )
+                ],
+            }
+        )
+        mock_customer = ParticipantResponse(
+            **{  # type: ignore[arg-type]
+                "id": "PA_CUSTOMER",
+                "accountId": "ACtest123",
+                "conversationId": "CH123456",
+                "name": "+12345678901",
+                "type": "CUSTOMER",
+                "addresses": [
+                    ParticipantAddress(channel="SMS", address="+12345678901").model_dump(
+                        by_alias=True
+                    )
+                ],
+            }
+        )
+
+        with patch.object(
+            channel,
+            "_reconcile_participants",
+            new=AsyncMock(return_value=(mock_agent, mock_customer)),
+        ):
+            await channel.process_webhook(webhook_data)
 
         # Verify callback was invoked
         assert captured_context is not None
@@ -218,6 +255,8 @@ class TestSMSChannel:
     @pytest.mark.asyncio
     async def test_process_message_with_existing_conversation(self) -> None:
         """Test processing message with pre-existing conversation."""
+        from tac.models.conversation import ParticipantAddress, ParticipantResponse
+
         tac = TAC(get_test_config())
 
         # Manually create memory_client for this test
@@ -251,7 +290,42 @@ class TestSMSChannel:
         )
         tac.conversation_memory_client.retrieve_memory = AsyncMock(return_value=empty_response)
 
-        await channel.process_webhook(message_webhook)
+        # Mock reconcile to return (agent, customer) so the callback fires.
+        mock_agent = ParticipantResponse(
+            **{  # type: ignore[arg-type]
+                "id": "PA_AGENT",
+                "accountId": "ACtest123",
+                "conversationId": "CH123456",
+                "name": "Test Agent",
+                "type": "AI_AGENT",
+                "addresses": [
+                    ParticipantAddress(channel="SMS", address="+15551234567").model_dump(
+                        by_alias=True
+                    )
+                ],
+            }
+        )
+        mock_customer = ParticipantResponse(
+            **{  # type: ignore[arg-type]
+                "id": "PA_CUSTOMER",
+                "accountId": "ACtest123",
+                "conversationId": "CH123456",
+                "name": "+12345678901",
+                "type": "CUSTOMER",
+                "addresses": [
+                    ParticipantAddress(channel="SMS", address="+12345678901").model_dump(
+                        by_alias=True
+                    )
+                ],
+            }
+        )
+
+        with patch.object(
+            channel,
+            "_reconcile_participants",
+            new=AsyncMock(return_value=(mock_agent, mock_customer)),
+        ):
+            await channel.process_webhook(message_webhook)
 
         # Verify memory retrieval was called
         tac.conversation_memory_client.retrieve_memory.assert_called_once()

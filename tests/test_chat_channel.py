@@ -173,6 +173,8 @@ class TestChatChannel:
 
     @pytest.mark.asyncio
     async def test_process_message(self) -> None:
+        from tac.models.conversation import ParticipantAddress, ParticipantResponse
+
         tac = TAC(get_test_config())
         channel = ChatChannel(tac)
         captured_messages: list[str] = []
@@ -189,7 +191,29 @@ class TestChatChannel:
         webhook = create_communication_created_webhook(
             "CH123", "PA_USER", "Hello from chat!", "2025-11-18T00:00:00.000Z"
         )
-        await channel.process_webhook(webhook)
+
+        # Mock reconcile to return an agent (customer is None for chat).
+        mock_agent = ParticipantResponse(
+            **{  # type: ignore[arg-type]
+                "id": "PA_AGENT",
+                "accountId": "ACtest123",
+                "conversationId": "CH123",
+                "name": "Test Agent",
+                "type": "AI_AGENT",
+                "addresses": [
+                    ParticipantAddress(
+                        channel="CHAT", address="ai-assistant", channel_id="CH_CHAT_SID_123"
+                    ).model_dump(by_alias=True)
+                ],
+            }
+        )
+
+        with patch.object(
+            channel,
+            "_reconcile_participants",
+            new=AsyncMock(return_value=(mock_agent, None)),
+        ):
+            await channel.process_webhook(webhook)
 
         assert len(captured_messages) == 1
         assert captured_messages[0] == "Hello from chat!"
@@ -425,6 +449,8 @@ class TestChatChannel:
 
     @pytest.mark.asyncio
     async def test_deduplication(self) -> None:
+        from tac.models.conversation import ParticipantAddress, ParticipantResponse
+
         tac = TAC(get_test_config())
         channel = ChatChannel(tac)
         captured: list[str] = []
@@ -435,8 +461,29 @@ class TestChatChannel:
             "CH123", "PA_USER", "Dedup test", "2025-11-18T00:00:00.000Z"
         )
 
-        await channel.process_webhook(webhook, idempotency_token="token_1")
-        await channel.process_webhook(webhook, idempotency_token="token_1")
+        # Mock reconcile to return an agent (customer is None for chat).
+        mock_agent = ParticipantResponse(
+            **{  # type: ignore[arg-type]
+                "id": "PA_AGENT",
+                "accountId": "ACtest123",
+                "conversationId": "CH123",
+                "name": "Test Agent",
+                "type": "AI_AGENT",
+                "addresses": [
+                    ParticipantAddress(
+                        channel="CHAT", address="ai-assistant", channel_id="CH_CHAT_SID_123"
+                    ).model_dump(by_alias=True)
+                ],
+            }
+        )
+
+        with patch.object(
+            channel,
+            "_reconcile_participants",
+            new=AsyncMock(return_value=(mock_agent, None)),
+        ):
+            await channel.process_webhook(webhook, idempotency_token="token_1")
+            await channel.process_webhook(webhook, idempotency_token="token_1")
 
         assert len(captured) == 1
 
@@ -460,6 +507,7 @@ class TestChatChannel:
     @pytest.mark.asyncio
     async def test_auto_retrieve_memory(self) -> None:
         from tac.context.memory import MemoryClient
+        from tac.models.conversation import ParticipantAddress, ParticipantResponse
 
         tac = TAC(get_test_config())
         tac.conversation_memory_client = MemoryClient(
@@ -488,10 +536,31 @@ class TestChatChannel:
         )
         tac.conversation_memory_client.retrieve_memory = AsyncMock(return_value=empty_response)
 
+        # Mock reconcile to return an agent (customer is None for chat).
+        mock_agent = ParticipantResponse(
+            **{  # type: ignore[arg-type]
+                "id": "PA_AGENT",
+                "accountId": "ACtest123",
+                "conversationId": "CH123",
+                "name": "Test Agent",
+                "type": "AI_AGENT",
+                "addresses": [
+                    ParticipantAddress(
+                        channel="CHAT", address="ai-assistant", channel_id="CH_CHAT_SID_123"
+                    ).model_dump(by_alias=True)
+                ],
+            }
+        )
+
         webhook = create_communication_created_webhook(
             "CH123", "PA_USER", "Memory test", "2025-11-18T00:00:02.000Z"
         )
-        await channel.process_webhook(webhook)
+        with patch.object(
+            channel,
+            "_reconcile_participants",
+            new=AsyncMock(return_value=(mock_agent, None)),
+        ):
+            await channel.process_webhook(webhook)
 
         tac.conversation_memory_client.retrieve_memory.assert_called_once()
 

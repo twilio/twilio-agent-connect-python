@@ -271,24 +271,32 @@ class MessagingChannel(BaseChannel):
             session.metadata["channel_id"] = communication_data.channel_id
 
         # Reconcile participant types pre-LLM so v1-bridge's UNKNOWN gets
-        # promoted to CUSTOMER (with a Memora profile attached when possible).
-        # Non-fatal: if Maestro is unavailable we still invoke the callback —
-        # `send_response` re-resolves participants from the live conversation.
+        # promoted to CUSTOMER (with a Memora profile attached when possible)
+        # and to stash both participant ids on the session for send_response.
+        # If reconciliation can't identify both sides, any eventual reply would
+        # fail too — skip the callback so the LLM doesn't waste a turn on an
+        # un-replyable conversation.
         resolved = await self._reconcile_participants(conv_id)
-        if resolved is not None:
-            agent_participant, customer_participant = resolved
-            session.ai_agent_info = AuthorInfo(
-                address=self.get_agent_address(conv_id).address,
-                participant_id=agent_participant.id,
+        if resolved is None:
+            self.logger.warning(
+                "Reconciliation failed; skipping callback for this inbound",
+                conversation_id=conv_id,
             )
-            # When reconcile resolved a customer (SMS path — chat disables
-            # customer reconciliation and uses the author_info captured from
-            # the webhook above), use its authoritative participant id and
-            # lift any resolved profile.
-            if customer_participant is not None and session.author_info is not None:
-                session.author_info.participant_id = customer_participant.id
-                if customer_participant.profile_id and not session.profile_id:
-                    session.profile_id = customer_participant.profile_id
+            return
+
+        agent_participant, customer_participant = resolved
+        session.ai_agent_info = AuthorInfo(
+            address=self.get_agent_address(conv_id).address,
+            participant_id=agent_participant.id,
+        )
+        # When reconcile resolved a customer (SMS path — chat disables
+        # customer reconciliation and uses the author_info captured from
+        # the webhook above), use its authoritative participant id and
+        # lift any resolved profile.
+        if customer_participant is not None and session.author_info is not None:
+            session.author_info.participant_id = customer_participant.id
+            if customer_participant.profile_id and not session.profile_id:
+                session.profile_id = customer_participant.profile_id
 
         memory_response = await self._retrieve_memory_if_enabled(session, message_text, conv_id)
 
