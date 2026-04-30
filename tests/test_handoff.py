@@ -285,6 +285,15 @@ class TestHandoffExecution:
         with pytest.raises(ValueError, match="Conversation Orchestrator"):
             create_studio_handoff_tool(tac, session)
 
+    def test_factory_raises_without_memory_store_id(self) -> None:
+        """Factory rejects TAC with orchestrator but no memory store."""
+        tac = TAC(get_test_config())
+        tac.conversation_memory_client = None
+        session = ConversationSession(conversation_id="conv_123", channel="voice")
+
+        with pytest.raises(ValueError, match="memory store ID"):
+            create_studio_handoff_tool(tac, session)
+
     @pytest.mark.asyncio
     async def test_handoff_digital_delivery_failure_reports_handoff_failed(
         self, monkeypatch: pytest.MonkeyPatch
