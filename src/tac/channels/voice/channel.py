@@ -161,6 +161,14 @@ class VoiceChannel(BaseChannel):
             )
             return
 
+        if payload.account_sid != self.tac.config.account_sid:
+            self.logger.warning(
+                "ConversationRelay callback account_sid mismatch, ignoring",
+                expected=self.tac.config.account_sid,
+                received=payload.account_sid,
+            )
+            return
+
         self.logger.info(
             "ConversationRelay callback received",
             call_sid=payload.call_sid,

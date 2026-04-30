@@ -179,6 +179,28 @@ class TestRelayOnlyMode:
 
     @pytest.mark.no_auto_mock
     @pytest.mark.asyncio
+    async def test_callback_ignores_mismatched_account_sid(self) -> None:
+        """Callback with wrong account_sid is silently ignored."""
+        tac = TAC(relay_only_config())
+        channel = VoiceChannel(tac)
+        channel._start_conversation("CA_relay_mismatch", None)
+
+        payload = ConversationRelayCallbackPayload(
+            CallSid="CA_relay_mismatch",
+            CallStatus="completed",
+            AccountSid="AC_WRONG",
+            From="+15551230000",
+            To="+15551234567",
+            Direction="inbound",
+        ).model_dump(by_alias=True, exclude_none=True)
+        payload = {k: str(v) for k, v in payload.items()}
+
+        await channel.handle_conversation_relay_callback(payload)
+
+        assert "CA_relay_mismatch" in channel._conversations
+
+    @pytest.mark.no_auto_mock
+    @pytest.mark.asyncio
     async def test_interrupt_callback_fires_in_relay_only(self) -> None:
         """on_interrupt callback fires in relay-only mode with session for call_sid."""
         tac = TAC(relay_only_config())
