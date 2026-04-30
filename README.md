@@ -26,7 +26,7 @@
   </p>
 </div>
 
-Seamlessly integrate with Twilio's Memory Store and Conversation Orchestrator to build LLM-powered agents with persistent memory and conversation context.
+Seamlessly integrate with Twilio's Memory Store and Conversation Orchestrator to build LLM-powered agents with persistent memory and conversation context — or run in ConversationRelay-only mode for voice without Conversation Orchestrator.
 
 ---
 
@@ -34,6 +34,7 @@ Seamlessly integrate with Twilio's Memory Store and Conversation Orchestrator to
 
 - **SMS Channel Support**: Built-in webhook handling for Twilio SMS conversations
 - **Voice Channel Support**: WebSocket protocol handling for Twilio Voice with ConversationRelay
+- **ConversationRelay-Only Mode**: Use TAC's voice plumbing (TwiML, WebSocket, callbacks) without Conversation Orchestrator
 - **Memory Management**: Automatic integration with Twilio Memory for persistent user context
 - **Conversation Lifecycle**: Automatic tracking of conversation sessions and state
 - **Type-Safe**: Full type hints and Pydantic models throughout
@@ -180,6 +181,7 @@ For detailed architecture and advanced usage, see [CLAUDE.md](CLAUDE.md).
 **Examples & Guides:**
 - **[Getting Started Guide](getting_started/)** - Setup wizard, examples, and comprehensive documentation
 - **[Partner SDK Examples](getting_started/examples/partners/)** - OpenAI Chat Completions and Responses API examples
+- **[ConversationRelay-Only Mode](getting_started/examples/features/relay_only.py)** - Voice-only without Conversation Orchestrator
 - More examples coming soon
 
 **Documentation:**
