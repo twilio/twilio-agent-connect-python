@@ -81,6 +81,7 @@ uv run getting_started/examples/partners/openai_chat_completions.py
 uv run getting_started/examples/partners/openai_responses_api.py
 uv run getting_started/examples/features/voice_streaming.py
 uv run getting_started/examples/features/handoff.py
+uv run getting_started/examples/features/relay_only.py
 ```
 
 ### Expose Your Server
