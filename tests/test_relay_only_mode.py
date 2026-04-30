@@ -28,6 +28,8 @@ def relay_only_config() -> dict:
     return {
         "account_sid": "AC123",
         "auth_token": "test_token_123",
+        "api_key": "SK123",
+        "api_secret": "test_api_secret",
         "phone_number": "+15551234567",
     }
 
@@ -44,17 +46,6 @@ def orchestrated_config() -> dict:
 
 class TestRelayOnlyMode:
     """Tests for TAC relay-only mode."""
-
-    @pytest.mark.no_auto_mock
-    def test_tac_init_raises_without_api_credentials(self) -> None:
-        """TAC raises when conversation_configuration_id set without api credentials."""
-        config = {
-            **relay_only_config(),
-            "conversation_configuration_id": "conv_configuration_test123",
-        }
-
-        with pytest.raises(ValueError, match="api_key and api_secret are required"):
-            TAC(config)
 
     @pytest.mark.no_auto_mock
     def test_tac_init_without_config_succeeds(self) -> None:

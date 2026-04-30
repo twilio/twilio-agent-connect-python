@@ -116,12 +116,12 @@ class TestTACConfig:
         assert "phone_number" in schema["properties"]
         assert "log_level" in schema["properties"]
 
-        # Check required fields (conversation_configuration_id, api_key, api_secret
-        # are optional to support ConversationRelay-only mode).
+        # Check required fields (conversation_configuration_id is optional
+        # to support ConversationRelay-only mode).
         assert "required" in schema
         required_fields = schema["required"]
-        assert "api_key" not in required_fields
-        assert "api_secret" not in required_fields
+        assert "api_key" in required_fields
+        assert "api_secret" in required_fields
         assert "conversation_configuration_id" not in required_fields
         assert "phone_number" in required_fields
         assert "auth_token" in required_fields
@@ -155,18 +155,20 @@ class TestTACConfig:
         error = exc_info.value
         assert "auth_token" in str(error)
         assert "account_sid" in str(error)
+        assert "api_key" in str(error)
+        assert "api_secret" in str(error)
         assert "phone_number" in str(error)
 
     def test_minimal_relay_only_config(self):
-        """Test that only phone_number + account creds are needed for relay-only mode."""
+        """Test that relay-only mode only requires conversation_configuration_id to be omitted."""
         config = TACConfig(
             account_sid="ACtest123",
             auth_token="test_token_123",
+            api_key="SK123",
+            api_secret="test_api_secret",
             phone_number="+15551234567",
         )
         assert config.phone_number == "+15551234567"
-        assert config.api_key is None
-        assert config.api_secret is None
         assert config.conversation_configuration_id is None
 
     def test_config_with_region(self):

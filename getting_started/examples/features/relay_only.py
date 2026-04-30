@@ -11,7 +11,7 @@ Use this when you want TAC's voice plumbing (TwiML, WebSocket, callbacks) but
 are bringing your own memory/state layer.
 
 Env vars required:
-- TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN
+- TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_API_KEY, TWILIO_API_SECRET
 - TWILIO_PHONE_NUMBER
 - TWILIO_VOICE_PUBLIC_DOMAIN (ngrok or similar)
 - OPENAI_API_KEY

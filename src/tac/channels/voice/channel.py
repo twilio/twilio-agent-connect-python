@@ -87,8 +87,6 @@ class VoiceChannel(BaseChannel):
         if self._twilio_client is None:
             from twilio.rest import Client
 
-            if not self.tac.config.api_key or not self.tac.config.api_secret:
-                raise RuntimeError("Outbound calls require api_key and api_secret in TACConfig.")
             self._twilio_client = Client(
                 self.tac.config.api_key,
                 self.tac.config.api_secret,

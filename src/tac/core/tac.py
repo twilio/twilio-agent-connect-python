@@ -49,12 +49,6 @@ class TAC:
         self.conversations_v1_service_sid: str | None = None
 
         if self.config.conversation_configuration_id:
-            if not self.config.api_key or not self.config.api_secret:
-                raise ValueError(
-                    "api_key and api_secret are required when conversation_configuration_id "
-                    "is set. Omit conversation_configuration_id for ConversationRelay-only mode."
-                )
-
             self.conversation_orchestrator_client = ConversationClient(
                 api_key=self.config.api_key,
                 api_secret=self.config.api_secret,
@@ -107,10 +101,6 @@ class TAC:
 
         self.knowledge_client: KnowledgeClient | None = None
         if self.config.knowledge_base_id:
-            if not self.config.api_key or not self.config.api_secret:
-                raise ValueError(
-                    "api_key and api_secret are required when knowledge_base_id is set."
-                )
             self.knowledge_client = KnowledgeClient(
                 api_key=self.config.api_key,
                 api_secret=self.config.api_secret,
