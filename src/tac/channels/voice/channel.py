@@ -142,14 +142,24 @@ class VoiceChannel(BaseChannel):
     ) -> None:
         """Handle ConversationRelay callback webhook from Twilio.
 
-        In relay-only mode, this is the primary mechanism for cleaning up
-        conversation state when a call ends. In orchestrated mode, conversation
-        lifecycle is managed by CO webhooks, so this is a no-op.
+        In relay-only mode, this is a secondary mechanism for cleaning up
+        conversation state when a call ends (the primary mechanism is websocket
+        disconnect). In orchestrated mode, conversation lifecycle is managed by
+        CO webhooks, so this is a no-op.
 
         Args:
             payload_dict: Raw form data dict from the webhook request.
         """
-        payload = ConversationRelayCallbackPayload(**payload_dict)
+        from pydantic import ValidationError
+
+        try:
+            payload = ConversationRelayCallbackPayload(**payload_dict)
+        except ValidationError:
+            self.logger.warning(
+                "Invalid ConversationRelay callback payload, ignoring",
+                payload_keys=list(payload_dict.keys()),
+            )
+            return
 
         self.logger.info(
             "ConversationRelay callback received",
@@ -169,13 +179,13 @@ class VoiceChannel(BaseChannel):
     ) -> tuple[str, SessionState | None]:
         """Poll CO for the conversation created by ConversationRelay, resolve
         the customer participant, and initialize the local session."""
-        co_client = self.tac.conversation_orchestrator_client
-        if co_client is None:
+        conversation_orchestrator_client = self.tac.conversation_orchestrator_client
+        if conversation_orchestrator_client is None:
             raise RuntimeError("_initialize_conversation called without Conversation Orchestrator")
 
         conversations: list[Any] = []
         for attempt in range(_POLL_ATTEMPTS):
-            conversations = await co_client.list_conversations(
+            conversations = await conversation_orchestrator_client.list_conversations(
                 channel_id=call_sid,
                 status=["ACTIVE"],
             )
@@ -201,7 +211,7 @@ class VoiceChannel(BaseChannel):
         conversation = conversations[0]
         conv_id = conversation.id
 
-        participants = await co_client.list_participants(conv_id)
+        participants = await conversation_orchestrator_client.list_participants(conv_id)
 
         customer_participant = next(
             (p for p in participants if p.type == "CUSTOMER"),
@@ -684,9 +694,10 @@ class VoiceChannel(BaseChannel):
         """
         Clean up WebSocket and session resources when connection closes.
 
-        Note: Does NOT clean up conversation state. The conversation remains tracked
-        in self._conversations until we receive CONVERSATION_UPDATED webhook with
-        CLOSED status from Maestro.
+        In orchestrated mode, the conversation remains tracked in
+        self._conversations until the CONVERSATION_UPDATED/CLOSED webhook
+        arrives from Maestro. In relay-only mode there is no such webhook,
+        so we also end the conversation here.
 
         Args:
             conv_id: Conversation ID
@@ -701,6 +712,9 @@ class VoiceChannel(BaseChannel):
             # Cancel any running task (user hung up, no point continuing)
             await session_state.cancel_stream_task()
             self.session_manager.remove_session(conv_id)
+
+        if not self.tac.is_orchestrator_enabled() and conv_id in self._conversations:
+            await self._end_conversation(conv_id)
 
         self.logger.debug(
             "Cleaned up WebSocket and session resources",
