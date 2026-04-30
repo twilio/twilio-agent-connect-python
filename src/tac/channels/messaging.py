@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 from tac import TAC
 from tac.channels.base import BaseChannel
+from tac.context.conversation import ConversationClient
 from tac.models.conversation import (
     ActionChannelSettings,
     ActionParticipantRef,
@@ -66,6 +67,14 @@ class MessagingChannel(BaseChannel):
         dedup_capacity: int = 10000,
         auto_retrieve_memory: bool = False,
     ):
+        if tac.conversation_orchestrator_client is None:
+            raise ValueError(
+                f"{type(self).__name__} requires Conversation Orchestrator to be configured. "
+                "Set `conversation_configuration_id` on TACConfig to enable messaging channels."
+            )
+        self.conversation_orchestrator_client: ConversationClient = (
+            tac.conversation_orchestrator_client
+        )
         super().__init__(
             tac, auto_retrieve_memory=auto_retrieve_memory, dedup_capacity=dedup_capacity
         )
@@ -111,7 +120,7 @@ class MessagingChannel(BaseChannel):
 
         if author_participant_id:
             try:
-                participants = await self.tac.conversation_orchestrator_client.list_participants(
+                participants = await self.conversation_orchestrator_client.list_participants(
                     conversation_id
                 )
                 author_p = next((p for p in participants if p.id == author_participant_id), None)
@@ -311,7 +320,7 @@ class MessagingChannel(BaseChannel):
             (
                 conversation_id,
                 reused,
-            ) = await self.tac.conversation_orchestrator_client.create_or_reuse_conversation(
+            ) = await self.conversation_orchestrator_client.create_or_reuse_conversation(
                 participants=[
                     ParticipantRequest(
                         type="CUSTOMER",
@@ -336,7 +345,7 @@ class MessagingChannel(BaseChannel):
                 ]
             )
 
-            participants = await self.tac.conversation_orchestrator_client.list_participants(
+            participants = await self.conversation_orchestrator_client.list_participants(
                 conversation_id
             )
 
@@ -395,7 +404,7 @@ class MessagingChannel(BaseChannel):
                     channel_settings=channel_settings,
                 ),
             )
-            await self.tac.conversation_orchestrator_client.create_action(
+            await self.conversation_orchestrator_client.create_action(
                 conversation_id, action_request
             )
 
@@ -411,7 +420,7 @@ class MessagingChannel(BaseChannel):
                 self._conversations.pop(conversation_id, None)
             if conversation_id and not reused:
                 try:
-                    await self.tac.conversation_orchestrator_client.update_conversation(
+                    await self.conversation_orchestrator_client.update_conversation(
                         conversation_id, "CLOSED"
                     )
                 except Exception as close_err:
@@ -456,7 +465,7 @@ class MessagingChannel(BaseChannel):
             address=agent_address.address,
         )
         try:
-            agent = await self.tac.conversation_orchestrator_client.add_participant(
+            agent = await self.conversation_orchestrator_client.add_participant(
                 conversation_id,
                 addresses=[agent_address],
                 participant_type="AI_AGENT",
@@ -478,9 +487,7 @@ class MessagingChannel(BaseChannel):
             )
 
         try:
-            retried = await self.tac.conversation_orchestrator_client.list_participants(
-                conversation_id
-            )
+            retried = await self.conversation_orchestrator_client.list_participants(conversation_id)
         except Exception as e:
             self.logger.error(
                 "Failed to retry listing participants",

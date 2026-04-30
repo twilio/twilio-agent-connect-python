@@ -118,3 +118,24 @@ class TwiMLOptions(BaseModel):
     )
 
     model_config = {"populate_by_name": True}
+
+
+class ConversationRelayCallbackPayload(BaseModel):
+    """Payload received from Twilio ConversationRelay callback webhook.
+
+    Sent via the <Connect action="..."> URL when a call ends or transitions state.
+    Used in relay-only mode to signal conversation completion.
+    """
+
+    account_sid: str = Field(..., alias="AccountSid")
+    call_sid: str = Field(..., alias="CallSid")
+    call_status: str = Field(..., alias="CallStatus")
+    from_number: str = Field(..., alias="From")
+    to_number: str = Field(..., alias="To")
+    direction: str = Field(..., alias="Direction")
+    application_sid: str | None = Field(None, alias="ApplicationSid")
+    session_id: str | None = Field(None, alias="SessionId")
+    session_status: str | None = Field(None, alias="SessionStatus")
+    session_duration: str | None = Field(None, alias="SessionDuration")
+
+    model_config = {"populate_by_name": True}

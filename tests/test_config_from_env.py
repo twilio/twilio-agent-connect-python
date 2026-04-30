@@ -214,13 +214,14 @@ class TestTACConfigFromEnv:
     def test_from_env_missing_conversation_configuration_id(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Test from_env() raises KeyError when
-        TWILIO_CONVERSATION_CONFIGURATION_ID is missing."""
+        """Test from_env() succeeds with conversation_configuration_id=None when
+        TWILIO_CONVERSATION_CONFIGURATION_ID is missing (ConversationRelay-only mode)."""
         self._set_all_env_vars(monkeypatch)
         monkeypatch.delenv("TWILIO_CONVERSATION_CONFIGURATION_ID", raising=False)
 
-        with pytest.raises(KeyError, match="TWILIO_CONVERSATION_CONFIGURATION_ID"):
-            TACConfig.from_env()
+        config = TACConfig.from_env()
+
+        assert config.conversation_configuration_id is None
 
     def test_from_env_missing_account_sid(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test from_env() raises KeyError when TWILIO_ACCOUNT_SID is missing."""
@@ -246,21 +247,23 @@ class TestTACConfigFromEnv:
         with pytest.raises(KeyError, match="TWILIO_PHONE_NUMBER"):
             TACConfig.from_env()
 
-    def test_from_env_missing_api_key(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Test from_env() raises KeyError when TWILIO_API_KEY is missing."""
+    def test_from_env_missing_api_key_returns_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test from_env() returns api_key=None when TWILIO_API_KEY is missing."""
         self._set_all_env_vars(monkeypatch)
         monkeypatch.delenv("TWILIO_API_KEY", raising=False)
 
-        with pytest.raises(KeyError, match="TWILIO_API_KEY"):
-            TACConfig.from_env()
+        config = TACConfig.from_env()
+        assert config.api_key is None
 
-    def test_from_env_missing_api_secret(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Test from_env() raises KeyError when TWILIO_API_SECRET is missing."""
+    def test_from_env_missing_api_secret_returns_none(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test from_env() returns api_secret=None when TWILIO_API_SECRET is missing."""
         self._set_all_env_vars(monkeypatch)
         monkeypatch.delenv("TWILIO_API_SECRET", raising=False)
 
-        with pytest.raises(KeyError, match="TWILIO_API_SECRET"):
-            TACConfig.from_env()
+        config = TACConfig.from_env()
+        assert config.api_secret is None
 
     def test_from_env_missing_multiple_vars(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test from_env() raises KeyError when environment variables are missing."""

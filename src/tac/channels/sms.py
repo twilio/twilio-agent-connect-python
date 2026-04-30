@@ -93,7 +93,7 @@ class SMSChannel(MessagingChannel):
             raise TypeError("SMS channel only supports string responses")
 
         try:
-            participants = await self.tac.conversation_orchestrator_client.list_participants(
+            participants = await self.conversation_orchestrator_client.list_participants(
                 conversation_id
             )
         except Exception as e:
@@ -167,7 +167,7 @@ class SMSChannel(MessagingChannel):
                 ),
             )
 
-            await self.tac.conversation_orchestrator_client.create_action(
+            await self.conversation_orchestrator_client.create_action(
                 conversation_id, action_request
             )
 

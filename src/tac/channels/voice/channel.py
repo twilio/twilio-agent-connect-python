@@ -15,6 +15,7 @@ from tac.core.tac import TAC
 from tac.models.outbound import InitiateVoiceConversationOptions, InitiateVoiceConversationResult
 from tac.models.session import AuthorInfo
 from tac.models.voice import (
+    ConversationRelayCallbackPayload,
     InterruptMessage,
     PromptMessage,
     SetupMessage,
@@ -77,6 +78,8 @@ class VoiceChannel(BaseChannel):
         if self._twilio_client is None:
             from twilio.rest import Client
 
+            if not self.tac.config.api_key or not self.tac.config.api_secret:
+                raise RuntimeError("Outbound calls require api_key and api_secret in TACConfig.")
             self._twilio_client = Client(
                 self.tac.config.api_key,
                 self.tac.config.api_secret,
@@ -133,6 +136,31 @@ class VoiceChannel(BaseChannel):
             )
         )
 
+    async def handle_conversation_relay_callback(
+        self,
+        payload_dict: dict[str, str],
+    ) -> None:
+        """Handle ConversationRelay callback webhook from Twilio.
+
+        In relay-only mode, this is the primary mechanism for cleaning up
+        conversation state when a call ends. In orchestrated mode, conversation
+        lifecycle is managed by CO webhooks, so this is a no-op.
+
+        Args:
+            payload_dict: Raw form data dict from the webhook request.
+        """
+        payload = ConversationRelayCallbackPayload(**payload_dict)
+
+        self.logger.info(
+            "ConversationRelay callback received",
+            call_sid=payload.call_sid,
+            call_status=payload.call_status,
+        )
+
+        if payload.call_status == "completed" and not self.tac.is_orchestrator_enabled():
+            if payload.call_sid in self._conversations:
+                await self._end_conversation(payload.call_sid)
+
     async def _initialize_conversation(
         self,
         call_sid: str,
@@ -141,9 +169,13 @@ class VoiceChannel(BaseChannel):
     ) -> tuple[str, SessionState | None]:
         """Poll CO for the conversation created by ConversationRelay, resolve
         the customer participant, and initialize the local session."""
+        co_client = self.tac.conversation_orchestrator_client
+        if co_client is None:
+            raise RuntimeError("_initialize_conversation called without Conversation Orchestrator")
+
         conversations: list[Any] = []
         for attempt in range(_POLL_ATTEMPTS):
-            conversations = await self.tac.conversation_orchestrator_client.list_conversations(
+            conversations = await co_client.list_conversations(
                 channel_id=call_sid,
                 status=["ACTIVE"],
             )
@@ -169,7 +201,7 @@ class VoiceChannel(BaseChannel):
         conversation = conversations[0]
         conv_id = conversation.id
 
-        participants = await self.tac.conversation_orchestrator_client.list_participants(conv_id)
+        participants = await co_client.list_participants(conv_id)
 
         customer_participant = next(
             (p for p in participants if p.type == "CUSTOMER"),
@@ -239,9 +271,30 @@ class VoiceChannel(BaseChannel):
 
                     if msg_type == "prompt":
                         if not conv_id and call_sid:
-                            conv_id, session_state = await self._initialize_conversation(
-                                call_sid, setup_msg, websocket
-                            )
+                            if self.tac.is_orchestrator_enabled():
+                                conv_id, session_state = await self._initialize_conversation(
+                                    call_sid, setup_msg, websocket
+                                )
+                            else:
+                                conv_id = call_sid
+                                self._websocket_manager.add_websocket(conv_id, websocket)
+                                self._start_conversation(conv_id, profile_id=None)
+
+                                from_number = (
+                                    setup_msg.to_number
+                                    if setup_msg.direction
+                                    and setup_msg.direction.upper() == "OUTBOUND"
+                                    else setup_msg.from_number
+                                )
+                                if from_number:
+                                    self._conversations[conv_id].author_info = AuthorInfo(
+                                        address=from_number,
+                                    )
+
+                                if self.session_manager is not None:
+                                    session_state = self.session_manager.get_or_create_session(
+                                        conv_id
+                                    )
 
                         if conv_id:
                             await self._handle_prompt_async(conv_id, data, session_state)

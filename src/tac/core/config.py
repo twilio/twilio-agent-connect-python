@@ -177,7 +177,15 @@ class TwilioMemoryConfig(BaseModel):
 class TACConfig(BaseModel):
     """Configuration model for Twilio Agent Connect settings."""
 
-    conversation_configuration_id: str = Field(description="Twilio Conversation Configuration ID")
+    conversation_configuration_id: str | None = Field(
+        default=None,
+        description=(
+            "Twilio Conversation Configuration ID. When omitted, TAC runs in "
+            "ConversationRelay-only mode: only the Voice channel is usable, "
+            "messaging channels cannot be constructed, and "
+            "TAC.retrieve_memory() returns an empty TACMemoryResponse."
+        ),
+    )
 
     memory_config: TwilioMemoryConfig = Field(
         default_factory=TwilioMemoryConfig,
@@ -188,8 +196,14 @@ class TACConfig(BaseModel):
 
     account_sid: str = Field(description="Twilio Account SID")
     auth_token: str = Field(description="Twilio Auth Token")
-    api_key: str = Field(description="Twilio API Key SID (starts with SK)")
-    api_secret: str = Field(description="Twilio API Key Secret")
+    api_key: str | None = Field(
+        default=None,
+        description="Twilio API Key SID (starts with SK)",
+    )
+    api_secret: str | None = Field(
+        default=None,
+        description="Twilio API Key Secret",
+    )
 
     region: str | None = Field(
         default=None,
@@ -272,12 +286,15 @@ class TACConfig(BaseModel):
         Create TACConfig from environment variables.
 
         Required:
-        - TWILIO_CONVERSATION_CONFIGURATION_ID: Conversation Orchestrator configuration ID
         - TWILIO_ACCOUNT_SID: Twilio Account SID
         - TWILIO_AUTH_TOKEN: Twilio Auth Token for API authentication
+        - TWILIO_PHONE_NUMBER: Phone number for voice and SMS channels
+
+        Required for Conversation Orchestrator / Memory / Knowledge:
+        - TWILIO_CONVERSATION_CONFIGURATION_ID: Conversation Orchestrator configuration ID
+          (when omitted, TAC runs in ConversationRelay-only mode)
         - TWILIO_API_KEY: Twilio API Key SID (starts with SK)
         - TWILIO_API_SECRET: Twilio API Secret for API Key authentication
-        - TWILIO_PHONE_NUMBER: Phone number for voice and SMS channels
 
         Optional:
         - TWILIO_KNOWLEDGE_BASE_ID: Knowledge Base ID for RAG search functionality
@@ -311,11 +328,11 @@ class TACConfig(BaseModel):
         conversation_intelligence_config = ConversationIntelligenceConfig.from_env()
 
         return cls(
-            conversation_configuration_id=os.environ["TWILIO_CONVERSATION_CONFIGURATION_ID"],
+            conversation_configuration_id=os.environ.get("TWILIO_CONVERSATION_CONFIGURATION_ID"),
             account_sid=os.environ["TWILIO_ACCOUNT_SID"],
             auth_token=os.environ["TWILIO_AUTH_TOKEN"],
-            api_key=os.environ["TWILIO_API_KEY"],
-            api_secret=os.environ["TWILIO_API_SECRET"],
+            api_key=os.environ.get("TWILIO_API_KEY"),
+            api_secret=os.environ.get("TWILIO_API_SECRET"),
             phone_number=os.environ["TWILIO_PHONE_NUMBER"],
             knowledge_base_id=os.environ.get("TWILIO_KNOWLEDGE_BASE_ID"),
             log_level=os.environ.get("TWILIO_LOG_LEVEL", "INFO"),
