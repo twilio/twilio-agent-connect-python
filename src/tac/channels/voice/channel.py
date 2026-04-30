@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from twilio.rest import Client
 
+from pydantic import ValidationError
+
 from tac.channels.base import BaseChannel
 from tac.channels.websocket_manager import WebSocketManager
 from tac.channels.websocket_protocol import WebSocketDisconnectError, WebSocketProtocol
@@ -150,8 +152,6 @@ class VoiceChannel(BaseChannel):
         Args:
             payload_dict: Raw form data dict from the webhook request.
         """
-        from pydantic import ValidationError
-
         try:
             payload = ConversationRelayCallbackPayload(**payload_dict)
         except ValidationError:

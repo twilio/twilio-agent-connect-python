@@ -83,6 +83,13 @@ async def handle_message_ready(
 tac.on_message_ready(handle_message_ready)
 
 
+async def handle_conversation_ended(context: ConversationSession) -> None:
+    conversation_history.pop(context.conversation_id, None)
+
+
+tac.on_conversation_ended(handle_conversation_ended)
+
+
 if __name__ == "__main__":
     server = TACFastAPIServer(tac=tac, voice_channel=voice_channel)
     server.start()
