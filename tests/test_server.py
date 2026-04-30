@@ -733,6 +733,29 @@ class TestSignatureValidation:
         assert resp.status_code == 200
         assert resp.json() == {"status": "ok"}
 
+    def test_websocket_accepts_valid_signature(self) -> None:
+        from fastapi import Depends, FastAPI, WebSocket
+        from fastapi.testclient import TestClient
+
+        from tac.server.webhook import build_websocket_signature_dependency
+
+        app = FastAPI()
+        ws_sig = build_websocket_signature_dependency(AUTH_TOKEN)
+        connected = False
+
+        @app.websocket("/ws")
+        async def ws_endpoint(websocket: WebSocket, _: None = Depends(ws_sig)) -> None:
+            nonlocal connected
+            await websocket.accept()
+            connected = True
+            await websocket.close()
+
+        signature = compute_signature("http://testserver/ws")
+        client = TestClient(app)
+        with client.websocket_connect("/ws", headers={"X-Twilio-Signature": signature}):
+            pass
+        assert connected
+
     def test_websocket_rejects_missing_signature(self) -> None:
         from fastapi import WebSocketDisconnect
         from fastapi.testclient import TestClient
