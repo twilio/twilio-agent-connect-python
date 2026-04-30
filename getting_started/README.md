@@ -54,7 +54,7 @@ Production-ready examples using partner SDK adapters:
 
 - **`voice_streaming.py`**: Stream LLM responses token-by-token for ~40-50% faster time-to-first-audio
 - **`handoff.py`**: Hand the conversation off to a human agent via a Twilio Studio Flow (works on voice and SMS)
-- **`relay_only.py`**: ConversationRelay-only mode — voice-only without Conversation Orchestrator
+- **`relay_only.py`**: ConversationRelay-only mode — get started with voice using just ConversationRelay
 
 ## Step 3: Run an Example
 
@@ -109,7 +109,7 @@ See `examples/.env.example` for all available configuration options. Key variabl
 - `TWILIO_PHONE_NUMBER`: Your Twilio phone number
 
 ### Required for Orchestrator Mode (omit for ConversationRelay-only)
-- `TWILIO_CONVERSATION_CONFIGURATION_ID`: Conversation Configuration ID (enables Memory, messaging channels, and Conversation Orchestrator)
+- `TWILIO_CONVERSATION_CONFIGURATION_ID`: Conversation Configuration ID
 
 ### Optional (Voice Channel)
 - `TWILIO_VOICE_PUBLIC_DOMAIN`: Your ngrok domain (required for voice)

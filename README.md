@@ -181,7 +181,7 @@ For detailed architecture and advanced usage, see [CLAUDE.md](CLAUDE.md).
 **Examples & Guides:**
 - **[Getting Started Guide](getting_started/)** - Setup wizard, examples, and comprehensive documentation
 - **[Partner SDK Examples](getting_started/examples/partners/)** - OpenAI Chat Completions and Responses API examples
-- **[ConversationRelay-Only Mode](getting_started/examples/features/relay_only.py)** - Voice-only without Conversation Orchestrator
+- **[ConversationRelay-Only Mode](getting_started/examples/features/relay_only.py)** - Get started with voice using just ConversationRelay
 - More examples coming soon
 
 **Documentation:**
