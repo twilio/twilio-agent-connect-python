@@ -17,6 +17,7 @@ from tac.channels.websocket_protocol import WebSocketDisconnectError
 from tac.core.logging import get_logger
 from tac.core.tac import TAC
 from tac.server.config import TACServerConfig
+from tac.server.webhook import build_http_signature_dependency, build_websocket_signature_dependency
 from tac.tools.handoff import studio_voice_handoff_url
 
 if TYPE_CHECKING:
@@ -25,7 +26,7 @@ if TYPE_CHECKING:
 
 try:
     import uvicorn
-    from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+    from fastapi import Depends, FastAPI, Request, WebSocket, WebSocketDisconnect
     from fastapi.responses import JSONResponse, Response
 except ImportError as e:
     raise ImportError(
@@ -119,6 +120,8 @@ class TACFastAPIServer:
     def _register_routes(self, app: FastAPI) -> None:
         """Register TAC routes (conversation webhook, voice, CI) onto the given FastAPI app."""
         config = self.config
+        http_sig = build_http_signature_dependency(self.tac.config.auth_token)
+        ws_sig = build_websocket_signature_dependency(self.tac.config.auth_token)
 
         if self.webhook_channels:
             channels = self.webhook_channels
@@ -137,7 +140,7 @@ class TACFastAPIServer:
                         exc_info=True,
                     )
 
-            @app.post(config.conversation_webhook_path)
+            @app.post(config.conversation_webhook_path, dependencies=[Depends(http_sig)])
             async def conversation_webhook(request: Request) -> JSONResponse:
                 """Handle incoming conversation webhooks from Twilio (all channels)."""
                 try:
@@ -180,7 +183,7 @@ class TACFastAPIServer:
                     "Set TWILIO_VOICE_PUBLIC_DOMAIN environment variable."
                 )
 
-            @app.post(config.twiml_path)
+            @app.post(config.twiml_path, dependencies=[Depends(http_sig)])
             async def post_twiml() -> Response:
                 """Generate TwiML for incoming voice calls."""
                 websocket_url = f"wss://{config.public_domain}{config.websocket_path}"
@@ -202,7 +205,7 @@ class TACFastAPIServer:
                 return Response(content=twiml, media_type="application/xml")
 
             @app.websocket(config.websocket_path)
-            async def websocket_endpoint(websocket: WebSocket) -> None:
+            async def websocket_endpoint(websocket: WebSocket, _: None = Depends(ws_sig)) -> None:
                 """Handle voice WebSocket connections."""
                 adapter = FastAPIWebSocketAdapter(websocket)
                 await vc.handle_websocket(adapter)
@@ -210,7 +213,7 @@ class TACFastAPIServer:
         if config.cintel_webhook_path is not None:
             tac = self.tac
 
-            @app.post(config.cintel_webhook_path)
+            @app.post(config.cintel_webhook_path, dependencies=[Depends(http_sig)])
             async def cintel_webhook(request: Request) -> JSONResponse:
                 """Handle Conversation Intelligence webhook events."""
                 payload = await request.json()

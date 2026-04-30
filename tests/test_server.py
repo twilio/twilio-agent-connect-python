@@ -1,22 +1,30 @@
 """Tests for TACFastAPIServer module."""
 
 import pytest
+from twilio.request_validator import RequestValidator
 
 from tac import TAC
 from tac.channels.websocket_protocol import WebSocketDisconnectError, WebSocketProtocol
 from tac.server.config import TACServerConfig
+
+AUTH_TOKEN = "test_token_123"
 
 
 def get_test_config() -> dict:
     """Get a valid test configuration."""
     return {
         "account_sid": "ACtest123",
-        "auth_token": "test_token_123",
+        "auth_token": AUTH_TOKEN,
         "api_key": "SK123",
         "api_secret": "test_api_token",
         "conversation_configuration_id": "conv_configuration_test123",
         "phone_number": "+15551234567",
     }
+
+
+def compute_signature(url: str, params: dict[str, str] | None = None) -> str:
+    """Compute a valid Twilio signature for test requests."""
+    return RequestValidator(AUTH_TOKEN).compute_signature(url, params or {})
 
 
 class TestTACServerConfig:
@@ -221,12 +229,17 @@ class TestTACFastAPIServer:
             patch.object(sms, "process_webhook", new_callable=AsyncMock) as mock_sms,
             patch.object(chat, "process_webhook", new_callable=AsyncMock) as mock_chat,
         ):
+            url = "http://test/webhook"
+            signature = compute_signature(url)
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
                 resp = await client.post(
                     "/webhook",
                     json={"eventType": "COMMUNICATION_CREATED", "data": {}},
-                    headers={"i-twilio-idempotency-token": "tok-123"},
+                    headers={
+                        "i-twilio-idempotency-token": "tok-123",
+                        "X-Twilio-Signature": signature,
+                    },
                 )
 
             assert resp.status_code == 200
@@ -272,12 +285,17 @@ class TestTACFastAPIServer:
             ) as mock_sms,
             patch.object(chat, "process_webhook", new_callable=AsyncMock) as mock_chat,
         ):
+            url = "http://test/webhook"
+            signature = compute_signature(url)
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
                 resp = await client.post(
                     "/webhook",
                     json={"eventType": "COMMUNICATION_CREATED", "data": {}},
-                    headers={"i-twilio-idempotency-token": "tok-456"},
+                    headers={
+                        "i-twilio-idempotency-token": "tok-456",
+                        "X-Twilio-Signature": signature,
+                    },
                 )
 
             # Webhook should still return 200 (fire-and-forget pattern)
@@ -534,10 +552,17 @@ class TestTwiMLConnectAction:
         )
         return TestClient(server.app)
 
+    def _twiml_signature(self) -> str:
+        """Compute signature for form-encoded POST to /twiml with empty body."""
+        return compute_signature("http://testserver/twiml")
+
     def test_connect_action_uses_studio_webhook_when_flow_sid_set(self) -> None:
         flow_sid = "FW" + "a" * 32
         client = self._build_server(studio_handoff_flow_sid=flow_sid)
-        resp = client.post("/twiml")  # type: ignore[attr-defined]
+        resp = client.post(  # type: ignore[attr-defined]
+            "/twiml",
+            headers={"X-Twilio-Signature": self._twiml_signature()},
+        )
 
         assert resp.status_code == 200
         expected = (
@@ -548,9 +573,198 @@ class TestTwiMLConnectAction:
 
     def test_connect_action_omitted_when_no_handoff_flow(self) -> None:
         client = self._build_server()  # no studio_handoff_flow_sid
-        resp = client.post("/twiml")  # type: ignore[attr-defined]
+        resp = client.post(  # type: ignore[attr-defined]
+            "/twiml",
+            headers={"X-Twilio-Signature": self._twiml_signature()},
+        )
 
         assert resp.status_code == 200
         # No action URL when no handoff flow configured
         assert "<Connect>" in resp.text
         assert "action=" not in resp.text
+
+
+class TestSignatureValidation:
+    """Test that webhook signature validation is enforced on all TAC routes."""
+
+    @pytest.mark.asyncio
+    async def test_webhook_rejects_missing_signature(self) -> None:
+        from httpx import ASGITransport, AsyncClient
+
+        from tac.channels import SMSChannel
+        from tac.server import TACFastAPIServer
+
+        tac = TAC(get_test_config())
+        server = TACFastAPIServer(
+            tac=tac,
+            config=TACServerConfig(public_domain="test.ngrok.io"),
+            messaging_channels=[SMSChannel(tac)],
+        )
+        transport = ASGITransport(app=server.app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post("/webhook", json={"eventType": "test"})
+        assert resp.status_code == 403
+
+    @pytest.mark.asyncio
+    async def test_webhook_rejects_invalid_signature(self) -> None:
+        from httpx import ASGITransport, AsyncClient
+
+        from tac.channels import SMSChannel
+        from tac.server import TACFastAPIServer
+
+        tac = TAC(get_test_config())
+        server = TACFastAPIServer(
+            tac=tac,
+            config=TACServerConfig(public_domain="test.ngrok.io"),
+            messaging_channels=[SMSChannel(tac)],
+        )
+        transport = ASGITransport(app=server.app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post(
+                "/webhook",
+                json={"eventType": "test"},
+                headers={"X-Twilio-Signature": "invalid"},
+            )
+        assert resp.status_code == 403
+
+    @pytest.mark.asyncio
+    async def test_webhook_accepts_valid_signature(self) -> None:
+        from unittest.mock import AsyncMock, patch
+
+        from httpx import ASGITransport, AsyncClient
+
+        from tac.channels import SMSChannel
+        from tac.server import TACFastAPIServer
+
+        tac = TAC(get_test_config())
+        sms = SMSChannel(tac)
+        server = TACFastAPIServer(
+            tac=tac,
+            config=TACServerConfig(public_domain="test.ngrok.io"),
+            messaging_channels=[sms],
+        )
+        with patch.object(sms, "process_webhook", new_callable=AsyncMock):
+            url = "http://test/webhook"
+            signature = compute_signature(url)
+            transport = ASGITransport(app=server.app)
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                resp = await client.post(
+                    "/webhook",
+                    json={"eventType": "test"},
+                    headers={"X-Twilio-Signature": signature},
+                )
+        assert resp.status_code == 200
+
+    def test_twiml_rejects_missing_signature(self) -> None:
+        from fastapi.testclient import TestClient
+
+        from tac.channels.voice import VoiceChannel
+        from tac.server import TACFastAPIServer
+
+        tac = TAC(get_test_config())
+        server = TACFastAPIServer(
+            tac=tac,
+            config=TACServerConfig(public_domain="test.ngrok.io"),
+            voice_channel=VoiceChannel(tac),
+        )
+        client = TestClient(server.app)
+        resp = client.post("/twiml")
+        assert resp.status_code == 403
+
+    def test_twiml_accepts_valid_form_signature(self) -> None:
+        from fastapi.testclient import TestClient
+
+        from tac.channels.voice import VoiceChannel
+        from tac.server import TACFastAPIServer
+
+        tac = TAC(get_test_config())
+        server = TACFastAPIServer(
+            tac=tac,
+            config=TACServerConfig(public_domain="test.ngrok.io"),
+            voice_channel=VoiceChannel(tac),
+        )
+        client = TestClient(server.app)
+        form_data = {"CallSid": "CA123", "From": "+15551234567"}
+        signature = compute_signature("http://testserver/twiml", form_data)
+        resp = client.post(
+            "/twiml",
+            data=form_data,
+            headers={"X-Twilio-Signature": signature},
+        )
+        assert resp.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_cintel_webhook_rejects_missing_signature(self) -> None:
+        from httpx import ASGITransport, AsyncClient
+
+        from tac.server import TACFastAPIServer
+
+        tac = TAC(get_test_config())
+        server = TACFastAPIServer(
+            tac=tac,
+            config=TACServerConfig(
+                public_domain="test.ngrok.io", cintel_webhook_path="/ci-webhook"
+            ),
+        )
+        transport = ASGITransport(app=server.app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post("/ci-webhook", json={"event": "test"})
+        assert resp.status_code == 403
+
+    @pytest.mark.asyncio
+    async def test_custom_routes_not_affected(self) -> None:
+        from httpx import ASGITransport, AsyncClient
+
+        from tac.server import TACFastAPIServer
+
+        tac = TAC(get_test_config())
+        server = TACFastAPIServer(
+            tac=tac,
+            config=TACServerConfig(public_domain="test.ngrok.io"),
+        )
+
+        @server.app.get("/health")
+        async def health() -> dict[str, str]:
+            return {"status": "ok"}
+
+        transport = ASGITransport(app=server.app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get("/health")
+        assert resp.status_code == 200
+        assert resp.json() == {"status": "ok"}
+
+    def test_websocket_rejects_missing_signature(self) -> None:
+        from fastapi import WebSocketDisconnect
+        from fastapi.testclient import TestClient
+
+        from tac.channels.voice import VoiceChannel
+        from tac.server import TACFastAPIServer
+
+        tac = TAC(get_test_config())
+        server = TACFastAPIServer(
+            tac=tac,
+            config=TACServerConfig(public_domain="test.ngrok.io"),
+            voice_channel=VoiceChannel(tac),
+        )
+        client = TestClient(server.app)
+        with pytest.raises(WebSocketDisconnect):
+            with client.websocket_connect("/ws"):
+                pass
+
+    def test_websocket_rejects_invalid_signature(self) -> None:
+        from fastapi import WebSocketDisconnect
+        from fastapi.testclient import TestClient
+
+        from tac.channels.voice import VoiceChannel
+        from tac.server import TACFastAPIServer
+
+        tac = TAC(get_test_config())
+        server = TACFastAPIServer(
+            tac=tac,
+            config=TACServerConfig(public_domain="test.ngrok.io"),
+            voice_channel=VoiceChannel(tac),
+        )
+        client = TestClient(server.app)
+        with pytest.raises(WebSocketDisconnect):
+            with client.websocket_connect("/ws", headers={"X-Twilio-Signature": "invalid"}):
+                pass

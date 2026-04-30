@@ -7,9 +7,9 @@ X-Forwarded-Host) for environments like ngrok.
 Requires: pip install tac[server]
 """
 
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 
-from fastapi import Request
+from fastapi import HTTPException, Request, WebSocket, WebSocketDisconnect
 from twilio.request_validator import RequestValidator
 
 
@@ -50,6 +50,65 @@ def validate_twilio_webhook(
     return result
 
 
+def build_http_signature_dependency(
+    auth_token: str,
+) -> Callable[..., Awaitable[None]]:
+    """Build a FastAPI dependency that validates Twilio webhook signatures on HTTP POST routes.
+
+    Usage:
+        sig_dep = build_http_signature_dependency(auth_token)
+
+        @app.post("/webhook", dependencies=[Depends(sig_dep)])
+        async def webhook(request: Request) -> JSONResponse:
+            ...
+    """
+
+    async def _validate_http_signature(request: Request) -> None:
+        content_type = request.headers.get("content-type", "")
+        if "application/x-www-form-urlencoded" in content_type:
+            form_data = await request.form()
+            body: str | Mapping[str, str] = {k: str(v) for k, v in form_data.items()}
+        else:
+            raw = await request.body()
+            body = raw.decode("utf-8")
+
+        if not validate_twilio_webhook(request, auth_token, body):
+            raise HTTPException(status_code=403, detail="Invalid Twilio signature")
+
+    return _validate_http_signature
+
+
+def build_websocket_signature_dependency(
+    auth_token: str,
+) -> Callable[..., Awaitable[None]]:
+    """Build a FastAPI dependency that validates Twilio signatures on WebSocket upgrade requests.
+
+    Validates the signature before the WebSocket is accepted.
+    Closes with code 1008 (Policy Violation) on invalid signature.
+
+    Usage:
+        ws_dep = build_websocket_signature_dependency(auth_token)
+
+        @app.websocket("/ws")
+        async def ws_endpoint(websocket: WebSocket, _: None = Depends(ws_dep)) -> None:
+            ...
+    """
+
+    async def _validate_ws_signature(websocket: WebSocket) -> None:
+        signature = websocket.headers.get("X-Twilio-Signature")
+        if not signature:
+            await websocket.close(code=1008, reason="Missing Twilio signature")
+            raise WebSocketDisconnect(code=1008)
+
+        url = _build_websocket_url(websocket)
+        validator = RequestValidator(auth_token)
+        if not validator.validate(url, {}, signature):
+            await websocket.close(code=1008, reason="Invalid Twilio signature")
+            raise WebSocketDisconnect(code=1008)
+
+    return _validate_ws_signature
+
+
 def _build_url(request: Request) -> str:
     """Build the full URL from request, handling proxy headers.
 
@@ -76,3 +135,37 @@ def _build_url(request: Request) -> str:
         url = f"{url}?{query}"
 
     return url
+
+
+def _build_websocket_url(websocket: WebSocket) -> str:
+    """Build the validation URL from a WebSocket, handling proxy headers and scheme conversion.
+
+    Converts ws/wss schemes back to http/https since Twilio signs the original HTTP URL.
+    """
+    proto_header = websocket.headers.get("X-Forwarded-Proto")
+    if proto_header:
+        proto = proto_header.split(",")[0].strip()
+    else:
+        proto = _ws_scheme_to_http(websocket.url.scheme)
+
+    host_header = (
+        websocket.headers.get("X-Forwarded-Host")
+        or websocket.headers.get("Host")
+        or websocket.url.netloc
+    )
+    host = host_header.split(",")[0].strip()
+
+    path = websocket.url.path
+    query = websocket.url.query
+
+    url = f"{proto}://{host}{path}"
+    if query:
+        url = f"{url}?{query}"
+
+    return url
+
+
+def _ws_scheme_to_http(scheme: str) -> str:
+    """Convert WebSocket scheme to HTTP equivalent for Twilio signature validation."""
+    mapping = {"ws": "http", "wss": "https"}
+    return mapping.get(scheme, scheme)
