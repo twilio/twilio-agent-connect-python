@@ -277,6 +277,14 @@ class TestHandoffExecution:
         with pytest.raises(ValueError, match="studio_handoff_flow_sid"):
             create_studio_handoff_tool(tac, session)
 
+    def test_factory_raises_in_relay_only_mode(self) -> None:
+        """Factory rejects relay-only TAC — orchestrator and memory are required."""
+        tac = TAC(get_test_config(conversation_configuration_id=None))
+        session = ConversationSession(conversation_id="conv_123", channel="voice")
+
+        with pytest.raises(ValueError, match="Conversation Orchestrator"):
+            create_studio_handoff_tool(tac, session)
+
     @pytest.mark.asyncio
     async def test_handoff_digital_delivery_failure_reports_handoff_failed(
         self, monkeypatch: pytest.MonkeyPatch

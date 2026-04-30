@@ -249,6 +249,14 @@ def create_studio_handoff_tool(
     The tool also sets the conversation to INACTIVE and clears status callbacks
     to prevent further webhook events from being routed to TAC.
 
+    **Not available in ConversationRelay-only mode.** This tool requires
+    Conversation Orchestrator for conversation state management (setting
+    INACTIVE status, clearing callbacks) and Conversation Memory for the
+    handoff payload's ``storeId``. In relay-only mode, implement a custom
+    handoff by setting ``session.pending_handoff_data`` directly — the voice
+    channel will send the WebSocket ``end`` message with your payload, and
+    your ``<Connect action>`` URL handler can route the call accordingly.
+
     Args:
         tac: TAC instance for building payload and posting to Studio
         session: Current conversation session
@@ -273,14 +281,29 @@ def create_studio_handoff_tool(
         ... )
 
     Raises:
-        ValueError: If ``tac.config.studio_handoff_flow_sid`` is unset. The
-            factory is Studio-specific; a missing SID is misconfiguration,
-            not a soft fallback.
+        ValueError: If ``tac.config.studio_handoff_flow_sid`` is unset,
+            if Conversation Orchestrator is not configured (relay-only mode),
+            or if no memory store ID is available.
     """
     if not tac.config.studio_handoff_flow_sid:
         raise ValueError(
             "create_studio_handoff_tool requires tac.config.studio_handoff_flow_sid "
             "(set TWILIO_STUDIO_HANDOFF_FLOW_SID in your environment)."
+        )
+
+    if not tac.is_orchestrator_enabled():
+        raise ValueError(
+            "create_studio_handoff_tool requires Conversation Orchestrator "
+            "(not available in ConversationRelay-only mode). Set "
+            "conversation_configuration_id in TACConfig, or implement a custom "
+            "handoff by setting session.pending_handoff_data directly."
+        )
+
+    if tac.conversation_memory_client is None or not tac.conversation_memory_client.store_id:
+        raise ValueError(
+            "create_studio_handoff_tool requires a memory store ID "
+            "(resolved from conversation_configuration_id at startup). Ensure "
+            "your Conversation Orchestrator configuration has an associated memory store."
         )
 
     handoff_tool = function_tool(name=name, description=description)(_handoff_impl)
