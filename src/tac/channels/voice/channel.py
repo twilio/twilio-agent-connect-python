@@ -76,6 +76,13 @@ class VoiceChannel(BaseChannel):
         self._websocket_manager = WebSocketManager()
         self._twilio_client: Client | None = None
 
+    @staticmethod
+    def _caller_address(setup_msg: SetupMessage) -> str | None:
+        """Return the phone number of the remote caller/callee from the setup message."""
+        if setup_msg.direction and setup_msg.direction.upper() == "OUTBOUND":
+            return setup_msg.to_number
+        return setup_msg.from_number
+
     def _get_twilio_client(self) -> Client:
         if self._twilio_client is None:
             from twilio.rest import Client
@@ -169,7 +176,7 @@ class VoiceChannel(BaseChannel):
             )
             return
 
-        self.logger.info(
+        self.logger.debug(
             "ConversationRelay callback received",
             call_sid=payload.call_sid,
             call_status=payload.call_status,
@@ -233,12 +240,7 @@ class VoiceChannel(BaseChannel):
             if customer_participant and customer_participant.addresses
             else None
         )
-        fallback_address = (
-            setup_msg.to_number
-            if setup_msg.direction and setup_msg.direction.upper() == "OUTBOUND"
-            else setup_msg.from_number
-        )
-        profile_lookup_address = customer_address or fallback_address
+        profile_lookup_address = customer_address or self._caller_address(setup_msg)
         profile_id = customer_participant.profile_id if customer_participant else None
 
         self._websocket_manager.add_websocket(conv_id, websocket)
@@ -298,15 +300,10 @@ class VoiceChannel(BaseChannel):
                                 self._websocket_manager.add_websocket(conv_id, websocket)
                                 self._start_conversation(conv_id, profile_id=None)
 
-                                from_number = (
-                                    setup_msg.to_number
-                                    if setup_msg.direction
-                                    and setup_msg.direction.upper() == "OUTBOUND"
-                                    else setup_msg.from_number
-                                )
-                                if from_number:
+                                caller = self._caller_address(setup_msg)
+                                if caller:
                                     self._conversations[conv_id].author_info = AuthorInfo(
-                                        address=from_number,
+                                        address=caller,
                                     )
 
                                 if self.session_manager is not None:
