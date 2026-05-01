@@ -30,6 +30,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 
 from tac import TAC, TACConfig
+from tac.channels.messaging import MessagingChannel
 from tac.channels.rcs import RCSChannel, RCSChannelConfig
 from tac.channels.sms import SMSChannel, SMSChannelConfig
 from tac.channels.voice import VoiceChannel, VoiceChannelConfig
@@ -76,26 +77,21 @@ SYSTEM_INSTRUCTIONS = (
 )
 
 tac = TAC(config=TACConfig.from_env())
-voice_channel = VoiceChannel(tac, config=VoiceChannelConfig(auto_retrieve_memory=True))
-sms_channel = SMSChannel(tac, config=SMSChannelConfig(auto_retrieve_memory=True))
-
-# RCS channel requires rcs_sender_id configured in TAC config
-rcs_channel = RCSChannel(
-    tac,
-    config=RCSChannelConfig(
-        auto_retrieve_memory=True,
-    ),
-)
-
-# WhatsApp channel requires whatsapp_number configured in TAC config
-whatsapp_channel = WhatsAppChannel(
-    tac,
-    config=WhatsAppChannelConfig(
-        auto_retrieve_memory=True,
-    ),
-)
-
 conversation_history: dict[str, list[Any]] = {}
+
+# Create channels based on configuration
+sms_channel = SMSChannel(tac, config=SMSChannelConfig(auto_retrieve_memory=True))
+rcs_channel = (
+    RCSChannel(tac, config=RCSChannelConfig(auto_retrieve_memory=True))
+    if tac.config.rcs_sender_id
+    else None
+)
+whatsapp_channel = (
+    WhatsAppChannel(tac, config=WhatsAppChannelConfig(auto_retrieve_memory=True))
+    if tac.config.whatsapp_number
+    else None
+)
+voice_channel = VoiceChannel(tac, config=VoiceChannelConfig(auto_retrieve_memory=True))
 
 
 async def handle_message_ready(
@@ -136,8 +132,7 @@ async def initiate_outbound(args: argparse.Namespace) -> None:
             print("\nWaiting for replies... (Ctrl+C to exit)\n")
 
         elif args.channel == "rcs":
-            # Validate RCS configuration
-            if not tac.config.rcs_sender_id:
+            if not rcs_channel:
                 print("Error: RCS requires TWILIO_RCS_SENDER_ID environment variable to be set.")
                 sys.exit(1)
 
@@ -149,8 +144,7 @@ async def initiate_outbound(args: argparse.Namespace) -> None:
             print("\nWaiting for replies... (Ctrl+C to exit)\n")
 
         elif args.channel == "whatsapp":
-            # Validate WhatsApp configuration
-            if not tac.config.whatsapp_number:
+            if not whatsapp_channel:
                 print(
                     "Error: WhatsApp requires TWILIO_WHATSAPP_NUMBER "
                     "environment variable to be set."
@@ -197,6 +191,13 @@ if __name__ == "__main__":
         print(f"--message is required for {args.channel.upper()} channel.")
         sys.exit(1)
 
+    # Build messaging channels list from already-created channel instances
+    messaging_channels: list[MessagingChannel] = [sms_channel]
+    if rcs_channel:
+        messaging_channels.append(rcs_channel)
+    if whatsapp_channel:
+        messaging_channels.append(whatsapp_channel)
+
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         asyncio.create_task(initiate_outbound(args))
@@ -207,7 +208,7 @@ if __name__ == "__main__":
     server = TACFastAPIServer(
         tac=tac,
         voice_channel=voice_channel,
-        messaging_channels=[sms_channel, rcs_channel, whatsapp_channel],
+        messaging_channels=messaging_channels,
         app=app,
     )
 

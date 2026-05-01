@@ -172,7 +172,7 @@ async def test_communication_created_webhook(whatsapp_channel: WhatsAppChannel) 
 
     conversation_id = "conv_123"
     participant_id = "part_customer"
-    message_text = "Hello from RCS!"
+    message_text = "Hello from WhatsApp!"
     timestamp = "2025-01-15T10:15:30Z"
 
     # Mock the callback
@@ -187,7 +187,7 @@ async def test_communication_created_webhook(whatsapp_channel: WhatsAppChannel) 
         callback_called = True
         callback_message = message
         callback_context = context
-        return "RCS response"
+        return "WhatsApp response"
 
     whatsapp_channel.tac.on_message_ready(mock_callback)
 
@@ -450,7 +450,7 @@ async def test_webhook_deduplication(whatsapp_channel: WhatsAppChannel) -> None:
 
 @pytest.mark.asyncio
 async def test_initiate_outbound_conversation(mock_tac: TAC) -> None:
-    """Test initiating an outbound RCS conversation."""
+    """Test initiating an outbound WhatsApp conversation."""
     from tac.models.outbound import InitiateMessagingConversationOptions
 
     channel = WhatsAppChannel(mock_tac, config=WhatsAppChannelConfig())
@@ -497,7 +497,7 @@ async def test_initiate_outbound_conversation(mock_tac: TAC) -> None:
 
         options = InitiateMessagingConversationOptions(
             to="whatsapp:+16505551234",
-            message="Hello from RCS!",
+            message="Hello from WhatsApp!",
         )
 
         result = await channel.initiate_outbound_conversation(options)
