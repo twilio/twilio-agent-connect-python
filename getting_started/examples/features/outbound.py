@@ -123,9 +123,7 @@ async def initiate_outbound(args: argparse.Namespace) -> None:
         elif args.channel == "rcs":
             # Validate RCS configuration
             if not tac.config.rcs_sender_id:
-                print(
-                    "Error: RCS requires TWILIO_RCS_SENDER_ID environment variable to be set."
-                )
+                print("Error: RCS requires TWILIO_RCS_SENDER_ID environment variable to be set.")
                 sys.exit(1)
 
             rcs_result = await rcs_channel.initiate_outbound_conversation(
