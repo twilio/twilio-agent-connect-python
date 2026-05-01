@@ -27,6 +27,10 @@ class TACServerConfig(BaseModel):
     )
     twiml_path: str = Field(default="/twiml", description="Path for TwiML generation endpoint")
     websocket_path: str = Field(default="/ws", description="Path for voice WebSocket endpoint")
+    conversation_relay_callback_path: str = Field(
+        default="/conversation-relay-callback",
+        description="Path for ConversationRelay action callback endpoint",
+    )
     cintel_webhook_path: str | None = Field(
         default=None,
         description="Path for Conversation Intelligence webhook endpoint. "

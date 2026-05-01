@@ -1,8 +1,9 @@
 """Tests for profile retrieval functionality."""
 
 from typing import Any
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock, patch
 
+import httpx
 import pytest
 
 from tac import TAC, TACConfig
@@ -17,28 +18,6 @@ from tac.models.memory import (
 )
 from tac.models.session import ConversationSession
 from tac.models.tac import TACMemoryResponse
-
-
-def create_participant_added_webhook(
-    conversation_id: str, participant_id: str, profile_id: str, timestamp: str
-) -> dict[str, Any]:
-    """Create a PARTICIPANT_ADDED webhook event."""
-    return {
-        "eventType": "PARTICIPANT_ADDED",
-        "timestamp": timestamp,
-        "data": {
-            "id": participant_id,
-            "conversationId": conversation_id,
-            "accountId": "ACtest123",
-            "serviceId": "IStest123",
-            "name": "+12345678901",
-            "type": "CUSTOMER",
-            "profileId": profile_id,
-            "addresses": [{"channel": "SMS", "address": "+12345678901", "channelId": None}],
-            "createdAt": timestamp,
-            "updatedAt": timestamp,
-        },
-    }
 
 
 def create_communication_created_webhook(
@@ -232,18 +211,57 @@ class TestProfileFetchingInRetrieveMemory:
         tac.conversation_memory_client.retrieve_memory.assert_called_once()
 
 
+def _make_participants() -> list[Any]:
+    from tac.models.conversation import ParticipantAddress, ParticipantResponse
+
+    return [
+        ParticipantResponse(
+            **{  # type: ignore[arg-type]
+                "id": "PA_AGENT",
+                "accountId": "ACtest123",
+                "conversationId": "CH123456",
+                "name": "+15551234567",
+                "type": "AI_AGENT",
+                "addresses": [
+                    ParticipantAddress(channel="SMS", address="+15551234567").model_dump(
+                        by_alias=True
+                    )
+                ],
+            }
+        ),
+        ParticipantResponse(
+            **{  # type: ignore[arg-type]
+                "id": "PA_CUSTOMER",
+                "accountId": "ACtest123",
+                "conversationId": "CH123456",
+                "name": "+12345678901",
+                "type": "CUSTOMER",
+                "addresses": [
+                    ParticipantAddress(channel="SMS", address="+12345678901").model_dump(
+                        by_alias=True
+                    )
+                ],
+            }
+        ),
+    ]
+
+
 class TestProfileInSMSChannel:
-    """Tests for profile retrieval in SMS channel."""
+    """Tests for profile retrieval in SMS channel.
+
+    Profile_id is resolved via `lookup_profile(address)` during memory
+    retrieval; there's no PARTICIPANT_ADDED-based seeding anymore.
+    """
 
     @pytest.mark.asyncio
     async def test_sms_profile_available_in_callback(self) -> None:
-        """Test that profile is available in callback context for SMS."""
+        from unittest.mock import patch
+
         config = get_test_config_with_trait_groups(trait_groups=["Contact"])
         tac = TAC(config)
         tac.conversation_memory_client = create_memory_client(tac)
-        channel = SMSChannel(tac, config={"auto_retrieve_memory": True})  # Enable auto retrieval
+        channel = SMSChannel(tac, config={"auto_retrieve_memory": True})
 
-        # Track callback data
         received_context = None
 
         def message_ready_callback(
@@ -257,193 +275,102 @@ class TestProfileInSMSChannel:
         tac.on_message_ready(message_ready_callback)
 
         mock_profile = get_mock_profile_response()
-
-        # Simulate participant.added webhook with profile
-        participant_webhook = create_participant_added_webhook(
-            "CH123456", "MB123", "profile_test_123", "2025-11-18T00:00:00.000Z"
+        tac.conversation_memory_client.lookup_profile = AsyncMock(
+            return_value=ProfileLookupResponse(
+                normalizedValue="+12345678901", profiles=["profile_test_123"]
+            )
+        )
+        tac.conversation_memory_client.get_profile = AsyncMock(return_value=mock_profile)
+        tac.conversation_memory_client.retrieve_memory = AsyncMock(
+            return_value=MemoryRetrievalResponse(
+                observations=[],
+                summaries=[],
+                communications=[],
+                meta=MemoryRetrievalMeta(queryTime=0),
+            )
         )
 
-        # Simulate message webhook
         message_webhook = create_communication_created_webhook(
             "CH123456", "MB123", "Hello!", "2025-11-18T00:00:01.000Z"
         )
 
-        tac.conversation_memory_client.get_profile = AsyncMock(return_value=mock_profile)
-        empty_memory = MemoryRetrievalResponse(
-            observations=[],
-            summaries=[],
-            communications=[],
-            meta=MemoryRetrievalMeta(queryTime=0),
-        )
-        tac.conversation_memory_client.retrieve_memory = AsyncMock(return_value=empty_memory)
+        with patch.object(
+            tac.conversation_orchestrator_client,
+            "list_participants",
+            return_value=_make_participants(),
+        ):
+            await channel.process_webhook(message_webhook)
 
-        # Process participant.added first (stores profile_id)
-        await channel.process_webhook(participant_webhook)
-
-        # Verify profile_id was stored but profile NOT fetched yet (lazy)
-        assert "CH123456" in channel._conversations
-        session = channel._conversations["CH123456"]
-        assert session.profile_id == "profile_test_123"
-        assert session.profile is None  # Profile not fetched until message
-
-        # Process message (triggers memory retrieval which fetches profile)
-        await channel.process_webhook(message_webhook)
-
-        # Verify profile was fetched during message processing
+        tac.conversation_memory_client.lookup_profile.assert_called_once()
         tac.conversation_memory_client.get_profile.assert_called_once_with(
             profile_id="profile_test_123",
             trait_groups=["Contact"],
         )
 
-        # Verify profile is in context
         assert received_context is not None
         assert received_context.profile is not None
         assert received_context.profile.id == "profile_test_123"
         assert received_context.profile.traits["Contact"]["firstName"] == "John"
 
     @pytest.mark.asyncio
-    async def test_sms_profile_fetched_on_conversation_start(self) -> None:
-        """Test that profile_id is stored but profile fetch is deferred (lazy)."""
+    async def test_sms_profile_cached_across_messages(self) -> None:
+        """Profile is fetched once per session, then cached."""
+        from unittest.mock import patch
 
-        config = get_test_config_with_trait_groups(trait_groups=["Contact"])
-        tac = TAC(config)
-        tac.conversation_memory_client = create_memory_client(tac)
-        channel = SMSChannel(tac)
-
-        mock_profile = get_mock_profile_response()
-
-        # Simulate participant.added webhook (stores profile_id only)
-        participant_added = create_participant_added_webhook(
-            "CH123456", "MB123", "profile_test_123", "2025-11-18T00:00:00.000Z"
-        )
-
-        tac.conversation_memory_client.get_profile = AsyncMock(return_value=mock_profile)
-        await channel.process_webhook(participant_added)
-
-        # Verify profile was NOT fetched (lazy behavior)
-        tac.conversation_memory_client.get_profile.assert_not_called()
-
-        # Verify conversation was created with profile_id but no profile yet
-        assert "CH123456" in channel._conversations
-        session = channel._conversations["CH123456"]
-        assert session.profile_id == "profile_test_123"
-        assert session.profile is None  # Profile not fetched until needed
-
-    @pytest.mark.asyncio
-    async def test_sms_profile_fetched_for_each_message(self) -> None:
-        """Test that profile is fetched once and then cached."""
         config = get_test_config_with_trait_groups()
         tac = TAC(config)
         tac.conversation_memory_client = create_memory_client(tac)
-        channel = SMSChannel(tac, config={"auto_retrieve_memory": True})  # Enable auto retrieval
-
-        mock_profile = get_mock_profile_response()
-
-        # Simulate participant.added first
-        participant_webhook = create_participant_added_webhook(
-            "CH123456", "MB123", "profile_test_123", "2025-11-18T00:00:00.000Z"
-        )
-
-        # Simulate first message
-        message_webhook_1 = create_communication_created_webhook(
-            "CH123456", "MB123", "First message", "2025-11-18T00:00:01.000Z"
-        )
-
-        tac.conversation_memory_client.get_profile = AsyncMock(return_value=mock_profile)
-        empty_memory = MemoryRetrievalResponse(
-            observations=[],
-            summaries=[],
-            communications=[],
-            meta=MemoryRetrievalMeta(queryTime=0),
-        )
-        tac.conversation_memory_client.retrieve_memory = AsyncMock(return_value=empty_memory)
-
-        # Process participant.added (profile NOT fetched, lazy behavior)
-        await channel.process_webhook(participant_webhook)
-        first_call_count = tac.conversation_memory_client.get_profile.call_count
-        assert first_call_count == 0  # No fetch on participant.added
-
-        # Process first message (profile fetched during retrieve_memory)
-        await channel.process_webhook(message_webhook_1)
-        second_call_count = tac.conversation_memory_client.get_profile.call_count
-        assert second_call_count == 1  # First fetch
-
-        # Simulate second message
-        message_webhook_2 = create_communication_created_webhook(
-            "CH123456", "MB123", "Second message", "2025-11-18T00:00:02.000Z"
-        )
-
-        # Process second message (profile NOT fetched again, cached)
-        await channel.process_webhook(message_webhook_2)
-        third_call_count = tac.conversation_memory_client.get_profile.call_count
-
-        # Verify profile was fetched only once (then cached)
-        assert second_call_count > first_call_count
-        assert third_call_count == second_call_count  # No additional fetch, cached
-        assert third_call_count == 1  # Only one fetch total (then cached)
-
-    @pytest.mark.asyncio
-    async def test_sms_profile_updates_session(self) -> None:
-        """Test that profile is cached and persists across messages."""
-        config = get_test_config_with_trait_groups()
-        tac = TAC(config)
-        tac.conversation_memory_client = create_memory_client(tac)
-        channel = SMSChannel(tac, config={"auto_retrieve_memory": True})  # Enable auto retrieval
+        channel = SMSChannel(tac, config={"auto_retrieve_memory": True})
 
         mock_profile_v1 = ProfileResponse(
             id="profile_test_123",
             createdAt="2025-01-15T10:30:45Z",
             traits={"Contact": {"firstName": "John"}},
         )
-
         mock_profile_v2 = ProfileResponse(
             id="profile_test_123",
             createdAt="2025-01-15T11:30:45Z",
-            traits={"Contact": {"firstName": "Jane"}},  # Updated name
+            traits={"Contact": {"firstName": "Jane"}},
         )
 
-        # Participant added event
-        participant_webhook = create_participant_added_webhook(
-            "CH123456", "MB123", "profile_test_123", "2025-11-18T00:00:00.000Z"
+        tac.conversation_memory_client.lookup_profile = AsyncMock(
+            return_value=ProfileLookupResponse(
+                normalizedValue="+12345678901", profiles=["profile_test_123"]
+            )
+        )
+        tac.conversation_memory_client.retrieve_memory = AsyncMock(
+            return_value=MemoryRetrievalResponse(
+                observations=[],
+                summaries=[],
+                communications=[],
+                meta=MemoryRetrievalMeta(queryTime=0),
+            )
         )
 
-        # First message
-        message_webhook_1 = create_communication_created_webhook(
-            "CH123456", "MB123", "Hello", "2025-11-18T00:00:01.000Z"
-        )
+        with patch.object(
+            tac.conversation_orchestrator_client,
+            "list_participants",
+            return_value=_make_participants(),
+        ):
+            tac.conversation_memory_client.get_profile = AsyncMock(return_value=mock_profile_v1)
+            await channel.process_webhook(
+                create_communication_created_webhook(
+                    "CH123456", "MB123", "Hello", "2025-11-18T00:00:01.000Z"
+                )
+            )
+            session = channel._conversations["CH123456"]
+            assert session.profile is not None
+            assert session.profile.traits["Contact"]["firstName"] == "John"
 
-        # Second message
-        message_webhook_2 = create_communication_created_webhook(
-            "CH123456", "MB123", "Hi again", "2025-11-18T00:00:02.000Z"
-        )
-
-        empty_memory = MemoryRetrievalResponse(
-            observations=[],
-            summaries=[],
-            communications=[],
-            meta=MemoryRetrievalMeta(queryTime=0),
-        )
-        tac.conversation_memory_client.retrieve_memory = AsyncMock(return_value=empty_memory)
-
-        # Process participant.added (no profile fetch, lazy behavior)
-        await channel.process_webhook(participant_webhook)
-        session = channel._conversations["CH123456"]
-        assert session.profile is None  # Profile not fetched yet
-
-        # Process first message with profile v1
-        tac.conversation_memory_client.get_profile = AsyncMock(return_value=mock_profile_v1)
-        await channel.process_webhook(message_webhook_1)
-        session = channel._conversations["CH123456"]
-        assert session.profile is not None
-        assert session.profile.traits["Contact"]["firstName"] == "John"
-
-        # Process second message - profile remains cached (v1), not fetched again
-        tac.conversation_memory_client.get_profile = AsyncMock(return_value=mock_profile_v2)
-        await channel.process_webhook(message_webhook_2)
-        session = channel._conversations["CH123456"]
-        assert session.profile is not None
-        # Profile is cached, so it remains "John" (not updated to "Jane")
-        assert session.profile.traits["Contact"]["firstName"] == "John"
+            tac.conversation_memory_client.get_profile = AsyncMock(return_value=mock_profile_v2)
+            await channel.process_webhook(
+                create_communication_created_webhook(
+                    "CH123456", "MB123", "Hi again", "2025-11-18T00:00:02.000Z"
+                )
+            )
+            session = channel._conversations["CH123456"]
+            # Cached → still v1 (John), not re-fetched to v2 (Jane).
+            assert session.profile.traits["Contact"]["firstName"] == "John"
 
 
 class TestProfileInConversationSession:
@@ -619,3 +546,76 @@ class TestMemoryClientRegion:
             api_secret="test_api_token",
         )
         assert client.base_url == "https://memory.twilio.com"
+
+
+class TestCreateProfile:
+    """HTTP-level tests for MemoryClient.create_profile."""
+
+    @pytest.mark.asyncio
+    async def test_create_profile_posts_traits_and_returns_id(self) -> None:
+        client = MemoryClient(
+            store_id="mem_store_01abc",
+            api_key="SK123",
+            api_secret="secret",
+        )
+
+        mock_response = Mock()
+        mock_response.json.return_value = {
+            "message": "Profile resolved and accepted for processing.",
+            "id": "mem_profile_01canonical",
+        }
+        mock_response.raise_for_status = Mock()
+
+        mock_http = AsyncMock()
+        mock_http.post = AsyncMock(return_value=mock_response)
+
+        with patch("httpx.AsyncClient") as mock_client_class:
+            mock_client_class.return_value.__aenter__.return_value = mock_http
+
+            profile_id = await client.create_profile(
+                traits={"Contact": {"phone": "+13175551234"}},
+            )
+
+        assert profile_id == "mem_profile_01canonical"
+        mock_http.post.assert_called_once_with(
+            "https://memory.twilio.com/v1/Stores/mem_store_01abc/Profiles",
+            json={"traits": {"Contact": {"phone": "+13175551234"}}},
+        )
+
+    @pytest.mark.asyncio
+    async def test_create_profile_raises_when_id_missing(self) -> None:
+        client = MemoryClient(
+            store_id="mem_store_01abc",
+            api_key="SK123",
+            api_secret="secret",
+        )
+
+        mock_response = Mock()
+        mock_response.json.return_value = {"message": "accepted"}
+        mock_response.raise_for_status = Mock()
+
+        mock_http = AsyncMock()
+        mock_http.post = AsyncMock(return_value=mock_response)
+
+        with patch("httpx.AsyncClient") as mock_client_class:
+            mock_client_class.return_value.__aenter__.return_value = mock_http
+
+            with pytest.raises(ValueError, match="missing 'id'"):
+                await client.create_profile(traits={"Contact": {"phone": "+1"}})
+
+    @pytest.mark.asyncio
+    async def test_create_profile_surfaces_http_errors(self) -> None:
+        client = MemoryClient(
+            store_id="mem_store_01abc",
+            api_key="SK123",
+            api_secret="secret",
+        )
+
+        mock_http = AsyncMock()
+        mock_http.post = AsyncMock(side_effect=httpx.HTTPError("boom"))
+
+        with patch("httpx.AsyncClient") as mock_client_class:
+            mock_client_class.return_value.__aenter__.return_value = mock_http
+
+            with pytest.raises(httpx.HTTPError, match="boom"):
+                await client.create_profile(traits={"Contact": {"phone": "+1"}})

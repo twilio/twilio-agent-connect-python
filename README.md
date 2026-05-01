@@ -35,6 +35,7 @@ Seamlessly integrate with Twilio's Memory Store and Conversation Orchestrator to
 - **Multi-Channel Support**: Built-in webhook handling for SMS, RCS, and Chat conversations
 - **Voice Channel Support**: WebSocket protocol handling for Twilio Voice with ConversationRelay
 - **Outbound Conversations**: Agent-initiated conversations via SMS, RCS, and Voice channels
+- **ConversationRelay-Only Mode**: Get started quickly with TAC's voice plumbing (TwiML, WebSocket, callbacks) before adding Conversation Orchestrator
 - **Memory Management**: Automatic integration with Twilio Memory for persistent user context
 - **Conversation Lifecycle**: Automatic tracking of conversation sessions and state
 - **Type-Safe**: Full type hints and Pydantic models throughout
@@ -181,6 +182,7 @@ For detailed architecture and advanced usage, see [CLAUDE.md](CLAUDE.md).
 **Examples & Guides:**
 - **[Getting Started Guide](getting_started/)** - Setup wizard, examples, and comprehensive documentation
 - **[Partner SDK Examples](getting_started/examples/partners/)** - OpenAI Chat Completions and Responses API examples
+- **[ConversationRelay-Only Mode](getting_started/examples/features/relay_only.py)** - Get started with voice using just ConversationRelay
 - More examples coming soon
 
 **Documentation:**

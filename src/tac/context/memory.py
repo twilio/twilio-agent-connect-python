@@ -225,6 +225,64 @@ class MemoryClient(BaseAPIClient):
             self.logger.error(f"Failed to parse Conversation Memory lookup response: {e}")
             raise
 
+    async def create_profile(
+        self,
+        traits: dict[str, dict[str, Any]],
+    ) -> str:
+        """
+        Create a profile via identity resolution (upsert).
+
+        Memora runs identity resolution on the submitted traits: if an
+        identifier match is found the existing canonical profile ID is
+        returned, otherwise a new profile is minted. The body must contain
+        at least one trait promoted-to-identifier per the store's identity
+        resolution settings, else resolution fails with 400.
+
+        The write is queued (202 Accepted) — the canonical profile ID is
+        returned synchronously in the response body, but downstream traits
+        may not be fully persisted immediately.
+
+        Args:
+            traits: Trait-group → field → value mapping, e.g.
+                `{"Contact": {"phone": "+13175551234"}}`. Max 50 groups × 99
+                traits each.
+
+        Returns:
+            Canonical profile ID (`mem_profile_…`).
+
+        Raises:
+            httpx.HTTPError: If the API request fails.
+            ValueError: If the response does not contain an `id` field.
+        """
+        endpoint = f"/v1/Stores/{self.store_id}/Profiles"
+        url = f"{self.base_url}{endpoint}"
+
+        payload: dict[str, Any] = {"traits": traits}
+
+        try:
+            async with self._get_client() as client:
+                response = await client.post(url, json=payload)
+                response.raise_for_status()
+                data = response.json()
+        except httpx.HTTPError as e:
+            response_text = (
+                getattr(e.response, "text", "No response body")
+                if hasattr(e, "response")
+                else "No response"
+            )
+            self.logger.error(
+                f"Failed to create profile: {e}\n"
+                f"URL: {url}\n"
+                f"Request body: {payload}\n"
+                f"Response: {response_text}"
+            )
+            raise
+
+        profile_id = data.get("id") if isinstance(data, dict) else None
+        if not isinstance(profile_id, str):
+            raise ValueError(f"CreateProfile response missing 'id' field: {data!r}")
+        return profile_id
+
     async def create_observation(
         self,
         profile_id: str,

@@ -134,6 +134,7 @@ python_functions = ["test_*"]
 markers = [
     "asyncio: mark test as an asyncio test",
     "no_auto_mock: disable automatic mocking of ConversationClient.get_configuration()",
+    "no_stub_profile_calls: disable autouse stub of MemoryClient.lookup_profile/create_profile",
 ]
 
 [tool.coverage.run]

@@ -13,10 +13,15 @@ class InitiateMessagingConversationOptions(BaseModel):
     This base model is used for messaging-style outbound conversations,
     including SMS, Chat, and RCS. Each channel may extend this with
     channel-specific requirements (e.g., Chat requires channel_id).
+
+    The sender is always TAC's configured address (``config.phone_number``
+    for SMS, ``ChatChannelConfig.agent_address`` for Chat,
+    ``config.rcs_sender_id`` for RCS). Multi-sender deployments should use
+    one TAC instance per sender so inbound webhook routing, memory scoping,
+    and configuration stay in sync.
     """
 
     to: str = Field(..., min_length=1)
-    from_: str | None = Field(default=None, alias="from")
     message: str = Field(..., min_length=1)
     metadata: dict[str, Any] | None = Field(default=None)
 
@@ -43,10 +48,13 @@ class InitiateConversationResult(BaseModel):
 
 
 class InitiateVoiceConversationOptions(BaseModel):
-    """Options for initiating an outbound voice conversation."""
+    """Options for initiating an outbound voice conversation.
+
+    The caller identity is always TAC's configured ``config.phone_number``.
+    Multi-number deployments should use one TAC instance per line.
+    """
 
     to: str = Field(..., min_length=1)
-    from_: str | None = Field(default=None, alias="from")
     websocket_url: str = Field(...)
     welcome_greeting: str | None = Field(default=None)
     action_url: str | None = Field(default=None)

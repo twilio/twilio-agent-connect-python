@@ -97,10 +97,22 @@ class TwilioMemoryConfig(BaseModel):
         description="Min relevance score for observations and summaries (0.0-1.0).",
     )
 
+    phone_trait_group: str = Field(
+        default="Contact",
+        description="Trait group name that holds the phone identifier on newly created profiles. "
+        "Must match the promoted-to-identifier configuration of the Memora store.",
+    )
+    phone_trait_field: str = Field(
+        default="phone",
+        description="Trait field name within phone_trait_group that holds the phone identifier.",
+    )
+
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
                 "trait_groups": ["Contact", "Preferences"],
+                "phone_trait_group": "Contact",
+                "phone_trait_field": "phone",
                 "observations_limit": 20,
                 "summaries_limit": 5,
                 "communications_limit": 0,
@@ -165,19 +177,36 @@ class TwilioMemoryConfig(BaseModel):
                 f"and TWILIO_MEMORY_RELEVANCE_THRESHOLD is a float. Error: {e}"
             ) from e
 
+        phone_trait_group = (
+            os.environ.get("TWILIO_MEMORY_PHONE_TRAIT_GROUP") or defaults.phone_trait_group
+        )
+        phone_trait_field = (
+            os.environ.get("TWILIO_MEMORY_PHONE_TRAIT_FIELD") or defaults.phone_trait_field
+        )
+
         return cls(
             trait_groups=trait_groups,
             observations_limit=observations_limit,
             summaries_limit=summaries_limit,
             communications_limit=communications_limit,
             relevance_threshold=relevance_threshold,
+            phone_trait_group=phone_trait_group,
+            phone_trait_field=phone_trait_field,
         )
 
 
 class TACConfig(BaseModel):
     """Configuration model for Twilio Agent Connect settings."""
 
-    conversation_configuration_id: str = Field(description="Twilio Conversation Configuration ID")
+    conversation_configuration_id: str | None = Field(
+        default=None,
+        description=(
+            "Twilio Conversation Configuration ID. When omitted, TAC runs in "
+            "ConversationRelay-only mode: only the Voice channel is usable, "
+            "messaging channels cannot be constructed, and "
+            "TAC.retrieve_memory() returns an empty TACMemoryResponse."
+        ),
+    )
 
     memory_config: TwilioMemoryConfig = Field(
         default_factory=TwilioMemoryConfig,
@@ -277,12 +306,15 @@ class TACConfig(BaseModel):
         Create TACConfig from environment variables.
 
         Required:
-        - TWILIO_CONVERSATION_CONFIGURATION_ID: Conversation Orchestrator configuration ID
         - TWILIO_ACCOUNT_SID: Twilio Account SID
         - TWILIO_AUTH_TOKEN: Twilio Auth Token for API authentication
         - TWILIO_API_KEY: Twilio API Key SID (starts with SK)
         - TWILIO_API_SECRET: Twilio API Secret for API Key authentication
         - TWILIO_PHONE_NUMBER: Phone number for voice and SMS channels
+
+        Required for Conversation Orchestrator / Memory / Knowledge:
+        - TWILIO_CONVERSATION_CONFIGURATION_ID: Conversation Orchestrator configuration ID
+          (when omitted, TAC runs in ConversationRelay-only mode)
 
         Optional:
         - TWILIO_RCS_SENDER_ID: RCS Sender ID for RCS channel
@@ -317,7 +349,7 @@ class TACConfig(BaseModel):
         conversation_intelligence_config = ConversationIntelligenceConfig.from_env()
 
         return cls(
-            conversation_configuration_id=os.environ["TWILIO_CONVERSATION_CONFIGURATION_ID"],
+            conversation_configuration_id=os.environ.get("TWILIO_CONVERSATION_CONFIGURATION_ID"),
             account_sid=os.environ["TWILIO_ACCOUNT_SID"],
             auth_token=os.environ["TWILIO_AUTH_TOKEN"],
             api_key=os.environ["TWILIO_API_KEY"],

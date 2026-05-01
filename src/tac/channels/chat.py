@@ -42,6 +42,11 @@ class ChatChannel(MessagingChannel):
     and manages conversation lifecycle through Conversation Orchestrator webhooks.
     """
 
+    # Chat identifies the customer author-driven from the webhook's
+    # `author.participant_id`; promoting some other channel-matching UNKNOWN
+    # CHAT participant could pick the wrong recipient.
+    reconcile_customer_type = False
+
     def __init__(
         self,
         tac: TAC,
@@ -68,6 +73,15 @@ class ChatChannel(MessagingChannel):
     def is_default_agent_address(self, author_address: str) -> bool:
         return author_address == self.agent_address
 
+    def get_agent_address(self, conversation_id: str) -> ParticipantAddress:
+        session = self._conversations.get(conversation_id)
+        channel_id = session.metadata.get("channel_id") if session else None
+        return ParticipantAddress(
+            channel="CHAT",
+            address=self.agent_address,
+            channel_id=channel_id if isinstance(channel_id, str) else None,
+        )
+
     async def send_response(
         self,
         conversation_id: str,
@@ -76,7 +90,11 @@ class ChatChannel(MessagingChannel):
     ) -> None:
         """Send chat response using the Conversation Orchestrator Send API.
 
-        Lazily creates an AI_AGENT participant if one doesn't exist yet.
+        Reads the agent and customer participant ids stashed on the session
+        by inbound reconciliation or outbound initiation. Missing ids are a
+        misuse — send_response is only expected to be called after an inbound
+        webhook (COMMUNICATION_CREATED → reconcile) or after
+        `initiate_outbound_conversation`, both of which populate the session.
 
         Args:
             conversation_id: Conversation ID to send response to
@@ -85,24 +103,26 @@ class ChatChannel(MessagingChannel):
 
         Raises:
             TypeError: If response is not a string
+            RuntimeError: If the session, channel_id, or participant ids are missing
         """
         if not isinstance(response, str):
             raise TypeError("Chat channel only supports string responses")
 
         session = self._conversations.get(conversation_id)
-        if not session:
-            self.logger.error(
-                "No active session found",
-                conversation_id=conversation_id,
+        if session is None or not session.author_info or not session.ai_agent_info:
+            raise RuntimeError(
+                f"Unable to send chat message: send_response called without a "
+                f"reconciled session for conversation {conversation_id}. Wait for "
+                "an inbound webhook or call initiate_outbound_conversation first."
             )
-            return
 
-        if not session.author_info:
-            self.logger.error(
-                "No author info found - no inbound message received yet",
-                conversation_id=conversation_id,
+        customer_participant_id = session.author_info.participant_id
+        agent_participant_id = session.ai_agent_info.participant_id
+        if not customer_participant_id or not agent_participant_id:
+            raise RuntimeError(
+                f"Unable to send chat message: session for conversation "
+                f"{conversation_id} is missing participant ids."
             )
-            return
 
         # channelId (Chat Channel SID) is required for CHAT delivery — the V1
         # Chat backend uses it to pick the destination thread. Inbound webhooks
@@ -114,37 +134,6 @@ class ChatChannel(MessagingChannel):
                 "this is normally populated by an inbound webhook. Ensure an inbound "
                 "message has been processed before calling send_response, or set "
                 "session.metadata['channel_id'] explicitly in advanced usage."
-            )
-
-        try:
-            participants = await self.tac.conversation_orchestrator_client.list_participants(
-                conversation_id
-            )
-        except Exception as e:
-            self.logger.error(
-                "Failed to list participants",
-                conversation_id=conversation_id,
-                error=str(e),
-            )
-            return
-
-        # Use from_address from session metadata (set during outbound initiation),
-        # falling back to the configured agent_address for inbound conversations
-        from_addr = session.metadata.get("from_address")
-        agent_addr = from_addr if isinstance(from_addr, str) else self.agent_address
-
-        agent_participant = await self._ensure_agent_participant(
-            conversation_id,
-            existing_participants=participants,
-            agent_address=ParticipantAddress(
-                channel="CHAT",
-                address=agent_addr,
-                channel_id=chat_channel_sid,
-            ),
-        )
-        if not agent_participant:
-            raise RuntimeError(
-                f"Failed to resolve AI_AGENT participant for conversation {conversation_id}"
             )
 
         # TODO(maestro): Drop `chat_service` here once the Actions API resolves the
@@ -162,12 +151,12 @@ class ChatChannel(MessagingChannel):
                 payload=SendMessageActionPayload(
                     from_=ActionParticipantRef(
                         channel="CHAT",
-                        participant_id=agent_participant.id,
+                        participant_id=agent_participant_id,
                     ),
                     to=[
                         ActionParticipantRef(
                             channel="CHAT",
-                            participant_id=session.author_info.participant_id,
+                            participant_id=customer_participant_id,
                         )
                     ],
                     content=ActionTextContent(text=response),
@@ -175,7 +164,7 @@ class ChatChannel(MessagingChannel):
                 ),
             )
 
-            await self.tac.conversation_orchestrator_client.create_action(
+            await self.conversation_orchestrator_client.create_action(
                 conversation_id, action_request
             )
 
@@ -203,7 +192,6 @@ class ChatChannel(MessagingChannel):
         If an active conversation with the same addresses already exists
         (group-by dedup), CO returns 409 and the existing conversation is reused.
         """
-        from_address = options.from_ or self.agent_address
         chat_service_sid = self.tac.conversations_v1_service_sid
         if not chat_service_sid:
             raise RuntimeError(
@@ -213,7 +201,7 @@ class ChatChannel(MessagingChannel):
 
         return await self._initiate_messaging_conversation(
             options=options,
-            from_address=from_address,
+            from_address=self.agent_address,
             customer_address_kwargs={"channel_id": options.channel_id},
             agent_address_kwargs={"channel_id": options.channel_id},
             extra_metadata={"channel_id": options.channel_id},

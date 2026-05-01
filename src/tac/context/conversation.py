@@ -113,10 +113,14 @@ class ConversationClient(BaseAPIClient):
         """
         Add a new participant to a conversation.
 
+        Used by `_reconcile_participants` when Maestro's v1-bridge emits only
+        the customer participant on an inbound SMS/chat — TAC adds itself as
+        `AI_AGENT` before replying.
+
         Args:
             conversation_id: The conversation ID to add participant to
             addresses: List of communication addresses for the participant (optional)
-            participant_type: Type of participant (e.g., "CUSTOMER", "AGENT"). Optional.
+            participant_type: Type of participant (e.g., "CUSTOMER", "AI_AGENT"). Optional.
 
         Returns:
             ParticipantResponse object containing the created participant details
@@ -131,13 +135,9 @@ class ConversationClient(BaseAPIClient):
 
         try:
             async with self._get_client() as client:
-                response = await client.post(
-                    url,
-                    json=request_payload,
-                )
+                response = await client.post(url, json=request_payload)
                 response.raise_for_status()
-                participant = ParticipantResponse(**response.json())
-                return participant
+                return ParticipantResponse(**response.json())
 
         except httpx.HTTPError as e:
             response_text = (
@@ -147,6 +147,70 @@ class ConversationClient(BaseAPIClient):
             )
             self.logger.error(
                 f"Failed to add participant: {e}\n"
+                f"URL: {url}\n"
+                f"Request body: {request_payload}\n"
+                f"Response: {response_text}"
+            )
+            raise
+
+    async def update_participant(
+        self,
+        conversation_id: str,
+        participant_id: str,
+        participant_type: Literal["HUMAN_AGENT", "CUSTOMER", "AI_AGENT", "AGENT"],
+        addresses: list[ParticipantAddress],
+        name: str | None = None,
+        profile_id: str | None = None,
+    ) -> ParticipantResponse:
+        """
+        Replace an existing participant.
+
+        PUT is a full resource replacement per the Maestro spec — any field
+        omitted from the body is cleared on the server. Callers must pass the
+        current `addresses` (and `name` if set) to preserve them; pass a new
+        `profile_id` to attach a profile during reconciliation.
+
+        Args:
+            conversation_id: Conversation ID containing the participant
+            participant_id: Participant ID to update
+            participant_type: New participant type
+            addresses: Current participant addresses (required to avoid wiping)
+            name: Current participant display name (optional)
+            profile_id: Memora profile ID to attach (optional)
+
+        Returns:
+            ParticipantResponse reflecting the updated participant.
+
+        Raises:
+            httpx.HTTPError: If the API request fails.
+        """
+        url = f"{self.base_url}/v2/Conversations/{conversation_id}/Participants/{participant_id}"
+
+        request_data = ParticipantRequest(
+            name=name,
+            type=participant_type,
+            profile_id=profile_id,
+            addresses=addresses,
+        )
+        request_payload = request_data.model_dump(by_alias=True, exclude_none=True)
+
+        try:
+            async with self._get_client() as client:
+                response = await client.put(
+                    url,
+                    json=request_payload,
+                )
+                response.raise_for_status()
+                return ParticipantResponse(**response.json())
+
+        except httpx.HTTPError as e:
+            response_text = (
+                getattr(e.response, "text", "No response body")
+                if hasattr(e, "response")
+                else "No response"
+            )
+            self.logger.error(
+                f"Failed to update participant: {e}\n"
                 f"URL: {url}\n"
                 f"Request body: {request_payload}\n"
                 f"Response: {response_text}"

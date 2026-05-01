@@ -214,13 +214,14 @@ class TestTACConfigFromEnv:
     def test_from_env_missing_conversation_configuration_id(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Test from_env() raises KeyError when
-        TWILIO_CONVERSATION_CONFIGURATION_ID is missing."""
+        """Test from_env() succeeds with conversation_configuration_id=None when
+        TWILIO_CONVERSATION_CONFIGURATION_ID is missing (ConversationRelay-only mode)."""
         self._set_all_env_vars(monkeypatch)
         monkeypatch.delenv("TWILIO_CONVERSATION_CONFIGURATION_ID", raising=False)
 
-        with pytest.raises(KeyError, match="TWILIO_CONVERSATION_CONFIGURATION_ID"):
-            TACConfig.from_env()
+        config = TACConfig.from_env()
+
+        assert config.conversation_configuration_id is None
 
     def test_from_env_missing_account_sid(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test from_env() raises KeyError when TWILIO_ACCOUNT_SID is missing."""

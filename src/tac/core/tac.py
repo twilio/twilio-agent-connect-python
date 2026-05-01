@@ -45,45 +45,60 @@ class TAC:
         setup_logging(log_level=self.config.log_level, log_format="console")
         self.logger = get_logger(__name__)
 
-        self.conversation_orchestrator_client = ConversationClient(
-            api_key=self.config.api_key,
-            api_secret=self.config.api_secret,
-            configuration_id=self.config.conversation_configuration_id,
-            region=self.config.region,
-        )
+        self.conversation_orchestrator_client: ConversationClient | None = None
+        self.conversation_memory_client: MemoryClient | None = None
+        self.conversations_v1_service_sid: str | None = None
 
-        try:
-            configuration = self.conversation_orchestrator_client.get_configuration(
-                self.config.conversation_configuration_id
+        if self.config.conversation_configuration_id:
+            self.conversation_orchestrator_client = ConversationClient(
+                api_key=self.config.api_key,
+                api_secret=self.config.api_secret,
+                configuration_id=self.config.conversation_configuration_id,
+                region=self.config.region,
             )
-        except Exception as e:
-            raise ValueError(
-                f"Failed to fetch Conversation Orchestrator configuration: {e}. "
-                "TAC initialization requires a valid Conversation Orchestrator configuration. "
-                "Please check your conversation_configuration_id and credentials."
-            ) from e
 
-        # TODO(maestro): Remove once the Actions API resolves the V1 Chat service SID
-        # server-side. Maestro team confirmed this should not be required client-side;
-        # until they ship the fix, CHAT sends fail with
-        #   "chatService attribute is required for CHAT channel"
-        # unless we pass it on channelSettings.chatService. We source it from the
-        # Configuration's conversationsV1Bridge since the inbound webhook's serviceId
-        # is the literal "unused" for CHAT. When the server-side fix lands, drop this
-        # attribute plus ActionChannelSettings.chat_service and the chat channel's
-        # chat_service_sid plumbing.
-        self.conversations_v1_service_sid: str | None = (
-            configuration.conversations_v1_bridge.service_id
-            if configuration.conversations_v1_bridge
-            else None
-        )
+            try:
+                configuration = self.conversation_orchestrator_client.get_configuration(
+                    self.config.conversation_configuration_id
+                )
+            except Exception as e:
+                raise ValueError(
+                    f"Failed to fetch Conversation Orchestrator configuration: {e}. "
+                    "Please check your conversation_configuration_id and credentials, or "
+                    "omit conversation_configuration_id to run in ConversationRelay-only mode."
+                ) from e
 
-        self.conversation_memory_client = MemoryClient(
-            store_id=configuration.memory_store_id,
-            api_key=self.config.api_key,
-            api_secret=self.config.api_secret,
-            region=self.config.region,
-        )
+            # TODO(maestro): Remove once the Actions API resolves the V1 Chat service SID
+            # server-side. Maestro team confirmed this should not be required client-side;
+            # until they ship the fix, CHAT sends fail with
+            #   "chatService attribute is required for CHAT channel"
+            # unless we pass it on channelSettings.chatService. We source it from the
+            # Configuration's conversationsV1Bridge since the inbound webhook's serviceId
+            # is the literal "unused" for CHAT. When the server-side fix lands, drop this
+            # attribute plus ActionChannelSettings.chat_service and the chat channel's
+            # chat_service_sid plumbing.
+            self.conversations_v1_service_sid = (
+                configuration.conversations_v1_bridge.service_id
+                if configuration.conversations_v1_bridge
+                else None
+            )
+
+            self.conversation_memory_client = MemoryClient(
+                store_id=configuration.memory_store_id,
+                api_key=self.config.api_key,
+                api_secret=self.config.api_secret,
+                region=self.config.region,
+            )
+            self.logger.info(
+                "TAC initialized with Conversation Orchestrator and Memory",
+                configuration_id=self.config.conversation_configuration_id,
+            )
+        else:
+            self.logger.info(
+                "TAC initialized in ConversationRelay-only mode "
+                "(no conversation_configuration_id). Only the Voice channel is usable; "
+                "messaging and Memory features are disabled."
+            )
 
         self.knowledge_client: KnowledgeClient | None = None
         if self.config.knowledge_base_id:
@@ -95,6 +110,12 @@ class TAC:
 
         self.ci_processor: OperatorResultProcessor | None = None
         if self.config.conversation_intelligence_config:
+            if self.conversation_memory_client is None:
+                raise ValueError(
+                    "conversation_intelligence_config requires Conversation Orchestrator to be "
+                    "configured (set conversation_configuration_id). CI observations/summaries "
+                    "are written via the Memory API."
+                )
             self.ci_processor = OperatorResultProcessor(
                 conversation_memory_client=self.conversation_memory_client,
                 config=self.config.conversation_intelligence_config,
@@ -119,12 +140,21 @@ class TAC:
             | None
         ) = None
 
+    def is_orchestrator_enabled(self) -> bool:
+        """True if TAC is configured with Conversation Orchestrator (not relay-only mode)."""
+        return self.conversation_orchestrator_client is not None
+
     async def retrieve_memory(
         self,
         conversation_context: ConversationSession,
         query: str | None = None,
     ) -> TACMemoryResponse:
         """Retrieve memories from Memory Store with fallback to Conversation Orchestrator.
+
+        Three-tier resolution:
+        1. Memory API (when conversation_memory_client is configured).
+        2. Conversation Orchestrator list_communications fallback (when CO is configured).
+        3. Empty TACMemoryResponse (relay-only mode).
 
         Args:
             conversation_context: Session containing conversation and profile information.
@@ -133,6 +163,15 @@ class TAC:
         Returns:
             Memory response containing conversation history and profile data.
         """
+        if self.conversation_memory_client is None:
+            if self.conversation_orchestrator_client is not None:
+                communications = await self.conversation_orchestrator_client.list_communications(
+                    conversation_id=conversation_context.conversation_id
+                )
+                return TACMemoryResponse(communications)
+            self.logger.debug("Memory retrieval skipped (relay-only mode)")
+            return TACMemoryResponse([])
+
         try:
             if not conversation_context.profile_id:
                 self.logger.debug(
@@ -191,6 +230,12 @@ class TAC:
             return TACMemoryResponse(memory_response)
 
         except Exception as e:
+            if self.conversation_orchestrator_client is None:
+                self.logger.warning(
+                    f"Memory retrieval failed: {e}. No Conversation Orchestrator fallback "
+                    "available; returning empty memory."
+                )
+                return TACMemoryResponse([])
             self.logger.warning(
                 f"Memory retrieval failed: {e}. "
                 "Falling back to Conversation Orchestrator Communications API."
