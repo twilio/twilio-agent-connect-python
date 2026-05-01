@@ -157,7 +157,7 @@ class ConversationClient(BaseAPIClient):
         self,
         conversation_id: str,
         participant_id: str,
-        participant_type: Literal["HUMAN_AGENT", "CUSTOMER", "AI_AGENT", "AGENT", "UNKNOWN"],
+        participant_type: Literal["HUMAN_AGENT", "CUSTOMER", "AI_AGENT", "AGENT"],
         addresses: list[ParticipantAddress],
         name: str | None = None,
         profile_id: str | None = None,

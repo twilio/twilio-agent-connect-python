@@ -42,6 +42,11 @@ class ChatChannel(MessagingChannel):
     and manages conversation lifecycle through Conversation Orchestrator webhooks.
     """
 
+    # Chat identifies the customer author-driven from the webhook's
+    # `author.participant_id`; promoting some other channel-matching UNKNOWN
+    # CHAT participant could pick the wrong recipient.
+    reconcile_customer_type = False
+
     def __init__(
         self,
         tac: TAC,

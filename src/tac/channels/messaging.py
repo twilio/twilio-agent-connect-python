@@ -1,7 +1,7 @@
 """MessagingChannel base class for messaging channels (SMS, Chat)."""
 
 from abc import abstractmethod
-from collections.abc import AsyncGenerator, Callable
+from collections.abc import AsyncGenerator
 from typing import Any
 
 import httpx
@@ -25,6 +25,13 @@ from tac.models.conversation import (
 from tac.models.outbound import InitiateConversationResult, InitiateMessagingConversationOptions
 from tac.models.session import AuthorInfo
 from tac.utils.redaction import mask_address
+
+# Participant types that represent TAC itself at TAC's (channel, address).
+# `AI_AGENT` is the canonical type; `AGENT` is the legacy Maestro form. A
+# participant typed either way at TAC's address is recognized as TAC and not
+# overwritten; anything else (HUMAN_AGENT, CUSTOMER, …) is someone else's
+# assignment.
+AGENT_TYPES: frozenset[str] = frozenset({"AGENT", "AI_AGENT"})
 
 
 class MessagingChannelConfig(BaseModel):
@@ -131,7 +138,7 @@ class MessagingChannel(BaseChannel):
                             conversation_id=conversation_id,
                             participant_id=author_participant_id,
                         )
-                    if author_p.type in ("AGENT", "AI_AGENT"):
+                    if author_p.type in AGENT_TYPES:
                         return True
             except Exception as e:
                 self.logger.warning(
@@ -382,7 +389,7 @@ class MessagingChannel(BaseChannel):
                 (
                     p
                     for p in participants
-                    if p.type in ("AGENT", "AI_AGENT")
+                    if p.type in AGENT_TYPES
                     and _match_address(p.addresses, from_address, agent_address_kwargs)
                 ),
                 None,
@@ -518,7 +525,7 @@ class MessagingChannel(BaseChannel):
             )
             if agent_candidate is None:
                 return None
-        elif agent_candidate.type not in ("AGENT", "AI_AGENT"):
+        elif agent_candidate.type not in AGENT_TYPES:
             self.logger.error(
                 "Participant at TAC's address has a conflicting type; refusing to "
                 "overwrite. Check Maestro participant state — a non-agent "
@@ -526,8 +533,6 @@ class MessagingChannel(BaseChannel):
                 conversation_id=conversation_id,
                 participant_id=agent_candidate.id,
                 participant_type=agent_candidate.type,
-                channel=channel,
-                address=agent_address.address,
             )
             return None
 
@@ -627,43 +632,6 @@ class MessagingChannel(BaseChannel):
             )
             return None
 
-    async def _refetch_after_409(
-        self,
-        conversation_id: str,
-        predicate: Callable[[ParticipantResponse], bool],
-        *,
-        context: str,
-    ) -> ParticipantResponse | None:
-        """Re-list participants after a 409 and find the one matching `predicate`.
-
-        Used by POST/PUT helpers to recover from concurrent-update races: the
-        other worker already made the change we wanted, so re-fetch and return
-        that participant. Returns None (with an ERROR log) if listing fails or
-        no match remains. `context` is a short label used in the no-match log
-        so the operator can tell which caller gave up.
-        """
-        try:
-            refreshed = await self.conversation_orchestrator_client.list_participants(
-                conversation_id
-            )
-        except Exception as e:
-            self.logger.error(
-                "Failed to re-list participants after 409",
-                conversation_id=conversation_id,
-                context=context,
-                error=str(e),
-            )
-            return None
-
-        match = next((p for p in refreshed if predicate(p)), None)
-        if match is None:
-            self.logger.error(
-                "No matching participant found after 409",
-                conversation_id=conversation_id,
-                context=context,
-            )
-        return match
-
     async def _promote_participant(
         self,
         conversation_id: str,
@@ -678,8 +646,9 @@ class MessagingChannel(BaseChannel):
         defaults to the participant's current value; pass a non-None override
         to attach a newly resolved profile during CUSTOMER reconciliation.
 
-        On 409 (concurrent update), re-fetches and returns the participant iff
-        it's now at `new_type`. Other errors return None.
+        Returns None on any error (including 409). A 409 from Maestro here
+        means the promotion is structurally blocked — stop and surface it;
+        don't retry.
         """
         effective_profile_id = profile_id if profile_id is not None else participant.profile_id
         try:
@@ -701,11 +670,16 @@ class MessagingChannel(BaseChannel):
             return updated
         except httpx.HTTPStatusError as e:
             if e.response is not None and e.response.status_code == 409:
-                return await self._refetch_after_409(
-                    conversation_id,
-                    lambda p: p.id == participant.id and p.type == new_type,
-                    context=f"promote to {new_type}",
+                self.logger.warning(
+                    "Maestro returned 409 on participant promotion; skipping — "
+                    "likely a conflicting conversation or grouping constraint. "
+                    "Check Maestro for duplicate active conversations.",
+                    conversation_id=conversation_id,
+                    participant_id=participant.id,
+                    target_type=new_type,
+                    conflicting_resource_id=e.response.headers.get("X-Conflicting-Resource-Id"),
                 )
+                return None
             self.logger.error(
                 "Failed to promote participant",
                 conversation_id=conversation_id,
@@ -731,8 +705,9 @@ class MessagingChannel(BaseChannel):
     ) -> ParticipantResponse | None:
         """POST an `AI_AGENT` participant owning `agent_address`.
 
-        On 409 (another worker added it first), re-fetches and returns the
-        AI_AGENT now owning that address. Other errors return None.
+        Returns None on any error (including 409). A 409 here means the
+        address is already owned or the conversation's participant set
+        can't accept a new AI_AGENT — stop and surface it; don't retry.
         """
         try:
             created = await self.conversation_orchestrator_client.add_participant(
@@ -744,29 +719,21 @@ class MessagingChannel(BaseChannel):
                 "Added AI_AGENT participant",
                 conversation_id=conversation_id,
                 participant_id=created.id,
-                channel=agent_address.channel,
-                address=agent_address.address,
             )
             return created
         except httpx.HTTPStatusError as e:
             if e.response is not None and e.response.status_code == 409:
-                return await self._refetch_after_409(
-                    conversation_id,
-                    lambda p: (
-                        p.type in ("AGENT", "AI_AGENT")
-                        and any(
-                            a.channel == agent_address.channel
-                            and a.address == agent_address.address
-                            for a in p.addresses
-                        )
-                    ),
-                    context="add AI_AGENT",
+                self.logger.warning(
+                    "Maestro returned 409 on AI_AGENT participant add; skipping — "
+                    "address is already owned or the conversation can't accept a "
+                    "new AI_AGENT. Check Maestro participant state.",
+                    conversation_id=conversation_id,
+                    conflicting_resource_id=e.response.headers.get("X-Conflicting-Resource-Id"),
                 )
+                return None
             self.logger.error(
                 "Failed to add AI_AGENT participant",
                 conversation_id=conversation_id,
-                channel=agent_address.channel,
-                address=agent_address.address,
                 error=str(e),
             )
             return None
@@ -774,8 +741,6 @@ class MessagingChannel(BaseChannel):
             self.logger.error(
                 "Failed to add AI_AGENT participant",
                 conversation_id=conversation_id,
-                channel=agent_address.channel,
-                address=agent_address.address,
                 error=str(e),
             )
             return None

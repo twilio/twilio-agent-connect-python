@@ -241,38 +241,6 @@ async def test_non_agent_at_our_address_refuses_to_overwrite(
 
 
 @pytest.mark.asyncio
-async def test_agent_type_at_our_address_is_recognized_as_tac() -> None:
-    """A participant typed `AGENT` (not `AI_AGENT`) at TAC's address counts as us.
-
-    Maestro/legacy flows can create the agent participant as plain `AGENT`.
-    TAC treats it as its own — no PUT, just use it.
-    """
-    tac = _tac()
-    channel = SMSChannel(tac)
-
-    agent_as_agent_type = _participant("PA_A", "AGENT", "+15551234567")
-    customer = _participant("PA_C", "CUSTOMER", "+12345678901")
-
-    with (
-        patch.object(
-            tac.conversation_orchestrator_client,
-            "list_participants",
-            return_value=[agent_as_agent_type, customer],
-        ),
-        patch.object(tac.conversation_orchestrator_client, "update_participant") as mock_update,
-        patch.object(tac.conversation_orchestrator_client, "add_participant") as mock_add,
-    ):
-        result = await channel._reconcile_participants("CH123")
-
-    assert result is not None
-    assert result[0].id == "PA_A"
-    assert result[0].type == "AGENT"
-    assert result[1] is not None and result[1].id == "PA_C"
-    mock_update.assert_not_called()
-    mock_add.assert_not_called()
-
-
-@pytest.mark.asyncio
 async def test_solo_customer_posts_agent() -> None:
     """v1-bridge inbound: only customer participant → POST AI_AGENT, then use."""
     tac = _tac()
@@ -309,152 +277,43 @@ async def test_solo_customer_posts_agent() -> None:
 
 
 @pytest.mark.asyncio
-async def test_solo_unknown_customer_posts_agent_and_promotes_customer() -> None:
-    """Only an UNKNOWN customer-side participant → POST agent + PUT customer."""
-    tac = _tac()
-    channel = SMSChannel(tac)
-
-    unknown_customer = _participant("PA_C", "UNKNOWN", "+12345678901")
-    created_agent = _participant("PA_A", "AI_AGENT", "+15551234567")
-    promoted_customer = _participant("PA_C", "CUSTOMER", "+12345678901")
-
-    with (
-        patch.object(
-            tac.conversation_orchestrator_client,
-            "list_participants",
-            return_value=[unknown_customer],
-        ),
-        patch.object(
-            tac.conversation_orchestrator_client,
-            "add_participant",
-            new=AsyncMock(return_value=created_agent),
-        ) as mock_add,
-        patch.object(
-            tac.conversation_orchestrator_client,
-            "update_participant",
-            new=AsyncMock(return_value=promoted_customer),
-        ) as mock_update,
-    ):
-        result = await channel._reconcile_participants("CH123")
-
-    assert result is not None
-    assert result[0].type == "AI_AGENT"
-    assert result[1] is not None
-    assert result[1].type == "CUSTOMER"
-    mock_add.assert_called_once()
-    mock_update.assert_called_once()
-    update_call = mock_update.call_args
-    assert update_call.kwargs["participant_id"] == "PA_C"
-    assert update_call.kwargs["participant_type"] == "CUSTOMER"
-
-
-@pytest.mark.asyncio
-async def test_add_agent_409_picks_up_existing_owner() -> None:
-    """POST AI_AGENT returns 409 → re-list, pick up the AI_AGENT another worker added."""
+async def test_add_agent_409_returns_none() -> None:
+    """POST AI_AGENT returns 409 → skip inbound. Maestro is signaling a
+    structural conflict (duplicate conversation, address owned, grouping
+    constraint) that TAC can't safely paper over by retrying."""
     tac = _tac()
     channel = SMSChannel(tac)
 
     customer = _participant("PA_C", "CUSTOMER", "+12345678901")
-    added_by_other = _participant("PA_A", "AI_AGENT", "+15551234567")
 
     mock_response = httpx.Response(
         status_code=409, request=httpx.Request("POST", "http://example.invalid")
     )
     conflict = httpx.HTTPStatusError("409", request=mock_response.request, response=mock_response)
 
-    list_calls = [
-        [customer],  # initial reconciliation list
-        [customer, added_by_other],  # re-list after POST 409
-    ]
-
     with (
         patch.object(
             tac.conversation_orchestrator_client,
             "list_participants",
-            new=AsyncMock(side_effect=list_calls),
+            new=AsyncMock(return_value=[customer]),
         ),
         patch.object(
             tac.conversation_orchestrator_client,
             "add_participant",
             new=AsyncMock(side_effect=conflict),
-        ),
+        ) as mock_add,
     ):
         result = await channel._reconcile_participants("CH123")
 
-    assert result is not None
-    assert result[0].id == "PA_A"
-    assert result[0].type == "AI_AGENT"
-    assert result[1] is not None
-    assert result[1].id == "PA_C"
-
-
-@pytest.mark.asyncio
-async def test_empty_participants_returns_none() -> None:
-    """No participants at all (e.g. brand-new conversation with no customer) → skip."""
-    tac = _tac()
-    channel = SMSChannel(tac)
-
-    created_agent = _participant("PA_A", "AI_AGENT", "+15551234567")
-
-    with (
-        patch.object(
-            tac.conversation_orchestrator_client,
-            "list_participants",
-            return_value=[],
-        ),
-        patch.object(
-            tac.conversation_orchestrator_client,
-            "add_participant",
-            new=AsyncMock(return_value=created_agent),
-        ),
-    ):
-        result = await channel._reconcile_participants("CH123")
-
-    # Agent posted, but no customer resolvable → skip.
     assert result is None
+    mock_add.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-async def test_promote_409_refetches_and_proceeds() -> None:
-    """PUT returning 409 is treated as concurrent update: re-list and use."""
-    tac = _tac()
-    channel = SMSChannel(tac)
-
-    unknown_agent = _participant("PA_A", "UNKNOWN", "+15551234567")
-    customer = _participant("PA_C", "CUSTOMER", "+12345678901")
-    promoted_by_other = _participant("PA_A", "AI_AGENT", "+15551234567")
-
-    mock_response = httpx.Response(
-        status_code=409, request=httpx.Request("PUT", "http://example.invalid")
-    )
-    conflict = httpx.HTTPStatusError("409", request=mock_response.request, response=mock_response)
-
-    list_calls = [
-        [unknown_agent, customer],  # first list during reconciliation
-        [promoted_by_other, customer],  # second list after 409
-    ]
-
-    with (
-        patch.object(
-            tac.conversation_orchestrator_client,
-            "list_participants",
-            new=AsyncMock(side_effect=list_calls),
-        ),
-        patch.object(
-            tac.conversation_orchestrator_client,
-            "update_participant",
-            new=AsyncMock(side_effect=conflict),
-        ),
-    ):
-        result = await channel._reconcile_participants("CH123")
-
-    assert result is not None
-    assert result[0].type == "AI_AGENT"
-
-
-@pytest.mark.asyncio
-async def test_promote_409_refetch_shows_wrong_type_returns_none() -> None:
-    """PUT 409 then re-list shows the participant still at the old type → skip."""
+async def test_promote_409_returns_none() -> None:
+    """PUT returning 409 → skip inbound. Maestro is signaling that the
+    promotion is structurally blocked (likely a conflicting active
+    conversation or grouping constraint); TAC should not retry."""
     tac = _tac()
     channel = SMSChannel(tac)
 
@@ -466,26 +325,22 @@ async def test_promote_409_refetch_shows_wrong_type_returns_none() -> None:
     )
     conflict = httpx.HTTPStatusError("409", request=mock_response.request, response=mock_response)
 
-    list_calls = [
-        [unknown_agent, customer],  # first list during reconciliation
-        [unknown_agent, customer],  # after 409, participant still UNKNOWN
-    ]
-
     with (
         patch.object(
             tac.conversation_orchestrator_client,
             "list_participants",
-            new=AsyncMock(side_effect=list_calls),
+            new=AsyncMock(return_value=[unknown_agent, customer]),
         ),
         patch.object(
             tac.conversation_orchestrator_client,
             "update_participant",
             new=AsyncMock(side_effect=conflict),
-        ),
+        ) as mock_update,
     ):
         result = await channel._reconcile_participants("CH123")
 
     assert result is None
+    mock_update.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -506,59 +361,6 @@ async def test_list_participants_failure_returns_none() -> None:
 
     assert result is None
     mock_update.assert_not_called()
-
-
-@pytest.mark.asyncio
-@pytest.mark.no_stub_profile_calls
-async def test_customer_promotion_reuses_existing_profile() -> None:
-    """Lookup hit: promote UNKNOWN → CUSTOMER with the existing profile_id."""
-    from tac.models.memory import ProfileLookupResponse
-
-    tac = _tac()
-    channel = SMSChannel(tac)
-
-    agent = _participant("PA_A", "AI_AGENT", "+15551234567")
-    unknown_customer = _participant("PA_C", "UNKNOWN", "+12345678901")
-    promoted = _participant("PA_C", "CUSTOMER", "+12345678901")
-
-    with (
-        patch.object(
-            tac.conversation_orchestrator_client,
-            "list_participants",
-            return_value=[agent, unknown_customer],
-        ),
-        patch.object(
-            tac.conversation_orchestrator_client,
-            "update_participant",
-            new=AsyncMock(return_value=promoted),
-        ) as mock_update,
-        patch.object(
-            tac.conversation_memory_client,
-            "lookup_profile",
-            new=AsyncMock(
-                return_value=ProfileLookupResponse(
-                    normalizedValue="+12345678901",
-                    profiles=["mem_profile_01existing"],
-                ),
-            ),
-        ) as mock_lookup,
-        patch.object(
-            tac.conversation_memory_client,
-            "create_profile",
-            new=AsyncMock(),
-        ) as mock_create,
-    ):
-        result = await channel._reconcile_participants("CH123")
-
-    assert result is not None
-    assert result[1] is not None and result[1].id == "PA_C"
-    mock_lookup.assert_awaited_once_with(id_type="phone", value="+12345678901")
-    mock_create.assert_not_called()
-    mock_update.assert_awaited_once()
-    kwargs = mock_update.await_args.kwargs
-    assert kwargs["participant_type"] == "CUSTOMER"
-    assert kwargs["profile_id"] == "mem_profile_01existing"
-    assert kwargs["addresses"] == unknown_customer.addresses
 
 
 @pytest.mark.asyncio
