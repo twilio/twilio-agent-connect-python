@@ -17,7 +17,6 @@ from tac.channels.websocket_protocol import WebSocketDisconnectError
 from tac.core.logging import get_logger
 from tac.core.tac import TAC
 from tac.server.config import TACServerConfig
-from tac.server.webhook import build_http_signature_dependency, build_websocket_signature_dependency
 from tac.tools.handoff import studio_voice_handoff_url
 
 if TYPE_CHECKING:
@@ -28,6 +27,11 @@ try:
     import uvicorn
     from fastapi import Depends, FastAPI, Request, WebSocket, WebSocketDisconnect
     from fastapi.responses import JSONResponse, Response
+
+    from tac.server.webhook import (
+        build_http_signature_dependency,
+        build_websocket_signature_dependency,
+    )
 except ImportError as e:
     raise ImportError(
         "TACFastAPIServer requires FastAPI and uvicorn. Install with: pip install tac[server]"

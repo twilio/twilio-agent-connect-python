@@ -377,6 +377,26 @@ class TestBuildWebsocketSignatureDependency:
         websocket.close.assert_not_called()
 
     @pytest.mark.asyncio
+    async def test_valid_signature_with_query_params(self) -> None:
+        auth_token = "test_token"
+        url = "wss://testserver/ws"
+        params = {"token": "abc123", "foo": "bar"}
+        validator = RequestValidator(auth_token)
+        signature = validator.compute_signature(url, params)
+
+        dep = build_websocket_signature_dependency(auth_token)
+
+        websocket = AsyncMock()
+        websocket.headers = {"x-twilio-signature": signature, "Host": "testserver"}
+        websocket.url.path = "/ws"
+        websocket.url.query = "token=abc123&foo=bar"
+        websocket.url.scheme = "wss"
+        websocket.url.netloc = "testserver"
+
+        await dep(websocket)
+        websocket.close.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_missing_signature_closes_with_1008(self) -> None:
         dep = build_websocket_signature_dependency("test_token")
 
