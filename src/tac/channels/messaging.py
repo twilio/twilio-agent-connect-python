@@ -240,25 +240,6 @@ class MessagingChannel(BaseChannel):
         if communication_data.channel_id:
             session.metadata["channel_id"] = communication_data.channel_id
 
-        # TEMP DEBUG: participants as they arrive on the webhook.
-        self.logger.info(
-            "DEBUG webhook participants",
-            conversation_id=conv_id,
-            author_address=communication_data.author.address,
-            author_participant_id=communication_data.author.participant_id,
-            author_channel=communication_data.author.channel,
-            recipients=[
-                {
-                    "address": r.address,
-                    "channel": r.channel,
-                    "participant_id": r.participant_id,
-                }
-                for r in (communication_data.recipients or [])
-            ],
-            session_has_ai_agent_info=session.ai_agent_info is not None,
-            session_has_author_info=session.author_info is not None,
-        )
-
         # Reconcile participant types pre-LLM so v1-bridge's UNKNOWN gets
         # promoted to CUSTOMER (with a Memora profile attached when possible)
         # and to stash both participant ids on the session for send_response.
@@ -278,24 +259,6 @@ class MessagingChannel(BaseChannel):
                 return
 
             agent_participant, customer_participant = resolved
-            # TEMP DEBUG: what reconcile resolved.
-            self.logger.info(
-                "DEBUG reconcile resolved",
-                conversation_id=conv_id,
-                agent_participant_id=agent_participant.id,
-                agent_participant_type=agent_participant.type,
-                agent_addresses=[
-                    {"channel": a.channel, "address": a.address}
-                    for a in agent_participant.addresses
-                ],
-                customer_participant_id=(customer_participant.id if customer_participant else None),
-                customer_participant_type=(
-                    customer_participant.type if customer_participant else None
-                ),
-                customer_profile_id=(
-                    customer_participant.profile_id if customer_participant else None
-                ),
-            )
             session.ai_agent_info = AuthorInfo(
                 address=self.get_agent_address(conv_id).address,
                 participant_id=agent_participant.id,
