@@ -74,7 +74,10 @@ def build_http_signature_dependency(
             body: str | Mapping[str, str] = {k: str(v) for k, v in form_data.items()}
         else:
             raw = await request.body()
-            body = raw.decode("utf-8")
+            try:
+                body = raw.decode("utf-8")
+            except UnicodeDecodeError:
+                raise HTTPException(status_code=403, detail="Invalid Twilio signature") from None
 
         if not validate_twilio_webhook(request, auth_token, body):
             raise HTTPException(status_code=403, detail="Invalid Twilio signature")

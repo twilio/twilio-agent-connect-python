@@ -334,6 +334,25 @@ class TestBuildHttpSignatureDependency:
             await dep(request)
         assert exc_info.value.status_code == 403
 
+    @pytest.mark.asyncio
+    async def test_malformed_utf8_body_raises_403(self) -> None:
+        dep = build_http_signature_dependency("test_token")
+
+        request = AsyncMock()
+        request.headers = {
+            "X-Twilio-Signature": "some_signature",
+            "content-type": "application/json",
+        }
+        request.url.path = "/webhook"
+        request.url.query = ""
+        request.url.scheme = "http"
+        request.url.netloc = "testserver"
+        request.body.return_value = b'\xff\xfe invalid utf8'
+
+        with pytest.raises(HTTPException) as exc_info:
+            await dep(request)
+        assert exc_info.value.status_code == 403
+
 
 class TestBuildWebsocketSignatureDependency:
     """Test build_websocket_signature_dependency."""
