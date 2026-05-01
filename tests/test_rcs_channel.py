@@ -131,6 +131,17 @@ async def test_rcs_channel_initialization_with_config(mock_tac: TAC) -> None:
 
 
 @pytest.mark.asyncio
+async def test_rcs_channel_requires_sender_id() -> None:
+    """Test RCS channel initialization fails without rcs_sender_id."""
+    config_without_sender = get_test_config()
+    config_without_sender.pop("rcs_sender_id")
+    tac = TAC(config_without_sender)
+
+    with pytest.raises(ValueError, match="rcs_sender_id is required for RCS channel"):
+        RCSChannel(tac)
+
+
+@pytest.mark.asyncio
 async def test_is_default_agent_address_configured(mock_tac: TAC) -> None:
     """Test agent address detection with configured rcs_sender_id from TAC config."""
     channel = RCSChannel(mock_tac, config=RCSChannelConfig())

@@ -74,13 +74,15 @@ class RCSChannel(MessagingChannel):
         return "RCS"
 
     def is_default_agent_address(self, author_address: str) -> bool:
-        # rcs_sender_id is guaranteed to be non-None by __init__ validation
-        assert self.tac.config.rcs_sender_id is not None
+        """Check if the author address matches the configured RCS sender ID."""
+        if not self.tac.config.rcs_sender_id:
+            raise RuntimeError("rcs_sender_id is required for RCS channel.")
         return author_address == self.tac.config.rcs_sender_id
 
     def get_agent_address(self, conversation_id: str) -> ParticipantAddress:
-        # rcs_sender_id is guaranteed to be non-None by __init__ validation
-        assert self.tac.config.rcs_sender_id is not None
+        """Get the agent's participant address for this conversation."""
+        if not self.tac.config.rcs_sender_id:
+            raise RuntimeError("rcs_sender_id is required for RCS channel.")
         return ParticipantAddress(channel="RCS", address=self.tac.config.rcs_sender_id)
 
     async def send_response(
@@ -175,11 +177,22 @@ class RCSChannel(MessagingChannel):
 
         Creates a conversation via Conversation Orchestrator with inline
         participants, then sends the initial message via the Actions API.
+        Uses the RCS sender ID from TACConfig as the from address.
         If an active conversation with the same addresses already exists
         (group-by dedup), CO returns 409 and the existing conversation is reused.
+
+        Args:
+            options: Conversation initiation options (to address and message)
+
+        Returns:
+            InitiateConversationResult with conversation_id and session
+
+        Raises:
+            RuntimeError: If rcs_sender_id is not configured
         """
-        # rcs_sender_id is guaranteed to be non-None by __init__ validation
-        assert self.tac.config.rcs_sender_id is not None
+        if not self.tac.config.rcs_sender_id:
+            raise RuntimeError("rcs_sender_id is required for RCS channel.")
+
         return await self._initiate_messaging_conversation(
             options=options,
             from_address=self.tac.config.rcs_sender_id,
