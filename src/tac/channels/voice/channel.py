@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from twilio.rest import Client
 
+from pydantic import ValidationError
+
 from tac.channels.base import BaseChannel
 from tac.channels.websocket_manager import WebSocketManager
 from tac.channels.websocket_protocol import WebSocketDisconnectError, WebSocketProtocol
@@ -22,6 +24,7 @@ from tac.models.voice import (
     TwiMLOptions,
 )
 from tac.session import SessionState
+from tac.utils.redaction import mask_phone
 
 from . import twiml
 from .config import VoiceChannelConfig
@@ -38,7 +41,6 @@ class VoiceChannel(BaseChannel):
     - TwiML generation for incoming calls (see twiml module)
     - WebSocket connection management for real-time voice streaming
     - Conversation lifecycle management (inherited from BaseChannel)
-    - ConversationRelay callback webhook handling
     - Outbound call initiation
 
     This channel is framework-agnostic and accepts any WebSocket implementation
@@ -74,6 +76,13 @@ class VoiceChannel(BaseChannel):
         self.session_manager = config.session_manager
         self._websocket_manager = WebSocketManager()
         self._twilio_client: Client | None = None
+
+    @staticmethod
+    def _caller_address(setup_msg: SetupMessage) -> str | None:
+        """Return the phone number of the remote caller/callee from the setup message."""
+        if setup_msg.direction and setup_msg.direction.upper() == "OUTBOUND":
+            return setup_msg.to_number
+        return setup_msg.from_number
 
     def _get_twilio_client(self) -> Client:
         if self._twilio_client is None:
@@ -138,32 +147,43 @@ class VoiceChannel(BaseChannel):
     async def handle_conversation_relay_callback(
         self,
         payload_dict: dict[str, str],
-    ) -> str | None:
-        """
-        Handle ConversationRelay callback webhook from Twilio.
+    ) -> None:
+        """Handle ConversationRelay callback webhook from Twilio.
 
-        This method processes the callback sent by Twilio when a ConversationRelay
-        session ends. Conversation lifecycle is managed by CO — the SDK does not
-        manually close conversations.
+        In relay-only mode, this is a secondary mechanism for cleaning up
+        conversation state when a call ends (the primary mechanism is websocket
+        disconnect). In orchestrated mode, conversation lifecycle is managed by
+        CO webhooks, so this is a no-op.
 
         Args:
             payload_dict: Raw form data dict from the webhook request.
-                Validated internally into ConversationRelayCallbackPayload.
-
-        Returns:
-            None for simple acknowledgment.
-
-        Raises:
-            ValidationError: If the payload dict fails validation.
         """
-        payload = ConversationRelayCallbackPayload(**payload_dict)
+        try:
+            payload = ConversationRelayCallbackPayload(**payload_dict)
+        except ValidationError:
+            self.logger.warning(
+                "Invalid ConversationRelay callback payload, ignoring",
+                payload_keys=list(payload_dict.keys()),
+            )
+            return
 
-        self.logger.info(
-            f"[ConversationRelay Callback] CallSid: {payload.call_sid}, "
-            f"Status: {payload.call_status}"
+        if payload.account_sid != self.tac.config.account_sid:
+            self.logger.warning(
+                "ConversationRelay callback account_sid mismatch, ignoring",
+                expected=self.tac.config.account_sid,
+                received=payload.account_sid,
+            )
+            return
+
+        self.logger.debug(
+            "ConversationRelay callback received",
+            call_sid=payload.call_sid,
+            call_status=payload.call_status,
         )
 
-        return None
+        if payload.call_status == "completed" and not self.tac.is_orchestrator_enabled():
+            if payload.call_sid in self._conversations:
+                await self._end_conversation(payload.call_sid)
 
     async def _initialize_conversation(
         self,
@@ -173,9 +193,13 @@ class VoiceChannel(BaseChannel):
     ) -> tuple[str, SessionState | None]:
         """Poll CO for the conversation created by ConversationRelay, resolve
         the customer participant, and initialize the local session."""
+        conversation_orchestrator_client = self.tac.conversation_orchestrator_client
+        if conversation_orchestrator_client is None:
+            raise RuntimeError("_initialize_conversation called without Conversation Orchestrator")
+
         conversations: list[Any] = []
         for attempt in range(_POLL_ATTEMPTS):
-            conversations = await self.tac.conversation_orchestrator_client.list_conversations(
+            conversations = await conversation_orchestrator_client.list_conversations(
                 channel_id=call_sid,
                 status=["ACTIVE"],
             )
@@ -201,7 +225,7 @@ class VoiceChannel(BaseChannel):
         conversation = conversations[0]
         conv_id = conversation.id
 
-        participants = await self.tac.conversation_orchestrator_client.list_participants(conv_id)
+        participants = await conversation_orchestrator_client.list_participants(conv_id)
 
         customer_participant = next(
             (p for p in participants if p.type == "CUSTOMER"),
@@ -215,12 +239,7 @@ class VoiceChannel(BaseChannel):
             if customer_participant and customer_participant.addresses
             else None
         )
-        fallback_address = (
-            setup_msg.to_number
-            if setup_msg.direction and setup_msg.direction.upper() == "OUTBOUND"
-            else setup_msg.from_number
-        )
-        profile_lookup_address = customer_address or fallback_address
+        profile_lookup_address = customer_address or self._caller_address(setup_msg)
         profile_id = customer_participant.profile_id if customer_participant else None
 
         self._websocket_manager.add_websocket(conv_id, websocket)
@@ -271,9 +290,25 @@ class VoiceChannel(BaseChannel):
 
                     if msg_type == "prompt":
                         if not conv_id and call_sid:
-                            conv_id, session_state = await self._initialize_conversation(
-                                call_sid, setup_msg, websocket
-                            )
+                            if self.tac.is_orchestrator_enabled():
+                                conv_id, session_state = await self._initialize_conversation(
+                                    call_sid, setup_msg, websocket
+                                )
+                            else:
+                                conv_id = call_sid
+                                self._websocket_manager.add_websocket(conv_id, websocket)
+                                self._start_conversation(conv_id, profile_id=None)
+
+                                caller = self._caller_address(setup_msg)
+                                if caller:
+                                    self._conversations[conv_id].author_info = AuthorInfo(
+                                        address=caller,
+                                    )
+
+                                if self.session_manager is not None:
+                                    session_state = self.session_manager.get_or_create_session(
+                                        conv_id
+                                    )
 
                         if conv_id:
                             await self._handle_prompt_async(conv_id, data, session_state)
@@ -321,8 +356,8 @@ class VoiceChannel(BaseChannel):
 
         self.logger.info(
             "Initiating outbound voice conversation",
-            to=options.to,
-            from_number=from_number,
+            to=mask_phone(options.to),
+            from_number=mask_phone(from_number),
         )
 
         try:
@@ -344,7 +379,7 @@ class VoiceChannel(BaseChannel):
             self.logger.info(
                 "Outbound voice call placed",
                 call_sid=call.sid,
-                to=options.to,
+                to=mask_phone(options.to),
             )
 
             return InitiateVoiceConversationResult(call_sid=call.sid)
@@ -352,7 +387,7 @@ class VoiceChannel(BaseChannel):
         except Exception as e:
             self.logger.error(
                 "Failed to initiate outbound call",
-                to=options.to,
+                to=mask_phone(options.to),
                 error=str(e),
                 exc_info=True,
             )
@@ -663,9 +698,10 @@ class VoiceChannel(BaseChannel):
         """
         Clean up WebSocket and session resources when connection closes.
 
-        Note: Does NOT clean up conversation state. The conversation remains tracked
-        in self._conversations until we receive CONVERSATION_UPDATED webhook with
-        CLOSED status from Maestro.
+        In orchestrated mode, the conversation remains tracked in
+        self._conversations until the CONVERSATION_UPDATED/CLOSED webhook
+        arrives from Maestro. In relay-only mode there is no such webhook,
+        so we also end the conversation here.
 
         Args:
             conv_id: Conversation ID
@@ -680,6 +716,9 @@ class VoiceChannel(BaseChannel):
             # Cancel any running task (user hung up, no point continuing)
             await session_state.cancel_stream_task()
             self.session_manager.remove_session(conv_id)
+
+        if not self.tac.is_orchestrator_enabled() and conv_id in self._conversations:
+            await self._end_conversation(conv_id)
 
         self.logger.debug(
             "Cleaned up WebSocket and session resources",

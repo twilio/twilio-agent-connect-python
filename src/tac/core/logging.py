@@ -2,6 +2,7 @@
 
 import json
 import logging
+import re
 import sys
 from typing import Any
 
@@ -32,6 +33,24 @@ _RESERVED_LOG_ATTRS = {
 }
 
 
+_PHONE_RE = re.compile(
+    r"(?<!\w)"
+    r"(?:\+\d[\d\-\s()]{6,}\d"
+    r"|(?:\(\d{3}\)\s*|\d{3}[\-.\s]?)\d{3}[\-.\s]?\d{4}"
+    r"|\d{10})"
+    r"(?!\w)"
+)
+_EMAIL_RE = re.compile(r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}")
+_REDACTED = "***"
+
+
+def _scrub_pii(value: str) -> str:
+    """Replace phone-number and email patterns with ``***``."""
+    value = _PHONE_RE.sub(_REDACTED, value)
+    value = _EMAIL_RE.sub(_REDACTED, value)
+    return value
+
+
 class JSONFormatter(logging.Formatter):
     """JSON formatter for structured logging using only stdlib."""
 
@@ -49,25 +68,25 @@ class JSONFormatter(logging.Formatter):
         Returns:
             JSON-formatted log string
         """
-        log_data = {
+        log_data: dict[str, Any] = {
             "timestamp": self.formatTime(record, self.datefmt),
             "level": record.levelname,
             "logger": record.name,
             "module": record.module,
             "function": record.funcName,
             "line": record.lineno,
-            "message": record.getMessage(),
+            "message": _scrub_pii(record.getMessage()),
         }
 
         # Add exception info if present
         if record.exc_info:
-            log_data["exception"] = self.formatException(record.exc_info)
+            log_data["exception"] = _scrub_pii(self.formatException(record.exc_info))
 
         # Add extra fields from LogRecord
         # Skip standard fields and internal fields
         for key, value in record.__dict__.items():
             if key not in _RESERVED_LOG_ATTRS and not key.startswith("_"):
-                log_data[key] = value
+                log_data[key] = _scrub_pii(str(value)) if isinstance(value, str) else value
 
         return json.dumps(log_data, default=str)
 
@@ -96,7 +115,7 @@ class ConsoleFormatter(logging.Formatter):
         # Format base message
         formatted = super().format(record)
 
-        return f"{formatted}{context_str}"
+        return _scrub_pii(f"{formatted}{context_str}")
 
 
 class ContextLogger:

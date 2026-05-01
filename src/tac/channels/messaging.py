@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from tac import TAC
 from tac.channels.base import BaseChannel
+from tac.context.conversation import ConversationClient
 from tac.models.conversation import (
     ActionChannelSettings,
     ActionParticipantRef,
@@ -23,6 +24,7 @@ from tac.models.conversation import (
 )
 from tac.models.outbound import InitiateConversationResult, InitiateMessagingConversationOptions
 from tac.models.session import AuthorInfo
+from tac.utils.redaction import mask_address
 
 
 class MessagingChannelConfig(BaseModel):
@@ -76,6 +78,14 @@ class MessagingChannel(BaseChannel):
         dedup_capacity: int = 10000,
         auto_retrieve_memory: bool = False,
     ):
+        if tac.conversation_orchestrator_client is None:
+            raise ValueError(
+                f"{type(self).__name__} requires Conversation Orchestrator to be configured. "
+                "Set `conversation_configuration_id` on TACConfig to enable messaging channels."
+            )
+        self.conversation_orchestrator_client: ConversationClient = (
+            tac.conversation_orchestrator_client
+        )
         super().__init__(
             tac, auto_retrieve_memory=auto_retrieve_memory, dedup_capacity=dedup_capacity
         )
@@ -110,7 +120,7 @@ class MessagingChannel(BaseChannel):
 
         if author_participant_id:
             try:
-                participants = await self.tac.conversation_orchestrator_client.list_participants(
+                participants = await self.conversation_orchestrator_client.list_participants(
                     conversation_id
                 )
                 author_p = next((p for p in participants if p.id == author_participant_id), None)
@@ -351,7 +361,7 @@ class MessagingChannel(BaseChannel):
             (
                 conversation_id,
                 reused,
-            ) = await self.tac.conversation_orchestrator_client.create_or_reuse_conversation(
+            ) = await self.conversation_orchestrator_client.create_or_reuse_conversation(
                 participants=[
                     ParticipantRequest(
                         type="CUSTOMER",
@@ -376,7 +386,7 @@ class MessagingChannel(BaseChannel):
                 ]
             )
 
-            participants = await self.tac.conversation_orchestrator_client.list_participants(
+            participants = await self.conversation_orchestrator_client.list_participants(
                 conversation_id
             )
 
@@ -435,14 +445,14 @@ class MessagingChannel(BaseChannel):
                     channel_settings=channel_settings,
                 ),
             )
-            await self.tac.conversation_orchestrator_client.create_action(
+            await self.conversation_orchestrator_client.create_action(
                 conversation_id, action_request
             )
 
             self.logger.info(
                 f"Outbound {self.get_channel_name()} conversation initiated",
                 conversation_id=conversation_id,
-                to=options.to,
+                to=mask_address(options.to),
             )
             return InitiateConversationResult(conversation_id=conversation_id, session=session)
 
@@ -451,7 +461,7 @@ class MessagingChannel(BaseChannel):
                 self._conversations.pop(conversation_id, None)
             if conversation_id and not reused:
                 try:
-                    await self.tac.conversation_orchestrator_client.update_conversation(
+                    await self.conversation_orchestrator_client.update_conversation(
                         conversation_id, "CLOSED"
                     )
                 except Exception as close_err:
@@ -497,7 +507,7 @@ class MessagingChannel(BaseChannel):
         agent_address = self.get_agent_address(conversation_id)
 
         try:
-            participants = await self.tac.conversation_orchestrator_client.list_participants(
+            participants = await self.conversation_orchestrator_client.list_participants(
                 conversation_id
             )
         except Exception as e:
@@ -605,6 +615,10 @@ class MessagingChannel(BaseChannel):
         if channel not in ("SMS", "VOICE"):
             return None
 
+        memory_client = self.tac.conversation_memory_client
+        if memory_client is None:
+            return None
+
         phone_address = next(
             (a.address for a in customer.addresses if a.channel == channel and a.address),
             None,
@@ -613,7 +627,7 @@ class MessagingChannel(BaseChannel):
             return None
 
         try:
-            lookup = await self.tac.conversation_memory_client.lookup_profile(
+            lookup = await memory_client.lookup_profile(
                 id_type="phone",
                 value=phone_address,
             )
@@ -631,7 +645,7 @@ class MessagingChannel(BaseChannel):
         trait_field = memory_config.phone_trait_field
 
         try:
-            return await self.tac.conversation_memory_client.create_profile(
+            return await memory_client.create_profile(
                 traits={trait_group: {trait_field: phone_address}},
             )
         except Exception as e:
@@ -658,7 +672,7 @@ class MessagingChannel(BaseChannel):
         so the operator can tell which caller gave up.
         """
         try:
-            refreshed = await self.tac.conversation_orchestrator_client.list_participants(
+            refreshed = await self.conversation_orchestrator_client.list_participants(
                 conversation_id
             )
         except Exception as e:
@@ -698,7 +712,7 @@ class MessagingChannel(BaseChannel):
         """
         effective_profile_id = profile_id if profile_id is not None else participant.profile_id
         try:
-            updated = await self.tac.conversation_orchestrator_client.update_participant(
+            updated = await self.conversation_orchestrator_client.update_participant(
                 conversation_id=conversation_id,
                 participant_id=participant.id,
                 participant_type=new_type,  # type: ignore[arg-type]
@@ -750,7 +764,7 @@ class MessagingChannel(BaseChannel):
         AI_AGENT now owning that address. Other errors return None.
         """
         try:
-            created = await self.tac.conversation_orchestrator_client.add_participant(
+            created = await self.conversation_orchestrator_client.add_participant(
                 conversation_id=conversation_id,
                 addresses=[agent_address],
                 participant_type="AI_AGENT",

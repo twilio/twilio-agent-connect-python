@@ -9,6 +9,7 @@ from tac import get_logger
 from tac.models.handoff import HandoffPayload, PendingHandoffData
 from tac.models.session import ConversationSession
 from tac.tools.base import InjectedToolArg, TACTool, function_tool
+from tac.utils.redaction import mask_address
 
 if TYPE_CHECKING:
     from tac.core.tac import TAC
@@ -111,8 +112,8 @@ async def post_studio_handoff(
     logger.debug(
         "Handoff payload delivered",
         handoff_url=handoff_url,
-        to=to_address,
-        from_=from_address,
+        to=mask_address(to_address),
+        from_=mask_address(from_address),
     )
 
 

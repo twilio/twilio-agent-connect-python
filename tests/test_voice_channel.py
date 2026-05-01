@@ -1189,65 +1189,6 @@ class TestVoiceChannel:
         assert "user_language" not in twiml
 
 
-class TestHandleConversationRelayCallback:
-    """Test handle_conversation_relay_callback behavior."""
-
-    @staticmethod
-    def _make_payload(**overrides: str) -> dict[str, str]:
-        """Create a valid callback payload with optional overrides."""
-        base = {
-            "AccountSid": "ACtest123",
-            "CallSid": "CA123",
-            "CallStatus": "completed",
-            "From": "+15551234567",
-            "To": "+15559876543",
-            "Direction": "inbound",
-        }
-        base.update(overrides)
-        return base
-
-    @pytest.mark.asyncio
-    async def test_completed_call_does_not_close_conversations(self) -> None:
-        """Test that completed call status does not manually close conversations.
-
-        Conversation lifecycle is managed by CO, not the SDK.
-        """
-        tac = TAC(get_test_config())
-        channel = VoiceChannel(tac)
-
-        tac.conversation_orchestrator_client.list_conversations = AsyncMock()
-        tac.conversation_orchestrator_client.update_conversation = AsyncMock()
-
-        payload = self._make_payload(CallStatus="completed")
-        result = await channel.handle_conversation_relay_callback(payload)
-
-        assert result is None
-        tac.conversation_orchestrator_client.list_conversations.assert_not_called()
-        tac.conversation_orchestrator_client.update_conversation.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_other_status_returns_none(self) -> None:
-        """Test that non-handoff, non-completed status returns None."""
-        tac = TAC(get_test_config())
-        channel = VoiceChannel(tac)
-
-        payload = self._make_payload(CallStatus="ringing")
-        result = await channel.handle_conversation_relay_callback(payload)
-
-        assert result is None
-
-    @pytest.mark.asyncio
-    async def test_invalid_payload_raises_validation_error(self) -> None:
-        """Test that invalid payload raises ValidationError."""
-        from pydantic import ValidationError
-
-        tac = TAC(get_test_config())
-        channel = VoiceChannel(tac)
-
-        with pytest.raises(ValidationError):
-            await channel.handle_conversation_relay_callback({})
-
-
 class TestConversationInitializationFlow:
     """Test new conversation initialization flow with ConversationRelay."""
 

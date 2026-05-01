@@ -54,6 +54,7 @@ Production-ready examples using partner SDK adapters:
 
 - **`voice_streaming.py`**: Stream LLM responses token-by-token for ~40-50% faster time-to-first-audio
 - **`handoff.py`**: Hand the conversation off to a human agent via a Twilio Studio Flow (works on voice and SMS)
+- **`relay_only.py`**: ConversationRelay-only mode — get started with voice using just ConversationRelay
 
 ## Step 3: Run an Example
 
@@ -80,6 +81,7 @@ uv run getting_started/examples/partners/openai_chat_completions.py
 uv run getting_started/examples/partners/openai_responses_api.py
 uv run getting_started/examples/features/voice_streaming.py
 uv run getting_started/examples/features/handoff.py
+uv run getting_started/examples/features/relay_only.py
 ```
 
 ### Expose Your Server
@@ -105,6 +107,8 @@ See `examples/.env.example` for all available configuration options. Key variabl
 - `TWILIO_API_KEY`: Twilio API key SID (starts with SK)
 - `TWILIO_API_SECRET`: Twilio API key secret
 - `TWILIO_PHONE_NUMBER`: Your Twilio phone number
+
+### Required for Orchestrator Mode (omit for ConversationRelay-only)
 - `TWILIO_CONVERSATION_CONFIGURATION_ID`: Conversation Configuration ID
 
 ### Optional (Voice Channel)

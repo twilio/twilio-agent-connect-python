@@ -95,41 +95,6 @@ class InterruptMessage(BaseModel):
 VoiceMessage = SetupMessage | PromptMessage | InterruptMessage
 
 
-class ConversationRelayCallbackPayload(BaseModel):
-    """
-    Payload received from Twilio ConversationRelay callback webhook.
-
-    Sent when a ConversationRelay session ends or transitions state.
-    """
-
-    account_sid: str = Field(..., alias="AccountSid", description="Twilio Account SID")
-    call_sid: str = Field(..., alias="CallSid", description="Twilio Call SID")
-    call_status: str = Field(
-        ...,
-        alias="CallStatus",
-        description="Call status (e.g., 'in-progress', 'completed', 'busy', 'no-answer')",
-    )
-    from_number: str = Field(..., alias="From", description="Caller's identifier")
-    to_number: str = Field(..., alias="To", description="Recipient's identifier")
-    direction: str = Field(..., alias="Direction", description="Call direction (inbound/outbound)")
-    application_sid: str | None = Field(
-        None, alias="ApplicationSid", description="Twilio Application SID"
-    )
-    session_id: str | None = Field(
-        None, alias="SessionId", description="ConversationRelay Session ID"
-    )
-    session_status: str | None = Field(
-        None,
-        alias="SessionStatus",
-        description="ConversationRelay session status (e.g., 'ended')",
-    )
-    session_duration: str | None = Field(
-        None, alias="SessionDuration", description="Session duration in seconds"
-    )
-
-    model_config = {"populate_by_name": True}
-
-
 class TwiMLOptions(BaseModel):
     """Options for generating ConversationRelay TwiML."""
 
@@ -151,5 +116,26 @@ class TwiMLOptions(BaseModel):
         description="Conversation Service SID for ConversationRelay to automatically "
         "manage conversation creation and participants.",
     )
+
+    model_config = {"populate_by_name": True}
+
+
+class ConversationRelayCallbackPayload(BaseModel):
+    """Payload received from Twilio ConversationRelay callback webhook.
+
+    Sent via the <Connect action="..."> URL when a call ends or transitions state.
+    Used in relay-only mode to signal conversation completion.
+    """
+
+    account_sid: str = Field(..., alias="AccountSid")
+    call_sid: str = Field(..., alias="CallSid")
+    call_status: str = Field(..., alias="CallStatus")
+    from_number: str = Field(..., alias="From")
+    to_number: str = Field(..., alias="To")
+    direction: str = Field(..., alias="Direction")
+    application_sid: str | None = Field(None, alias="ApplicationSid")
+    session_id: str | None = Field(None, alias="SessionId")
+    session_status: str | None = Field(None, alias="SessionStatus")
+    session_duration: str | None = Field(None, alias="SessionDuration")
 
     model_config = {"populate_by_name": True}

@@ -189,6 +189,10 @@ class TACFastAPIServer:
                         self.tac.config.account_sid,
                         self.tac.config.studio_handoff_flow_sid,
                     )
+                elif not self.tac.is_orchestrator_enabled():
+                    action_url = (
+                        f"https://{config.public_domain}{config.conversation_relay_callback_path}"
+                    )
                 else:
                     action_url = None
 
@@ -206,6 +210,18 @@ class TACFastAPIServer:
                 """Handle voice WebSocket connections."""
                 adapter = FastAPIWebSocketAdapter(websocket)
                 await vc.handle_websocket(adapter)
+
+            @app.post(config.conversation_relay_callback_path)
+            async def conversation_relay_callback(request: Request) -> Response:
+                """Handle ConversationRelay action callback (call ended)."""
+                try:
+                    form_data = await request.form()
+                    payload_dict = {k: str(v) for k, v in form_data.items()}
+                    await vc.handle_conversation_relay_callback(payload_dict)
+                except Exception:
+                    logger.error("Failed to process ConversationRelay callback", exc_info=True)
+                    return Response(content="", media_type="text/plain", status_code=400)
+                return Response(content="", media_type="text/plain", status_code=200)
 
         if config.cintel_webhook_path is not None:
             tac = self.tac

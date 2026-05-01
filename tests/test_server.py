@@ -518,8 +518,7 @@ class TestTACFastAPIServer:
 
 
 class TestTwiMLConnectAction:
-    """TwiML <Connect action=...> routes to Studio when the Flow SID is configured,
-    otherwise falls back to the TAC ConversationRelay callback path."""
+    """TwiML <Connect action=...> routes to Studio when the Flow SID is configured."""
 
     def _build_server(self, **tac_overrides: object) -> object:
         from fastapi.testclient import TestClient

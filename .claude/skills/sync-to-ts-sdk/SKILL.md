@@ -14,7 +14,7 @@ This skill analyzes changes from the Python SDK (`twilio-agent-connect-python`) 
 
 The skill accepts the following arguments (can be combined):
 
-1. **GitHub PR URL**: `https://github.com/twilio-innovation/twilio-agent-connect-python/pull/123`
+1. **GitHub PR URL**: `https://github.com/twilio/twilio-agent-connect-python/pull/123`
 2. **No commit flag**: `--no-commit` (makes and stages changes, but skips commit/push/PR)
 
 **Examples:**
@@ -30,7 +30,7 @@ The skill accepts the following arguments (can be combined):
 
 - Python SDK (source): Current working directory (this repo)
 - TypeScript SDK (target): Clone to `~/.claude/cache/sync-to-ts-sdk/twilio-agent-connect-typescript` (user's home directory)
-- GitHub org: `twilio-innovation`
+- GitHub org: `twilio`
 
 ## Determine Input Mode
 
@@ -68,12 +68,12 @@ Arguments: $ARGUMENTS (the full argument string)
 Before doing anything else, verify that the `gh` CLI is installed and authenticated with access to the target repo:
 
 ```bash
-gh repo view twilio-innovation/twilio-agent-connect-typescript --json name --jq '.name'
+gh repo view twilio/twilio-agent-connect-typescript --json name --jq '.name'
 ```
 
 - If this command succeeds (prints `twilio-agent-connect-typescript`), proceed to Phase 1.
 - If it fails for **any reason** (gh not installed, not authenticated, no repo access, network error, etc.), **STOP the skill immediately** and tell the user:
-  > This skill requires the GitHub CLI (`gh`) to be installed and authenticated with access to `twilio-innovation/twilio-agent-connect-typescript`.
+  > This skill requires the GitHub CLI (`gh`) to be installed and authenticated with access to `twilio/twilio-agent-connect-typescript`.
   >
   > Run `gh auth status` to check your authentication, or `gh auth login` to authenticate.
 
@@ -126,7 +126,7 @@ git clean -fd
 
 ```bash
 mkdir -p "$HOME/.claude/cache/sync-to-ts-sdk"
-gh repo clone twilio-innovation/twilio-agent-connect-typescript "$TS_SDK_DIR"
+gh repo clone twilio/twilio-agent-connect-typescript "$TS_SDK_DIR"
 ```
 
 ### Phase 2: Analyze Python SDK Changes
@@ -137,13 +137,13 @@ Fetch PR details and diff using GitHub CLI:
 
 ```bash
 # Get PR metadata
-gh pr view <PR_NUMBER> --repo twilio-innovation/twilio-agent-connect-python --json title,body,headRefName,baseRefName,files,url
+gh pr view <PR_NUMBER> --repo twilio/twilio-agent-connect-python --json title,body,headRefName,baseRefName,files,url
 
 # Get the diff
-gh pr diff <PR_NUMBER> --repo twilio-innovation/twilio-agent-connect-python
+gh pr diff <PR_NUMBER> --repo twilio/twilio-agent-connect-python
 
 # Get list of changed files
-gh pr view <PR_NUMBER> --repo twilio-innovation/twilio-agent-connect-python --json files --jq '.files[].path'
+gh pr view <PR_NUMBER> --repo twilio/twilio-agent-connect-python --json files --jq '.files[].path'
 ```
 
 Store:

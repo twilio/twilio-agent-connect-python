@@ -8,6 +8,7 @@ __version__ = version("twilio-agent-connect")
 from tac.core import TAC, TACConfig, get_logger
 from tac.context.base import PartnerConnector
 from tac.models import TwiMLOptions
+from tac.utils.redaction import mask_address, mask_email, mask_phone
 
 # isort: on
 
@@ -17,5 +18,8 @@ __all__ = [
     "PartnerConnector",
     "get_logger",
     "TwiMLOptions",
+    "mask_address",
+    "mask_email",
+    "mask_phone",
     "__version__",
 ]
