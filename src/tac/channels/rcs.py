@@ -76,6 +76,9 @@ class RCSChannel(MessagingChannel):
     def is_default_agent_address(self, author_address: str) -> bool:
         return author_address == self.tac.config.rcs_sender_id
 
+    def get_agent_address(self, conversation_id: str) -> ParticipantAddress:
+        return ParticipantAddress(channel="RCS", address=self.tac.config.rcs_sender_id)
+
     async def send_response(
         self,
         conversation_id: str,
