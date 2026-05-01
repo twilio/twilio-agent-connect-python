@@ -7,10 +7,14 @@ X-Forwarded-Host) for environments like ngrok.
 Requires: pip install tac[server]
 """
 
+import logging
 from collections.abc import Awaitable, Callable, Mapping
+from urllib.parse import parse_qs
 
 from fastapi import HTTPException, Request, WebSocket, WebSocketDisconnect
 from twilio.request_validator import RequestValidator
+
+logger = logging.getLogger(__name__)
 
 
 def validate_twilio_webhook(
@@ -95,14 +99,22 @@ def build_websocket_signature_dependency(
     """
 
     async def _validate_ws_signature(websocket: WebSocket) -> None:
-        signature = websocket.headers.get("X-Twilio-Signature")
+        signature = websocket.headers.get("x-twilio-signature")
         if not signature:
+            logger.warning(
+                "WebSocket missing x-twilio-signature header. Available headers: %s",
+                list(websocket.headers.keys()),
+            )
             await websocket.close(code=1008, reason="Missing Twilio signature")
             raise WebSocketDisconnect(code=1008)
 
-        url = _build_websocket_url(websocket)
+        url, params = _build_websocket_url_and_params(websocket)
         validator = RequestValidator(auth_token)
-        if not validator.validate(url, {}, signature):
+        if not validator.validate(url, params, signature):
+            logger.warning(
+                "WebSocket signature validation failed. URL used: %s",
+                url,
+            )
             await websocket.close(code=1008, reason="Invalid Twilio signature")
             raise WebSocketDisconnect(code=1008)
 
@@ -137,16 +149,20 @@ def _build_url(request: Request) -> str:
     return url
 
 
-def _build_websocket_url(websocket: WebSocket) -> str:
-    """Build the validation URL from a WebSocket, handling proxy headers and scheme conversion.
+def _build_websocket_url_and_params(websocket: WebSocket) -> tuple[str, dict[str, str]]:
+    """Build the validation URL and params from a WebSocket request.
 
-    Converts ws/wss schemes back to http/https since Twilio signs the original HTTP URL.
+    Twilio signs the wss:// URL it connects to. Query parameters are passed
+    separately in the params dict for signature computation (not appended to the URL).
+    When behind a proxy (like ngrok), X-Forwarded-Proto reports 'https' but Twilio
+    signed 'wss://', so we convert https->wss and http->ws.
     """
     proto_header = websocket.headers.get("X-Forwarded-Proto")
     if proto_header:
-        proto = proto_header.split(",")[0].strip()
+        raw_proto = proto_header.split(",")[0].strip()
+        proto = _http_scheme_to_ws(raw_proto)
     else:
-        proto = _ws_scheme_to_http(websocket.url.scheme)
+        proto = websocket.url.scheme
 
     host_header = (
         websocket.headers.get("X-Forwarded-Host")
@@ -156,16 +172,19 @@ def _build_websocket_url(websocket: WebSocket) -> str:
     host = host_header.split(",")[0].strip()
 
     path = websocket.url.path
-    query = websocket.url.query
-
     url = f"{proto}://{host}{path}"
+
+    # Query params are included as params dict, not in the URL
+    params: dict[str, str] = {}
+    query = websocket.url.query
     if query:
-        url = f"{url}?{query}"
+        parsed = parse_qs(query)
+        params = {k: v[0] for k, v in parsed.items()}
 
-    return url
+    return url, params
 
 
-def _ws_scheme_to_http(scheme: str) -> str:
-    """Convert WebSocket scheme to HTTP equivalent for Twilio signature validation."""
-    mapping = {"ws": "http", "wss": "https"}
+def _http_scheme_to_ws(scheme: str) -> str:
+    """Convert HTTP scheme to WebSocket equivalent for URL reconstruction."""
+    mapping = {"https": "wss", "http": "ws"}
     return mapping.get(scheme, scheme)

@@ -8,8 +8,8 @@ from twilio.request_validator import RequestValidator
 
 from tac.server.webhook import (
     _build_url,
-    _build_websocket_url,
-    _ws_scheme_to_http,
+    _build_websocket_url_and_params,
+    _http_scheme_to_ws,
     build_http_signature_dependency,
     build_websocket_signature_dependency,
     validate_twilio_webhook,
@@ -171,10 +171,10 @@ class TestBuildUrl:
         assert url == "https://localhost:8000/webhook"
 
 
-class TestBuildWebsocketUrl:
-    """Test _build_websocket_url function."""
+class TestBuildWebsocketUrlAndParams:
+    """Test _build_websocket_url_and_params function."""
 
-    def test_converts_wss_to_https(self) -> None:
+    def test_preserves_wss_scheme(self) -> None:
         websocket = MagicMock()
         websocket.headers = {}
         websocket.url.path = "/ws"
@@ -182,10 +182,11 @@ class TestBuildWebsocketUrl:
         websocket.url.scheme = "wss"
         websocket.url.netloc = "example.com"
 
-        url = _build_websocket_url(websocket)
-        assert url == "https://example.com/ws"
+        url, params = _build_websocket_url_and_params(websocket)
+        assert url == "wss://example.com/ws"
+        assert params == {}
 
-    def test_converts_ws_to_http(self) -> None:
+    def test_preserves_ws_scheme(self) -> None:
         websocket = MagicMock()
         websocket.headers = {}
         websocket.url.path = "/ws"
@@ -193,10 +194,11 @@ class TestBuildWebsocketUrl:
         websocket.url.scheme = "ws"
         websocket.url.netloc = "localhost:8000"
 
-        url = _build_websocket_url(websocket)
-        assert url == "http://localhost:8000/ws"
+        url, params = _build_websocket_url_and_params(websocket)
+        assert url == "ws://localhost:8000/ws"
+        assert params == {}
 
-    def test_uses_forwarded_proto_over_scheme_conversion(self) -> None:
+    def test_converts_forwarded_https_to_wss(self) -> None:
         websocket = MagicMock()
         websocket.headers = {
             "X-Forwarded-Proto": "https",
@@ -206,18 +208,20 @@ class TestBuildWebsocketUrl:
         websocket.url.query = ""
         websocket.url.scheme = "ws"
 
-        url = _build_websocket_url(websocket)
-        assert url == "https://public.example.com/ws"
+        url, params = _build_websocket_url_and_params(websocket)
+        assert url == "wss://public.example.com/ws"
+        assert params == {}
 
-    def test_includes_query_string(self) -> None:
+    def test_query_params_returned_separately(self) -> None:
         websocket = MagicMock()
         websocket.headers = {"Host": "example.com"}
         websocket.url.path = "/ws"
-        websocket.url.query = "token=abc123"
+        websocket.url.query = "token=abc123&foo=bar"
         websocket.url.scheme = "wss"
 
-        url = _build_websocket_url(websocket)
-        assert url == "https://example.com/ws?token=abc123"
+        url, params = _build_websocket_url_and_params(websocket)
+        assert url == "wss://example.com/ws"
+        assert params == {"token": "abc123", "foo": "bar"}
 
     def test_handles_comma_separated_forwarded_headers(self) -> None:
         websocket = MagicMock()
@@ -228,24 +232,25 @@ class TestBuildWebsocketUrl:
         websocket.url.path = "/ws"
         websocket.url.query = ""
 
-        url = _build_websocket_url(websocket)
-        assert url == "https://public.example.com/ws"
+        url, params = _build_websocket_url_and_params(websocket)
+        assert url == "wss://public.example.com/ws"
+        assert params == {}
 
 
-class TestWsSchemeToHttp:
-    """Test _ws_scheme_to_http helper."""
+class TestHttpSchemeToWs:
+    """Test _http_scheme_to_ws helper."""
 
-    def test_ws_to_http(self) -> None:
-        assert _ws_scheme_to_http("ws") == "http"
+    def test_https_to_wss(self) -> None:
+        assert _http_scheme_to_ws("https") == "wss"
 
-    def test_wss_to_https(self) -> None:
-        assert _ws_scheme_to_http("wss") == "https"
+    def test_http_to_ws(self) -> None:
+        assert _http_scheme_to_ws("http") == "ws"
 
-    def test_passthrough_http(self) -> None:
-        assert _ws_scheme_to_http("http") == "http"
+    def test_passthrough_wss(self) -> None:
+        assert _http_scheme_to_ws("wss") == "wss"
 
-    def test_passthrough_https(self) -> None:
-        assert _ws_scheme_to_http("https") == "https"
+    def test_passthrough_ws(self) -> None:
+        assert _http_scheme_to_ws("ws") == "ws"
 
 
 class TestBuildHttpSignatureDependency:
@@ -336,17 +341,18 @@ class TestBuildWebsocketSignatureDependency:
     @pytest.mark.asyncio
     async def test_valid_signature_passes(self) -> None:
         auth_token = "test_token"
-        url = "http://testserver/ws"
+        # Twilio signs the wss:// URL with query params as params dict
+        url = "wss://testserver/ws"
         validator = RequestValidator(auth_token)
         signature = validator.compute_signature(url, {})
 
         dep = build_websocket_signature_dependency(auth_token)
 
         websocket = AsyncMock()
-        websocket.headers = {"X-Twilio-Signature": signature, "Host": "testserver"}
+        websocket.headers = {"x-twilio-signature": signature, "Host": "testserver"}
         websocket.url.path = "/ws"
         websocket.url.query = ""
-        websocket.url.scheme = "ws"
+        websocket.url.scheme = "wss"
         websocket.url.netloc = "testserver"
 
         # Should not raise
@@ -374,10 +380,10 @@ class TestBuildWebsocketSignatureDependency:
         dep = build_websocket_signature_dependency("test_token")
 
         websocket = AsyncMock()
-        websocket.headers = {"X-Twilio-Signature": "bad_signature", "Host": "testserver"}
+        websocket.headers = {"x-twilio-signature": "bad_signature", "Host": "testserver"}
         websocket.url.path = "/ws"
         websocket.url.query = ""
-        websocket.url.scheme = "ws"
+        websocket.url.scheme = "wss"
         websocket.url.netloc = "testserver"
 
         with pytest.raises(WebSocketDisconnect) as exc_info:

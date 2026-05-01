@@ -750,9 +750,9 @@ class TestSignatureValidation:
             connected = True
             await websocket.close()
 
-        signature = compute_signature("http://testserver/ws")
+        signature = compute_signature("ws://testserver/ws")
         client = TestClient(app)
-        with client.websocket_connect("/ws", headers={"X-Twilio-Signature": signature}):
+        with client.websocket_connect("/ws", headers={"x-twilio-signature": signature}):
             pass
         assert connected
 
