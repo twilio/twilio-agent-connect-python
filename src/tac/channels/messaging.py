@@ -1,4 +1,4 @@
-"""MessagingChannel base class for messaging channels (SMS, Chat)."""
+"""MessagingChannel base class for messaging channels (SMS, RCS, WhatsApp, Chat)."""
 
 from abc import abstractmethod
 from collections.abc import AsyncGenerator
@@ -35,7 +35,7 @@ AGENT_TYPES: frozenset[str] = frozenset({"AGENT", "AI_AGENT"})
 
 
 class MessagingChannelConfig(BaseModel):
-    """Base configuration for messaging channels (SMS, Chat).
+    """Base configuration for messaging channels (SMS, RCS, WhatsApp, Chat).
 
     Attributes:
         dedup_capacity: Maximum number of idempotency tokens to track.
@@ -57,7 +57,7 @@ class MessagingChannelConfig(BaseModel):
 
 
 class MessagingChannel(BaseChannel):
-    """Abstract base class for messaging channels (SMS, Chat).
+    """Abstract base class for messaging channels (SMS, RCS, WhatsApp, Chat).
 
     Provides shared webhook processing logic for channels that use
     Conversation Orchestrator webhooks with COMMUNICATION_CREATED
@@ -65,10 +65,10 @@ class MessagingChannel(BaseChannel):
 
     Subclasses must implement:
     - is_default_agent_address(): Fast-path check for the channel's default agent address
-    - get_channel_type_upper(): Return uppercase channel type ("SMS", "CHAT")
+    - get_channel_type_upper(): Return uppercase channel type ("SMS", "RCS", "WHATSAPP", "CHAT")
     - get_agent_address(conversation_id): Return the agent's ParticipantAddress for a conversation
     - send_response(): Send messages back through the channel
-    - get_channel_name(): Return lowercase channel name ("sms", "chat")
+    - get_channel_name(): Return lowercase channel name ("sms", "rcs", "whatsapp", "chat")
 
     Subclass class attributes:
     - reconcile_customer_type: If True, reconciliation will also promote a
@@ -102,7 +102,7 @@ class MessagingChannel(BaseChannel):
         """Fast-path check: is the author address this channel's default agent address?
 
         For example, config.phone_number for SMS, config.rcs_sender_id for RCS,
-        agent_address for Chat.
+        config.whatsapp_number for WhatsApp, agent_address for Chat.
 
         Args:
             author_address: The address of the message author
@@ -321,7 +321,7 @@ class MessagingChannel(BaseChannel):
         extra_metadata: dict[str, str] | None = None,
         channel_settings: ActionChannelSettings | None = None,
     ) -> InitiateConversationResult:
-        """Shared outbound initiation logic for messaging channels (SMS, Chat).
+        """Shared outbound initiation logic for messaging channels (SMS, RCS, WhatsApp, Chat).
 
         Subclasses call this with channel-specific address kwargs and settings.
         """
