@@ -99,7 +99,7 @@ After your pull request is merged, you can safely delete your branch and pull th
 To ensure consistency throughout the source code, keep these rules in mind as you are working:
 
 - **Tests** - All features or bug fixes must be tested. Write tests using [pytest](https://docs.pytest.org/).
-- **Type Safety** - Code must pass `make type-check` (mypy in strict mode).
+- **Type Safety** - Code must pass `make type-check` (mypy with the project's configured strictness settings).
 - **Linting** - Code must pass `make lint` (ruff).
 - **Formatting** - Code must pass `make format` (ruff format — line length 100). Run `make format` to auto-fix.
 - **Python Version** - Target Python 3.10+. Use modern syntax (type unions with `|`, etc.).
