@@ -32,9 +32,9 @@ Seamlessly integrate with Twilio's Memory Store and Conversation Orchestrator to
 
 ## Key Features
 
-- **Multi-Channel Support**: Built-in webhook handling for SMS, RCS, and Chat conversations
+- **Multi-Channel Support**: Built-in webhook handling for SMS, RCS, WhatsApp, and Chat conversations
 - **Voice Channel Support**: WebSocket protocol handling for Twilio Voice with ConversationRelay
-- **Outbound Conversations**: Agent-initiated conversations via SMS, RCS, and Voice channels
+- **Outbound Conversations**: Agent-initiated conversations via SMS, RCS, WhatsApp, and Voice channels
 - **ConversationRelay-Only Mode**: Get started quickly with TAC's voice plumbing (TwiML, WebSocket, callbacks) before adding Conversation Orchestrator
 - **Memory Management**: Automatic integration with Twilio Memory for persistent user context
 - **Conversation Lifecycle**: Automatic tracking of conversation sessions and state
@@ -93,7 +93,7 @@ After completing setup, here's a minimal example to get started:
 
 ### Multi-Channel with OpenAI SDK
 
-Use the OpenAI adapter to automatically inject conversation memory and user context into your OpenAI API calls across Voice, SMS, RCS, and Chat channels.
+Use the OpenAI adapter to automatically inject conversation memory and user context into your OpenAI API calls across Voice, SMS, RCS, WhatsApp, and Chat channels.
 
 First, install the required packages:
 
@@ -157,7 +157,7 @@ TACFastAPIServer(tac=tac, voice_channel=voice_channel, messaging_channels=[sms_c
 
 **That's it!** The server automatically:
 - Creates FastAPI app with `/twiml`, `/ws`, and `/webhook` endpoints
-- Handles Voice, SMS, RCS, and Chat conversations
+- Handles Voice, SMS, RCS, WhatsApp, and Chat conversations
 - Routes responses to the appropriate channel
 - Injects conversation memory and user profile into OpenAI calls
 

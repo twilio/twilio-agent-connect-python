@@ -55,7 +55,8 @@ Production-ready examples using partner SDK adapters:
 - **`voice_streaming.py`**: Stream LLM responses token-by-token for ~40-50% faster time-to-first-audio
 - **`handoff.py`**: Hand the conversation off to a human agent via a Twilio Studio Flow (works on voice and SMS)
 - **`rcs.py`**: RCS (Rich Communication Services) channel with automatic memory retrieval
-- **`outbound.py`**: Agent-initiated outbound conversations via SMS, RCS, or Voice channels
+- **`whatsapp.py`**: WhatsApp channel with automatic memory retrieval
+- **`outbound.py`**: Agent-initiated outbound conversations via SMS, RCS, WhatsApp, or Voice channels
 - **`chat/`**: Twilio Conversations (Chat) channel examples
 - **`relay_only.py`**: ConversationRelay-only mode — get started with voice using just ConversationRelay
 
@@ -123,6 +124,7 @@ See `examples/.env.example` for all available configuration options. Key variabl
 ### Optional (Channel-Specific)
 - `TWILIO_STUDIO_HANDOFF_FLOW_SID`: Studio Flow SID used by `create_studio_handoff_tool` (required for `features/handoff.py`)
 - `TWILIO_RCS_SENDER_ID`: RCS Sender ID (required for `features/rcs.py`)
+- `TWILIO_WHATSAPP_NUMBER`: WhatsApp-enabled phone number in format `whatsapp:+1234567890` (required for `features/whatsapp.py`)
 - `TWILIO_CONVERSATIONS_SERVICE_SID`: Conversations Service SID (required for Chat channel examples)
 
 ## Next Steps
