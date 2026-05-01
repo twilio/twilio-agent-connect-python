@@ -75,7 +75,8 @@ class MessagingChannel(BaseChannel):
     def is_default_agent_address(self, author_address: str) -> bool:
         """Fast-path check: is the author address this channel's default agent address?
 
-        For example, config.phone_number for SMS, agent_address for Chat.
+        For example, config.phone_number for SMS, config.rcs_sender_id for RCS,
+        agent_address for Chat.
 
         Args:
             author_address: The address of the message author

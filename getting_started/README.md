@@ -118,7 +118,7 @@ See `examples/.env.example` for all available configuration options. Key variabl
 
 ### Optional (Channel-Specific)
 - `TWILIO_STUDIO_HANDOFF_FLOW_SID`: Studio Flow SID used by `create_studio_handoff_tool` (required for `features/handoff.py`)
-- `TWILIO_RCS_AGENT_ID`: RCS agent address (required for `features/rcs.py`)
+- `TWILIO_RCS_SENDER_ID`: RCS Sender ID (required for `features/rcs.py`)
 - `TWILIO_CONVERSATIONS_SERVICE_SID`: Conversations Service SID (required for Chat channel examples)
 
 ## Next Steps

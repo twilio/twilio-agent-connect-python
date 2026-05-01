@@ -104,7 +104,8 @@ def get_test_config() -> dict[str, Any]:
         "api_key": "SK123",
         "api_secret": "test_api_token",
         "conversation_configuration_id": "default_config",
-        "phone_number": "+15551234567",  # Required by TACConfig
+        "phone_number": "+15551234567",
+        "rcs_sender_id": "rcs:twilio_signal_test_agent",
     }
 
 
@@ -117,33 +118,29 @@ def mock_tac() -> TAC:
 @pytest.fixture
 def rcs_channel(mock_tac: TAC) -> RCSChannel:
     """Create RCS channel instance."""
-    return RCSChannel(
-        mock_tac, config=RCSChannelConfig(agent_address="rcs:twilio_signal_test_agent")
-    )
+    return RCSChannel(mock_tac, config=RCSChannelConfig())
 
 
 @pytest.mark.asyncio
 async def test_rcs_channel_initialization(mock_tac: TAC) -> None:
-    """Test RCS channel initialization requires config with agent_address."""
-    with pytest.raises(TypeError):
-        RCSChannel(mock_tac)  # type: ignore[call-arg]
+    """Test RCS channel initialization succeeds with rcs_sender_id in TAC config."""
+    channel = RCSChannel(mock_tac)
+    assert channel.get_channel_name() == "rcs"
 
 
 @pytest.mark.asyncio
 async def test_rcs_channel_initialization_with_config(mock_tac: TAC) -> None:
     """Test RCS channel initialization with explicit config."""
-    config = RCSChannelConfig(agent_address="rcs:twilio_signal_test_agent")
+    config = RCSChannelConfig()
     channel = RCSChannel(mock_tac, config=config)
     assert channel.get_channel_name() == "rcs"
     assert channel.get_channel_type_upper() == "RCS"
-    assert channel.agent_address == "rcs:twilio_signal_test_agent"
 
 
 @pytest.mark.asyncio
 async def test_is_default_agent_address_configured(mock_tac: TAC) -> None:
-    """Test agent address detection with configured agent address."""
-    config = RCSChannelConfig(agent_address="rcs:twilio_signal_test_agent")
-    channel = RCSChannel(mock_tac, config=config)
+    """Test agent address detection with configured rcs_sender_id from TAC config."""
+    channel = RCSChannel(mock_tac, config=RCSChannelConfig())
 
     assert channel.is_default_agent_address("rcs:twilio_signal_test_agent") is True
     assert channel.is_default_agent_address("rcs:+12345678901") is False
@@ -352,8 +349,7 @@ async def test_initiate_outbound_conversation(mock_tac: TAC) -> None:
     """Test initiating an outbound RCS conversation."""
     from tac.models.outbound import InitiateMessagingConversationOptions
 
-    config = RCSChannelConfig(agent_address="rcs:test_agent")
-    channel = RCSChannel(mock_tac, config=config)
+    channel = RCSChannel(mock_tac, config=RCSChannelConfig())
 
     # Mock the conversation orchestrator client methods
     with (
@@ -391,7 +387,7 @@ async def test_initiate_outbound_conversation(mock_tac: TAC) -> None:
                 account_id="ACtest123",
                 name="Agent",
                 type="AI_AGENT",
-                addresses=[{"channel": "RCS", "address": "rcs:test_agent"}],
+                addresses=[{"channel": "RCS", "address": "rcs:twilio_signal_test_agent"}],
             ),
         ]
 
@@ -411,7 +407,7 @@ async def test_initiate_outbound_conversation(mock_tac: TAC) -> None:
 @pytest.mark.asyncio
 async def test_auto_retrieve_memory_enabled(mock_tac: TAC) -> None:
     """Test RCS channel with auto_retrieve_memory enabled."""
-    config = RCSChannelConfig(agent_address="rcs:test_agent", auto_retrieve_memory=True)
+    config = RCSChannelConfig(auto_retrieve_memory=True)
     channel = RCSChannel(mock_tac, config=config)
 
     assert channel.auto_retrieve_memory is True

@@ -12,6 +12,7 @@ from openai import AsyncOpenAI
 
 from tac import TAC, TACConfig
 from tac.adapters.openai import with_tac_memory
+from tac.channels import RCSChannel, RCSChannelConfig
 from tac.channels.sms import SMSChannel, SMSChannelConfig
 from tac.channels.voice import VoiceChannel, VoiceChannelConfig
 from tac.core.logging import get_logger
@@ -31,6 +32,7 @@ tac = TAC(config=TACConfig.from_env())
 # Channels process Twilio webhooks and manage conversation lifecycle
 voice_channel = VoiceChannel(tac, config=VoiceChannelConfig(auto_retrieve_memory=True))
 sms_channel = SMSChannel(tac, config=SMSChannelConfig(auto_retrieve_memory=True))
+rcs_channel = RCSChannel(tac, config=RCSChannelConfig(auto_retrieve_memory=True))
 
 # Initialize your LLM client (OpenAI in this example)
 openai_client = AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
@@ -108,6 +110,6 @@ if __name__ == "__main__":
     # - /ws: WebSocket endpoint for Voice channel
     # - /webhook: Conversation webhook for all channels
     server = TACFastAPIServer(
-        tac=tac, voice_channel=voice_channel, messaging_channels=[sms_channel]
+        tac=tac, voice_channel=voice_channel, messaging_channels=[sms_channel, rcs_channel]
     )
     server.start()

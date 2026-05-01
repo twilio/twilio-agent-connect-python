@@ -7,19 +7,18 @@ the OpenAI Agents SDK.
 
 Usage:
     python outbound.py --to +16505551234 --channel sms --message "Hello!"
-    python outbound.py --to rcs:+16505551234 --channel rcs --message "Hello!"
-    python outbound.py --to rcs:+16505551234 --channel rcs --message "Hello!" --from rcs:my_agent
+    python outbound.py --to +16505551234 --channel rcs --message "Hello!"
+    python outbound.py --to +16505551234 --channel rcs --message "Hello!" --from rcs:sender_id
     python outbound.py --to +16505551234 --channel voice
     python outbound.py --to +16505551234 --channel voice --welcome-greeting "Hi there!"
 
 Requires ``OPENAI_API_KEY`` in addition to the usual TAC env vars.
 For voice calls, ``TWILIO_VOICE_PUBLIC_DOMAIN`` must also be set (e.g. via ngrok).
-For RCS, either ``TWILIO_RCS_AGENT_ID`` must be set OR ``--from`` flag must be provided.
+For RCS, ``TWILIO_RCS_SENDER_ID`` must be set OR ``--from`` flag must be provided.
 """
 
 import argparse
 import asyncio
-import os
 import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -75,12 +74,10 @@ tac = TAC(config=TACConfig.from_env())
 voice_channel = VoiceChannel(tac, config=VoiceChannelConfig(auto_retrieve_memory=True))
 sms_channel = SMSChannel(tac, config=SMSChannelConfig(auto_retrieve_memory=True))
 
-# RCS channel requires agent_address - use env var or will be validated at runtime
-rcs_agent_id = os.environ.get("TWILIO_RCS_AGENT_ID", "")
+# RCS channel requires rcs_messaging_service_sid configured in TAC config
 rcs_channel = RCSChannel(
     tac,
     config=RCSChannelConfig(
-        agent_address=rcs_agent_id or "rcs:placeholder",  # Will validate at runtime
         auto_retrieve_memory=True,
     ),
 )
@@ -129,10 +126,10 @@ async def initiate_outbound(args: argparse.Namespace) -> None:
 
         elif args.channel == "rcs":
             # Validate RCS configuration
-            if not args.from_ and not os.environ.get("TWILIO_RCS_AGENT_ID"):
+            if not args.from_ and not tac.config.rcs_sender_id:
                 print(
-                    "Error: RCS requires either TWILIO_RCS_AGENT_ID environment variable "
-                    "or --from flag to specify the agent address."
+                    "Error: RCS requires either TWILIO_RCS_SENDER_ID environment "
+                    "variable or --from flag to specify the RCS Sender ID."
                 )
                 sys.exit(1)
 

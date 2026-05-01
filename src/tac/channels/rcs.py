@@ -26,16 +26,8 @@ class RCSChannelConfig(MessagingChannelConfig):
     """Configuration for RCS channel.
 
     Inherits dedup_capacity and auto_retrieve_memory from MessagingChannelConfig.
-
-    Attributes:
-        agent_address: Full RCS agent address (e.g., 'rcs:my_rcs_agent').
-        dedup_capacity: Maximum number of idempotency tokens to track for deduplication.
     """
 
-    agent_address: str = Field(
-        ...,
-        description="RCS agent address",
-    )
     dedup_capacity: int = Field(
         default=10000,
         gt=0,
@@ -49,17 +41,18 @@ class RCSChannel(MessagingChannel):
     Inherits shared messaging channel webhook processing from MessagingChannel
     and provides RCS-specific message sending and filtering.
 
-    RCS uses agent addresses (e.g., 'rcs:my_agent') which must be configured
-    explicitly via RCSChannelConfig.
+    RCS uses RCS Sender IDs configured in TACConfig (via TWILIO_RCS_SENDER_ID).
     """
 
     def __init__(
         self,
         tac: TAC,
-        config: RCSChannelConfig | dict[str, Any],
+        config: RCSChannelConfig | dict[str, Any] | None = None,
     ):
         if isinstance(config, dict):
             config = RCSChannelConfig(**config)
+        elif config is None:
+            config = RCSChannelConfig()
 
         super().__init__(
             tac,
@@ -67,7 +60,12 @@ class RCSChannel(MessagingChannel):
             auto_retrieve_memory=config.auto_retrieve_memory,
         )
 
-        self.agent_address = config.agent_address
+        if not tac.config.rcs_sender_id:
+            raise ValueError(
+                "rcs_sender_id is required for RCS channel. "
+                "Please set TWILIO_RCS_SENDER_ID environment variable or "
+                "provide rcs_sender_id in TACConfig."
+            )
 
     def get_channel_name(self) -> str:
         return "rcs"
@@ -76,7 +74,7 @@ class RCSChannel(MessagingChannel):
         return "RCS"
 
     def is_default_agent_address(self, author_address: str) -> bool:
-        return author_address == self.agent_address
+        return author_address == self.tac.config.rcs_sender_id
 
     async def send_response(
         self,
@@ -109,17 +107,14 @@ class RCSChannel(MessagingChannel):
             )
             return
 
-        # Get session for per-conversation metadata
-        session = self._conversations.get(conversation_id)
-
         # Use from_address from session metadata (set during outbound initiation),
-        # falling back to the configured agent_address for inbound conversations
-        session_from_address = session.metadata.get("from_address") if session else None
-        agent_address = (
-            session_from_address
-            if isinstance(session_from_address, str) and session_from_address
-            else self.agent_address
-        )
+        # falling back to the configured rcs_sender_id for inbound conversations
+        session = self._conversations.get(conversation_id)
+        agent_address = self.tac.config.rcs_sender_id
+        if session:
+            from_addr = session.metadata.get("from_address")
+            if isinstance(from_addr, str):
+                agent_address = from_addr
 
         # Find the CUSTOMER participant by address on the RCS channel
         customer_participant = None
@@ -203,7 +198,7 @@ class RCSChannel(MessagingChannel):
         If an active conversation with the same addresses already exists
         (group-by dedup), CO returns 409 and the existing conversation is reused.
         """
-        from_address = options.from_ or self.agent_address
+        from_address = options.from_ or self.tac.config.rcs_sender_id
         return await self._initiate_messaging_conversation(
             options=options,
             from_address=from_address,

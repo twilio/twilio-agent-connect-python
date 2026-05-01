@@ -33,6 +33,7 @@ def get_test_config() -> dict[str, Any]:
         "api_secret": "test_api_secret",
         "conversation_configuration_id": "conv_configuration_test123",
         "phone_number": "+15551234567",
+        "rcs_sender_id": "rcs:my_agent",
         "memory_config": TwilioMemoryConfig(trait_groups=["Contact"]),
     }
 
@@ -870,7 +871,7 @@ class TestRCSOutbound:
         tac = TAC(get_test_config())
         from tac.channels.rcs import RCSChannelConfig
 
-        channel = RCSChannel(tac, config=RCSChannelConfig(agent_address="rcs:my_agent"))
+        channel = RCSChannel(tac, config=RCSChannelConfig())
         _mock_rcs_outbound(tac)
 
         result = await channel.initiate_outbound_conversation(
@@ -889,7 +890,7 @@ class TestRCSOutbound:
         tac = TAC(get_test_config())
         from tac.channels.rcs import RCSChannelConfig
 
-        channel = RCSChannel(tac, config=RCSChannelConfig(agent_address="rcs:my_agent"))
+        channel = RCSChannel(tac, config=RCSChannelConfig())
         _mock_rcs_outbound(tac, from_addr="rcs:custom_agent")
 
         result = await channel.initiate_outbound_conversation(
@@ -907,7 +908,7 @@ class TestRCSOutbound:
         tac = TAC(get_test_config())
         from tac.channels.rcs import RCSChannelConfig
 
-        channel = RCSChannel(tac, config=RCSChannelConfig(agent_address="rcs:my_agent"))
+        channel = RCSChannel(tac, config=RCSChannelConfig())
         _mock_rcs_outbound(tac)
 
         result = await channel.initiate_outbound_conversation(
@@ -921,7 +922,7 @@ class TestRCSOutbound:
         tac = TAC(get_test_config())
         from tac.channels.rcs import RCSChannelConfig
 
-        channel = RCSChannel(tac, config=RCSChannelConfig(agent_address="rcs:my_agent"))
+        channel = RCSChannel(tac, config=RCSChannelConfig())
         _mock_rcs_outbound(tac, conv_id="CHrcs_existing", reused=True)
 
         result = await channel.initiate_outbound_conversation(
@@ -936,7 +937,7 @@ class TestRCSOutbound:
         tac = TAC(get_test_config())
         from tac.channels.rcs import RCSChannelConfig
 
-        channel = RCSChannel(tac, config=RCSChannelConfig(agent_address="rcs:my_agent"))
+        channel = RCSChannel(tac, config=RCSChannelConfig())
         _mock_rcs_outbound(tac)
 
         await channel.initiate_outbound_conversation(
@@ -965,7 +966,7 @@ class TestRCSSendResponseAfterOutbound:
         tac = TAC(get_test_config())
         from tac.channels.rcs import RCSChannelConfig
 
-        channel = RCSChannel(tac, config=RCSChannelConfig(agent_address="rcs:default_agent"))
+        channel = RCSChannel(tac, config=RCSChannelConfig())
         _mock_rcs_outbound(tac, from_addr="rcs:custom_agent")
 
         await channel.initiate_outbound_conversation(

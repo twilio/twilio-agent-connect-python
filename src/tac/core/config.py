@@ -218,6 +218,11 @@ class TACConfig(BaseModel):
         description="Twilio Phone Number for Voice (inbound) and SMS (send/receive).",
     )
 
+    rcs_sender_id: str | None = Field(
+        default=None,
+        description="Optional Twilio RCS Sender ID",
+    )
+
     knowledge_base_id: str | None = Field(
         default=None,
         description="Optional Knowledge Base ID for knowledge search functionality",
@@ -280,6 +285,7 @@ class TACConfig(BaseModel):
         - TWILIO_PHONE_NUMBER: Phone number for voice and SMS channels
 
         Optional:
+        - TWILIO_RCS_SENDER_ID: RCS Sender ID for RCS channel
         - TWILIO_KNOWLEDGE_BASE_ID: Knowledge Base ID for RAG search functionality
         - TWILIO_LOG_LEVEL: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL).
           Default: INFO
@@ -317,6 +323,7 @@ class TACConfig(BaseModel):
             api_key=os.environ["TWILIO_API_KEY"],
             api_secret=os.environ["TWILIO_API_SECRET"],
             phone_number=os.environ["TWILIO_PHONE_NUMBER"],
+            rcs_sender_id=os.environ.get("TWILIO_RCS_SENDER_ID"),
             knowledge_base_id=os.environ.get("TWILIO_KNOWLEDGE_BASE_ID"),
             log_level=os.environ.get("TWILIO_LOG_LEVEL", "INFO"),
             region=os.environ.get("TWILIO_REGION"),
