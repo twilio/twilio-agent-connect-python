@@ -131,7 +131,7 @@ class MessagingChannel(BaseChannel):
                             conversation_id=conversation_id,
                             participant_id=author_participant_id,
                         )
-                    if author_p.type in ("AI_AGENT", "HUMAN_AGENT", "AGENT"):
+                    if author_p.type in ("AGENT", "AI_AGENT"):
                         return True
             except Exception as e:
                 self.logger.warning(
@@ -418,7 +418,7 @@ class MessagingChannel(BaseChannel):
                 (
                     p
                     for p in participants
-                    if p.type in ("AI_AGENT", "HUMAN_AGENT", "AGENT")
+                    if p.type in ("AGENT", "AI_AGENT")
                     and _match_address(p.addresses, from_address, agent_address_kwargs)
                 ),
                 None,
@@ -485,13 +485,18 @@ class MessagingChannel(BaseChannel):
 
             | Agent side           | Customer side       | Action                        |
             |----------------------|---------------------|-------------------------------|
-            | AI_AGENT             | CUSTOMER            | Use as-is (no profile work).  |
-            | AI_AGENT             | UNKNOWN, no CUST    | Resolve profile, PUT → CUST.  |
+            | AGENT / AI_AGENT     | CUSTOMER            | Use as-is (no profile work).  |
+            | AGENT / AI_AGENT     | UNKNOWN, no CUST    | Resolve profile, PUT → CUST.  |
             | UNKNOWN at our addr  | CUSTOMER            | PUT agent → AI_AGENT.         |
             | UNKNOWN at our addr  | UNKNOWN, no CUST    | PUT agent; resolve, PUT CUST. |
             | other at our addr    | any                 | Return None (log ERROR).      |
             | none at our addr     | CUSTOMER or UNKNOWN | POST AI_AGENT, then proceed.  |
             | any                  | no resolvable cust  | Return None (caller WARNs).   |
+
+        TAC recognizes both `AGENT` and `AI_AGENT` at its address as itself.
+        `HUMAN_AGENT` is NOT treated as TAC (a real human is a separate
+        participant — TAC must not speak on their behalf); it falls into the
+        "other at our addr" row and causes the reconcile to bail.
 
         Customer-side reconciliation is gated by `reconcile_customer_type`.
         Chat sets it to `False` because chat identifies the customer
@@ -538,8 +543,8 @@ class MessagingChannel(BaseChannel):
                 return None
         elif agent_candidate.type == "UNKNOWN":
             # Only promote UNKNOWN — an already-typed participant at TAC's
-            # address (CUSTOMER / AGENT / HUMAN_AGENT) is someone else's
-            # assignment and must not be overwritten.
+            # address that isn't AGENT/AI_AGENT (e.g., CUSTOMER, HUMAN_AGENT)
+            # is someone else's assignment and must not be overwritten.
             agent_candidate = await self._promote_participant(
                 conversation_id=conversation_id,
                 participant=agent_candidate,
@@ -547,10 +552,10 @@ class MessagingChannel(BaseChannel):
             )
             if agent_candidate is None:
                 return None
-        elif agent_candidate.type != "AI_AGENT":
+        elif agent_candidate.type not in ("AGENT", "AI_AGENT"):
             self.logger.error(
                 "Participant at TAC's address has a conflicting type; refusing to "
-                "overwrite. Check Maestro participant state — a non-AI_AGENT "
+                "overwrite. Check Maestro participant state — a non-agent "
                 "participant is holding TAC's (channel, address).",
                 conversation_id=conversation_id,
                 participant_id=agent_candidate.id,
@@ -782,7 +787,7 @@ class MessagingChannel(BaseChannel):
                 return await self._refetch_after_409(
                     conversation_id,
                     lambda p: (
-                        p.type == "AI_AGENT"
+                        p.type in ("AGENT", "AI_AGENT")
                         and any(
                             a.channel == agent_address.channel
                             and a.address == agent_address.address

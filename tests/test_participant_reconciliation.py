@@ -204,15 +204,16 @@ async def test_unknown_agent_plus_unknown_customer_promotes_both() -> None:
     assert mock_update.call_count == 2
 
 
-@pytest.mark.parametrize("conflicting_type", ["AGENT", "HUMAN_AGENT", "CUSTOMER"])
+@pytest.mark.parametrize("conflicting_type", ["HUMAN_AGENT", "CUSTOMER"])
 @pytest.mark.asyncio
-async def test_non_unknown_at_our_address_refuses_to_overwrite(
+async def test_non_agent_at_our_address_refuses_to_overwrite(
     conflicting_type: str,
 ) -> None:
-    """Participant already typed at TAC's address is someone else's state.
+    """Participant at TAC's address with a non-agent type is someone else's state.
 
-    TAC only rewrites UNKNOWN. An AGENT, HUMAN_AGENT, or CUSTOMER holding
-    our (channel, address) is a real assignment — maybe a Studio handoff,
+    TAC recognizes `AGENT` and `AI_AGENT` at its address as itself and
+    rewrites `UNKNOWN`. A `HUMAN_AGENT` or `CUSTOMER` holding our
+    (channel, address) is a real assignment — maybe a Studio handoff,
     maybe a misconfiguration — and clobbering it could misroute messages
     or break a human agent's session. Log ERROR and return None so the
     operator investigates.
@@ -235,6 +236,38 @@ async def test_non_unknown_at_our_address_refuses_to_overwrite(
         result = await channel._reconcile_participants("CH123")
 
     assert result is None
+    mock_update.assert_not_called()
+    mock_add.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_agent_type_at_our_address_is_recognized_as_tac() -> None:
+    """A participant typed `AGENT` (not `AI_AGENT`) at TAC's address counts as us.
+
+    Maestro/legacy flows can create the agent participant as plain `AGENT`.
+    TAC treats it as its own — no PUT, just use it.
+    """
+    tac = _tac()
+    channel = SMSChannel(tac)
+
+    agent_as_agent_type = _participant("PA_A", "AGENT", "+15551234567")
+    customer = _participant("PA_C", "CUSTOMER", "+12345678901")
+
+    with (
+        patch.object(
+            tac.conversation_orchestrator_client,
+            "list_participants",
+            return_value=[agent_as_agent_type, customer],
+        ),
+        patch.object(tac.conversation_orchestrator_client, "update_participant") as mock_update,
+        patch.object(tac.conversation_orchestrator_client, "add_participant") as mock_add,
+    ):
+        result = await channel._reconcile_participants("CH123")
+
+    assert result is not None
+    assert result[0].id == "PA_A"
+    assert result[0].type == "AGENT"
+    assert result[1] is not None and result[1].id == "PA_C"
     mock_update.assert_not_called()
     mock_add.assert_not_called()
 
