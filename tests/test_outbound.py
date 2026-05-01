@@ -758,38 +758,6 @@ class TestRCSOutbound:
         tac.conversation_orchestrator_client.create_action.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_custom_from_address(self) -> None:
-        tac = TAC(get_test_config())
-        from tac.channels.rcs import RCSChannelConfig
-
-        channel = RCSChannel(tac, config=RCSChannelConfig())
-        _mock_rcs_outbound(tac, from_addr="rcs:custom_agent")
-
-        result = await channel.initiate_outbound_conversation(
-            InitiateMessagingConversationOptions(
-                to="rcs:+15559876543",
-                message="Hello from custom agent",
-                **{"from": "rcs:custom_agent"},
-            )
-        )
-
-        assert result.session.metadata["from_address"] == "rcs:custom_agent"
-
-    @pytest.mark.asyncio
-    async def test_default_from_address_stored(self) -> None:
-        tac = TAC(get_test_config())
-        from tac.channels.rcs import RCSChannelConfig
-
-        channel = RCSChannel(tac, config=RCSChannelConfig())
-        _mock_rcs_outbound(tac)
-
-        result = await channel.initiate_outbound_conversation(
-            InitiateMessagingConversationOptions(to="rcs:+15559876543", message="Hello")
-        )
-
-        assert result.session.metadata["from_address"] == "rcs:my_agent"
-
-    @pytest.mark.asyncio
     async def test_reuses_conversation_on_409(self) -> None:
         tac = TAC(get_test_config())
         from tac.channels.rcs import RCSChannelConfig
@@ -829,33 +797,3 @@ class TestRCSOutbound:
 # =============================================================================
 # RCS sendResponse after outbound
 # =============================================================================
-
-
-class TestRCSSendResponseAfterOutbound:
-    @pytest.mark.asyncio
-    async def test_uses_from_address_for_agent_participant(self) -> None:
-        """Verify RCS send_response uses session.metadata['from_address'] for custom sender."""
-        tac = TAC(get_test_config())
-        from tac.channels.rcs import RCSChannelConfig
-
-        channel = RCSChannel(tac, config=RCSChannelConfig())
-        _mock_rcs_outbound(tac, from_addr="rcs:custom_agent")
-
-        await channel.initiate_outbound_conversation(
-            InitiateMessagingConversationOptions(
-                to="rcs:+15559876543",
-                message="First",
-                **{"from": "rcs:custom_agent"},
-            )
-        )
-
-        # Reset create_action mock for sendResponse call
-        tac.conversation_orchestrator_client.create_action = AsyncMock(
-            return_value=make_action_response("CHrcs_out")
-        )
-
-        await channel.send_response("CHrcs_out", "Follow-up")
-
-        call_args = tac.conversation_orchestrator_client.create_action.call_args
-        action_request = call_args.args[1]
-        assert action_request.payload.from_.participant_id == "PArcsagent"

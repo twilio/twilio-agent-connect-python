@@ -12,28 +12,20 @@ from tac.models.session import ConversationSession
 from tac.models.tac import TACMemoryResponse
 
 
-def create_participant_added_webhook(
-    conversation_id: str,
-    participant_id: str,
-    profile_id: str,
-    timestamp: str,
-    address: str = "rcs:+12345678901",
-) -> dict[str, Any]:
-    """Create a PARTICIPANT_ADDED webhook event for RCS."""
+def create_conversation_created_webhook(conversation_id: str, timestamp: str) -> dict[str, Any]:
+    """Create a CONVERSATION_CREATED webhook event."""
     return {
-        "eventType": "PARTICIPANT_ADDED",
+        "eventType": "CONVERSATION_CREATED",
         "timestamp": timestamp,
         "data": {
-            "id": participant_id,
-            "conversationId": conversation_id,
+            "id": conversation_id,
             "accountId": "ACtest123",
             "serviceId": "IStest123",
-            "name": address,
-            "type": "CUSTOMER",
-            "profileId": profile_id,
-            "addresses": [{"channel": "RCS", "address": address, "channelId": None}],
+            "status": "ACTIVE",
+            "name": "Test Conversation",
             "createdAt": timestamp,
             "updatedAt": timestamp,
+            "configuration": {"intelligenceServiceIds": []},
         },
     }
 
@@ -77,7 +69,7 @@ def create_communication_created_webhook(
 
 
 def create_conversation_updated_webhook(
-    conversation_id: str, status: str, timestamp: str, configuration_id: str = "default_config"
+    conversation_id: str, status: str, timestamp: str
 ) -> dict[str, Any]:
     """Create a CONVERSATION_UPDATED webhook event."""
     return {
@@ -86,12 +78,13 @@ def create_conversation_updated_webhook(
         "data": {
             "id": conversation_id,
             "accountId": "ACtest123",
+            "configurationId": "default_config",
             "serviceId": "IStest123",
-            "configurationId": configuration_id,
             "status": status,
             "name": "Test Conversation",
-            "createdAt": timestamp,
+            "createdAt": "2025-11-18T00:00:00.000Z",
             "updatedAt": timestamp,
+            "configuration": {"intelligenceServiceIds": []},
         },
     }
 
@@ -147,29 +140,25 @@ async def test_is_default_agent_address_configured(mock_tac: TAC) -> None:
 
 
 @pytest.mark.asyncio
-async def test_participant_added_webhook(rcs_channel: RCSChannel) -> None:
-    """Test PARTICIPANT_ADDED webhook processing."""
-    webhook = create_participant_added_webhook(
+async def test_conversation_created_webhook(rcs_channel: RCSChannel) -> None:
+    """Test CONVERSATION_CREATED webhook processing."""
+    webhook = create_conversation_created_webhook(
         conversation_id="conv_123",
-        participant_id="part_customer",
-        profile_id="prof_123",
         timestamp="2025-01-15T10:15:30Z",
-        address="rcs:+12345678901",
     )
 
+    # CONVERSATION_CREATED events are ignored (no action needed)
     await rcs_channel.process_webhook(webhook)
 
-    # Verify conversation was started
-    assert "conv_123" in rcs_channel._conversations
-    session = rcs_channel._conversations["conv_123"]
-    assert session.conversation_id == "conv_123"
-    assert session.profile_id == "prof_123"
-    assert session.channel == "rcs"
+    # Conversations are not started until COMMUNICATION_CREATED
+    assert "conv_123" not in rcs_channel._conversations
 
 
 @pytest.mark.asyncio
 async def test_communication_created_webhook(rcs_channel: RCSChannel) -> None:
     """Test COMMUNICATION_CREATED webhook processing."""
+    from tac.models.conversation import ParticipantAddress, ParticipantResponse
+
     conversation_id = "conv_123"
     participant_id = "part_customer"
     message_text = "Hello from RCS!"
@@ -194,15 +183,48 @@ async def test_communication_created_webhook(rcs_channel: RCSChannel) -> None:
     # Mock send_response to avoid actual API calls
     rcs_channel.send_response = AsyncMock()
 
-    webhook = create_communication_created_webhook(
-        conversation_id=conversation_id,
-        participant_id=participant_id,
-        message_text=message_text,
-        timestamp=timestamp,
-        author_address="rcs:+12345678901",
+    # Mock reconcile to return (agent, customer) so callback fires
+    mock_agent = ParticipantResponse(
+        **{  # type: ignore[arg-type]
+            "id": "PA_AGENT",
+            "accountId": "ACtest123",
+            "conversationId": conversation_id,
+            "name": "Agent",
+            "type": "AI_AGENT",
+            "addresses": [
+                ParticipantAddress(
+                    channel="RCS", address="rcs:twilio_signal_test_agent", channel_id=None
+                )
+            ],
+        }
+    )
+    mock_customer = ParticipantResponse(
+        **{  # type: ignore[arg-type]
+            "id": "PA_CUSTOMER",
+            "accountId": "ACtest123",
+            "conversationId": conversation_id,
+            "name": "Customer",
+            "type": "CUSTOMER",
+            "addresses": [
+                ParticipantAddress(channel="RCS", address="rcs:+12345678901", channel_id=None)
+            ],
+        }
     )
 
-    await rcs_channel.process_webhook(webhook)
+    with patch.object(
+        rcs_channel, "_reconcile_participants", new_callable=AsyncMock
+    ) as mock_reconcile:
+        mock_reconcile.return_value = (mock_agent, mock_customer)
+
+        webhook = create_communication_created_webhook(
+            conversation_id=conversation_id,
+            participant_id=participant_id,
+            message_text=message_text,
+            timestamp=timestamp,
+            author_address="rcs:+12345678901",
+        )
+
+        await rcs_channel.process_webhook(webhook)
 
     # Verify callback was invoked
     assert callback_called
@@ -218,27 +240,6 @@ async def test_communication_from_agent_ignored(rcs_channel: RCSChannel) -> None
     """Test that messages from the agent are ignored."""
     conversation_id = "conv_123"
 
-    # First, process PARTICIPANT_ADDED for agent to detect agent address
-    agent_webhook = {
-        "eventType": "PARTICIPANT_ADDED",
-        "timestamp": "2025-01-15T10:15:29Z",
-        "data": {
-            "id": "part_agent",
-            "conversationId": conversation_id,
-            "accountId": "ACtest123",
-            "serviceId": "IStest123",
-            "name": "Agent",
-            "type": "AI_AGENT",
-            "profileId": None,
-            "addresses": [
-                {"channel": "RCS", "address": "rcs:twilio_signal_test_agent", "channelId": None}
-            ],
-            "createdAt": "2025-01-15T10:15:29Z",
-            "updatedAt": "2025-01-15T10:15:29Z",
-        },
-    }
-    await rcs_channel.process_webhook(agent_webhook)
-
     # Mock the callback
     callback_called = False
 
@@ -251,7 +252,7 @@ async def test_communication_from_agent_ignored(rcs_channel: RCSChannel) -> None
 
     rcs_channel.tac.on_message_ready(mock_callback)
 
-    # Message from agent (should be detected via cached agent address)
+    # Message from agent (should be detected via configured rcs_sender_id)
     webhook = create_communication_created_webhook(
         conversation_id=conversation_id,
         participant_id="part_agent",
@@ -271,8 +272,25 @@ async def test_conversation_updated_closed(rcs_channel: RCSChannel) -> None:
     """Test CONVERSATION_UPDATED with CLOSED status."""
     conversation_id = "conv_123"
 
-    # Start a conversation first
-    rcs_channel._start_conversation(conversation_id, profile_id="prof_123")
+    # Start a conversation first by processing a communication
+    webhook = create_communication_created_webhook(
+        conversation_id=conversation_id,
+        participant_id="part_customer",
+        message_text="Hello",
+        timestamp="2025-01-15T10:15:30Z",
+        author_address="rcs:+12345678901",
+    )
+
+    # Mock callback to avoid errors
+    async def mock_callback(
+        message: str, context: ConversationSession, memory: TACMemoryResponse | None
+    ) -> str:
+        return "response"
+
+    rcs_channel.tac.on_message_ready(mock_callback)
+    rcs_channel.send_response = AsyncMock()
+    await rcs_channel.process_webhook(webhook)
+
     assert conversation_id in rcs_channel._conversations
 
     # Mock the conversation ended callback
@@ -286,14 +304,13 @@ async def test_conversation_updated_closed(rcs_channel: RCSChannel) -> None:
 
     rcs_channel.tac.on_conversation_ended(mock_ended_callback)
 
-    webhook = create_conversation_updated_webhook(
+    close_webhook = create_conversation_updated_webhook(
         conversation_id=conversation_id,
         status="CLOSED",
         timestamp="2025-01-15T10:20:30Z",
-        configuration_id="default_config",
     )
 
-    await rcs_channel.process_webhook(webhook)
+    await rcs_channel.process_webhook(close_webhook)
 
     # Verify conversation was ended
     assert conversation_id not in rcs_channel._conversations
@@ -315,6 +332,8 @@ async def test_send_response_type_error(rcs_channel: RCSChannel) -> None:
 @pytest.mark.asyncio
 async def test_webhook_deduplication(rcs_channel: RCSChannel) -> None:
     """Test webhook deduplication using idempotency tokens."""
+    from tac.models.conversation import ParticipantAddress, ParticipantResponse
+
     webhook = create_communication_created_webhook(
         conversation_id="conv_123",
         participant_id="part_customer",
@@ -334,14 +353,47 @@ async def test_webhook_deduplication(rcs_channel: RCSChannel) -> None:
     rcs_channel.tac.on_message_ready(mock_callback)
     rcs_channel.send_response = AsyncMock()
 
-    # Process webhook with idempotency token
-    idempotency_token = "test_token_123"
-    await rcs_channel.process_webhook(webhook, idempotency_token=idempotency_token)
-    assert callback_count == 1
+    # Mock reconcile
+    mock_agent = ParticipantResponse(
+        **{  # type: ignore[arg-type]
+            "id": "PA_AGENT",
+            "accountId": "ACtest123",
+            "conversationId": "conv_123",
+            "name": "Agent",
+            "type": "AI_AGENT",
+            "addresses": [
+                ParticipantAddress(
+                    channel="RCS", address="rcs:twilio_signal_test_agent", channel_id=None
+                )
+            ],
+        }
+    )
+    mock_customer = ParticipantResponse(
+        **{  # type: ignore[arg-type]
+            "id": "PA_CUSTOMER",
+            "accountId": "ACtest123",
+            "conversationId": "conv_123",
+            "name": "Customer",
+            "type": "CUSTOMER",
+            "addresses": [
+                ParticipantAddress(channel="RCS", address="rcs:+12345678901", channel_id=None)
+            ],
+        }
+    )
 
-    # Process same webhook again with same token - should be deduplicated
-    await rcs_channel.process_webhook(webhook, idempotency_token=idempotency_token)
-    assert callback_count == 1  # Should not increment
+    with patch.object(
+        rcs_channel, "_reconcile_participants", new_callable=AsyncMock
+    ) as mock_reconcile:
+        mock_reconcile.return_value = (mock_agent, mock_customer)
+
+        # Process webhook with idempotency token
+        idempotency_token = "test_token_123"
+        await rcs_channel.process_webhook(webhook, idempotency_token=idempotency_token)
+        assert callback_count == 1
+
+        # Process same webhook again with same token - should be deduplicated
+        await rcs_channel.process_webhook(webhook, idempotency_token=idempotency_token)
+        assert callback_count == 1  # Should not increment
 
 
 @pytest.mark.asyncio
@@ -407,6 +459,8 @@ async def test_initiate_outbound_conversation(mock_tac: TAC) -> None:
 @pytest.mark.asyncio
 async def test_auto_retrieve_memory_enabled(mock_tac: TAC) -> None:
     """Test RCS channel with auto_retrieve_memory enabled."""
+    from tac.models.conversation import ParticipantAddress, ParticipantResponse
+
     config = RCSChannelConfig(auto_retrieve_memory=True)
     channel = RCSChannel(mock_tac, config=config)
 
@@ -422,8 +476,40 @@ async def test_auto_retrieve_memory_enabled(mock_tac: TAC) -> None:
         )
     )
 
-    with patch.object(mock_tac, "retrieve_memory", new_callable=AsyncMock) as mock_retrieve:
+    # Mock reconcile
+    mock_agent = ParticipantResponse(
+        **{  # type: ignore[arg-type]
+            "id": "PA_AGENT",
+            "accountId": "ACtest123",
+            "conversationId": "conv_123",
+            "name": "Agent",
+            "type": "AI_AGENT",
+            "addresses": [
+                ParticipantAddress(
+                    channel="RCS", address="rcs:twilio_signal_test_agent", channel_id=None
+                )
+            ],
+        }
+    )
+    mock_customer = ParticipantResponse(
+        **{  # type: ignore[arg-type]
+            "id": "PA_CUSTOMER",
+            "accountId": "ACtest123",
+            "conversationId": "conv_123",
+            "name": "Customer",
+            "type": "CUSTOMER",
+            "addresses": [
+                ParticipantAddress(channel="RCS", address="rcs:+12345678901", channel_id=None)
+            ],
+        }
+    )
+
+    with (
+        patch.object(mock_tac, "retrieve_memory", new_callable=AsyncMock) as mock_retrieve,
+        patch.object(channel, "_reconcile_participants", new_callable=AsyncMock) as mock_reconcile,
+    ):
         mock_retrieve.return_value = mock_memory
+        mock_reconcile.return_value = (mock_agent, mock_customer)
 
         callback_called = False
         callback_memory = None

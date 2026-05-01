@@ -8,13 +8,12 @@ the OpenAI Agents SDK.
 Usage:
     python outbound.py --to +16505551234 --channel sms --message "Hello!"
     python outbound.py --to +16505551234 --channel rcs --message "Hello!"
-    python outbound.py --to +16505551234 --channel rcs --message "Hello!" --from rcs:sender_id
     python outbound.py --to +16505551234 --channel voice
     python outbound.py --to +16505551234 --channel voice --welcome-greeting "Hi there!"
 
 Requires ``OPENAI_API_KEY`` in addition to the usual TAC env vars.
 For voice calls, ``TWILIO_VOICE_PUBLIC_DOMAIN`` must also be set (e.g. via ngrok).
-For RCS, ``TWILIO_RCS_SENDER_ID`` must be set OR ``--from`` flag must be provided.
+For RCS, ``TWILIO_RCS_SENDER_ID`` must be set in environment variables.
 """
 
 import argparse
@@ -55,7 +54,6 @@ def parse_args() -> argparse.Namespace:
         help="Channel (sms, rcs, or voice)",
     )
     parser.add_argument("--message", help="Initial message (required for SMS and RCS)")
-    parser.add_argument("--from", dest="from_", help="Optional sender address override")
     parser.add_argument("--welcome-greeting", help="Optional voice welcome greeting")
     return parser.parse_args()
 
@@ -124,17 +122,14 @@ async def initiate_outbound(args: argparse.Namespace) -> None:
 
         elif args.channel == "rcs":
             # Validate RCS configuration
-            if not args.from_ and not tac.config.rcs_sender_id:
+            if not tac.config.rcs_sender_id:
                 print(
-                    "Error: RCS requires either TWILIO_RCS_SENDER_ID environment "
-                    "variable or --from flag to specify the RCS Sender ID."
+                    "Error: RCS requires TWILIO_RCS_SENDER_ID environment variable to be set."
                 )
                 sys.exit(1)
 
             rcs_result = await rcs_channel.initiate_outbound_conversation(
-                InitiateMessagingConversationOptions(
-                    to=args.to, from_=args.from_, message=args.message
-                )
+                InitiateMessagingConversationOptions(to=args.to, message=args.message)
             )
             print(f"RCS message sent to {args.to} (conversation: {rcs_result.conversation_id})")
             print(f"[{rcs_result.conversation_id}] Agent: {args.message}")
