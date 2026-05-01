@@ -74,9 +74,13 @@ class RCSChannel(MessagingChannel):
         return "RCS"
 
     def is_default_agent_address(self, author_address: str) -> bool:
+        # rcs_sender_id is guaranteed to be non-None by __init__ validation
+        assert self.tac.config.rcs_sender_id is not None
         return author_address == self.tac.config.rcs_sender_id
 
     def get_agent_address(self, conversation_id: str) -> ParticipantAddress:
+        # rcs_sender_id is guaranteed to be non-None by __init__ validation
+        assert self.tac.config.rcs_sender_id is not None
         return ParticipantAddress(channel="RCS", address=self.tac.config.rcs_sender_id)
 
     async def send_response(
@@ -174,6 +178,8 @@ class RCSChannel(MessagingChannel):
         If an active conversation with the same addresses already exists
         (group-by dedup), CO returns 409 and the existing conversation is reused.
         """
+        # rcs_sender_id is guaranteed to be non-None by __init__ validation
+        assert self.tac.config.rcs_sender_id is not None
         return await self._initiate_messaging_conversation(
             options=options,
             from_address=self.tac.config.rcs_sender_id,
