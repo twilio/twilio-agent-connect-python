@@ -300,7 +300,42 @@ async def test_conversation_updated_closed(rcs_channel: RCSChannel) -> None:
 
     rcs_channel.tac.on_message_ready(mock_callback)
     rcs_channel.send_response = AsyncMock()
-    await rcs_channel.process_webhook(webhook)
+
+    # Mock reconcile to avoid HTTP calls
+    from tac.models.conversation import ParticipantAddress, ParticipantResponse
+
+    mock_agent = ParticipantResponse(
+        **{  # type: ignore[arg-type]
+            "id": "PA_AGENT",
+            "accountId": "ACtest123",
+            "conversationId": conversation_id,
+            "name": "Agent",
+            "type": "AI_AGENT",
+            "addresses": [
+                ParticipantAddress(
+                    channel="RCS", address="rcs:twilio_signal_test_agent", channel_id=None
+                )
+            ],
+        }
+    )
+    mock_customer = ParticipantResponse(
+        **{  # type: ignore[arg-type]
+            "id": "PA_CUSTOMER",
+            "accountId": "ACtest123",
+            "conversationId": conversation_id,
+            "name": "Customer",
+            "type": "CUSTOMER",
+            "addresses": [
+                ParticipantAddress(channel="RCS", address="rcs:+12345678901", channel_id=None)
+            ],
+        }
+    )
+
+    with patch.object(
+        rcs_channel, "_reconcile_participants", new_callable=AsyncMock
+    ) as mock_reconcile:
+        mock_reconcile.return_value = (mock_agent, mock_customer)
+        await rcs_channel.process_webhook(webhook)
 
     assert conversation_id in rcs_channel._conversations
 
