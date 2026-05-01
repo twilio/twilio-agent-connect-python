@@ -48,7 +48,6 @@ def parse_args() -> argparse.Namespace:
         "--channel", required=True, choices=["sms", "voice"], help="Channel (sms or voice)"
     )
     parser.add_argument("--message", help="Initial message (required for SMS)")
-    parser.add_argument("--from", dest="from_", help="Optional sender address override")
     parser.add_argument("--welcome-greeting", help="Optional voice welcome greeting")
     return parser.parse_args()
 
@@ -101,9 +100,7 @@ async def initiate_outbound(args: argparse.Namespace) -> None:
     try:
         if args.channel == "sms":
             sms_result = await sms_channel.initiate_outbound_conversation(
-                InitiateMessagingConversationOptions(
-                    to=args.to, from_=args.from_, message=args.message
-                )
+                InitiateMessagingConversationOptions(to=args.to, message=args.message)
             )
             print(f"SMS sent to {args.to} (conversation: {sms_result.conversation_id})")
             print(f"[{sms_result.conversation_id}] Agent: {args.message}")
@@ -119,7 +116,6 @@ async def initiate_outbound(args: argparse.Namespace) -> None:
             voice_result = await voice_channel.initiate_outbound_conversation(
                 InitiateVoiceConversationOptions(
                     to=args.to,
-                    from_=args.from_,
                     websocket_url=f"wss://{public_domain}/ws",
                     welcome_greeting=args.welcome_greeting,
                     action_url=f"https://{public_domain}/conversation-relay-callback",

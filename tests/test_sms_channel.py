@@ -30,28 +30,6 @@ def create_conversation_created_webhook(conversation_id: str, timestamp: str) ->
     }
 
 
-def create_participant_added_webhook(
-    conversation_id: str, participant_id: str, profile_id: str, timestamp: str
-) -> dict[str, Any]:
-    """Create a PARTICIPANT_ADDED webhook event."""
-    return {
-        "eventType": "PARTICIPANT_ADDED",
-        "timestamp": timestamp,
-        "data": {
-            "id": participant_id,
-            "conversationId": conversation_id,
-            "accountId": "ACtest123",
-            "serviceId": "IStest123",
-            "name": "+12345678901",
-            "type": "CUSTOMER",
-            "profileId": profile_id,
-            "addresses": [{"channel": "SMS", "address": "+12345678901", "channelId": None}],
-            "createdAt": timestamp,
-            "updatedAt": timestamp,
-        },
-    }
-
-
 def create_communication_created_webhook(
     conversation_id: str,
     participant_id: str,
@@ -147,22 +125,6 @@ class TestSMSChannel:
         # phone_number is now required at TACConfig level
         with pytest.raises(ValueError):
             TAC(config)
-
-    @pytest.mark.asyncio
-    async def test_process_conversation_started(self) -> None:
-        """Test processing participant.added event to start conversation."""
-        tac = TAC(get_test_config())
-        channel = SMSChannel(tac)
-
-        # Process participant.added (creates conversation session)
-        participant_webhook = create_participant_added_webhook(
-            "CH123456", "MB123", "profile_test_123", "2025-11-18T00:00:01.000Z"
-        )
-        await channel.process_webhook(participant_webhook)
-
-        # Verify conversation was started with profile
-        assert "CH123456" in channel._conversations
-        assert channel._conversations["CH123456"].profile_id == "profile_test_123"
 
     @pytest.mark.asyncio
     async def test_process_message_auto_initialize(self) -> None:
@@ -272,13 +234,7 @@ class TestSMSChannel:
             tac, config={"auto_retrieve_memory": True}
         )  # Enable memory retrieval for test
 
-        # Start conversation via participant added
-        participant_webhook = create_participant_added_webhook(
-            "CH123456", "MB123", "profile_test_123", "2025-11-18T00:00:01.000Z"
-        )
-        await channel.process_webhook(participant_webhook)
-
-        # Now process message
+        # Message webhook auto-initializes the session.
         message_webhook = create_communication_created_webhook(
             "CH123456", "MB123", "Test message", "2025-11-18T00:00:02.000Z"
         )
@@ -291,6 +247,8 @@ class TestSMSChannel:
         tac.conversation_memory_client.retrieve_memory = AsyncMock(return_value=empty_response)
 
         # Mock reconcile to return (agent, customer) so the callback fires.
+        # Customer carries a profile_id so retrieve_memory skips the
+        # lookup_profile fallback path.
         mock_agent = ParticipantResponse(
             **{  # type: ignore[arg-type]
                 "id": "PA_AGENT",
@@ -312,12 +270,16 @@ class TestSMSChannel:
                 "conversationId": "CH123456",
                 "name": "+12345678901",
                 "type": "CUSTOMER",
+                "profileId": "profile_test_123",
                 "addresses": [
                     ParticipantAddress(channel="SMS", address="+12345678901").model_dump(
                         by_alias=True
                     )
                 ],
             }
+        )
+        tac.conversation_memory_client.get_profile = AsyncMock(
+            side_effect=Exception("skip profile")
         )
 
         with patch.object(
@@ -363,11 +325,11 @@ class TestSMSChannel:
         tac = TAC(get_test_config())
         channel = SMSChannel(tac)
 
-        # Start conversation via participant added
-        start_webhook = create_participant_added_webhook(
-            "CH123456", "MB123", "profile_test_123", "2025-11-18T00:00:00.000Z"
+        channel._conversations["CH123456"] = ConversationSession(
+            conversation_id="CH123456",
+            channel="sms",
+            profile_id="profile_test_123",
         )
-        await channel.process_webhook(start_webhook)
 
         # End conversation (status changed to CLOSED)
         end_webhook = create_conversation_updated_webhook(
@@ -448,17 +410,14 @@ class TestSMSChannel:
         tac = TAC(get_test_config())
         channel = SMSChannel(tac)
 
-        # Start first conversation via participant added
-        await channel.process_webhook(
-            create_participant_added_webhook("CH111", "PA111", "PR111", "2025-11-18T00:00:00.000Z")
+        channel._conversations["CH111"] = ConversationSession(
+            conversation_id="CH111", channel="sms", profile_id="PR111"
+        )
+        channel._conversations["CH222"] = ConversationSession(
+            conversation_id="CH222", channel="sms", profile_id="PR222"
         )
 
-        # Start second conversation via participant added
-        await channel.process_webhook(
-            create_participant_added_webhook("CH222", "PA222", "PR222", "2025-11-18T00:00:01.000Z")
-        )
-
-        # Verify both conversations started successfully
+        # Verify both conversations tracked.
         assert "CH111" in channel._conversations
         assert "CH222" in channel._conversations
 
@@ -498,11 +457,8 @@ class TestSMSChannel:
 
         tac.on_conversation_ended(handler)
 
-        # Start conversation via participant added
-        await channel.process_webhook(
-            create_participant_added_webhook(
-                "CH_CB1", "MB_CB1", "prof_cb1", "2025-11-18T00:00:01.000Z"
-            )
+        channel._conversations["CH_CB1"] = ConversationSession(
+            conversation_id="CH_CB1", channel="sms", profile_id="prof_cb1"
         )
 
         # Close conversation
@@ -526,10 +482,8 @@ class TestSMSChannel:
 
         tac.on_conversation_ended(bad_handler)
 
-        await channel.process_webhook(
-            create_participant_added_webhook(
-                "CH_CB2", "MB_CB2", "prof_cb2", "2025-11-18T00:00:00.000Z"
-            )
+        channel._conversations["CH_CB2"] = ConversationSession(
+            conversation_id="CH_CB2", channel="sms", profile_id="prof_cb2"
         )
         await channel.process_webhook(
             create_conversation_updated_webhook("CH_CB2", "CLOSED", "2025-11-18T00:10:00.000Z")
@@ -550,10 +504,8 @@ class TestSMSChannel:
 
         tac.on_conversation_ended(async_handler)
 
-        await channel.process_webhook(
-            create_participant_added_webhook(
-                "CH_ASYNC1", "MB_ASYNC1", "prof_async1", "2025-11-18T00:00:00.000Z"
-            )
+        channel._conversations["CH_ASYNC1"] = ConversationSession(
+            conversation_id="CH_ASYNC1", channel="sms", profile_id="prof_async1"
         )
         await channel.process_webhook(
             create_conversation_updated_webhook("CH_ASYNC1", "CLOSED", "2025-11-18T00:10:00.000Z")
@@ -570,10 +522,8 @@ class TestSMSChannel:
         channel = SMSChannel(tac)
 
         # No callback registered — should not raise
-        await channel.process_webhook(
-            create_participant_added_webhook(
-                "CH_NOCB", "MB_NOCB", "prof_nocb", "2025-11-18T00:00:00.000Z"
-            )
+        channel._conversations["CH_NOCB"] = ConversationSession(
+            conversation_id="CH_NOCB", channel="sms", profile_id="prof_nocb"
         )
         await channel.process_webhook(
             create_conversation_updated_webhook("CH_NOCB", "CLOSED", "2025-11-18T00:10:00.000Z")
@@ -652,13 +602,6 @@ class TestSMSChannel:
 
         tac.on_message_ready(message_callback)
 
-        # Start conversation via participant added
-        await channel.process_webhook(
-            create_participant_added_webhook(
-                "CH_AUTO_SEND", "PA_AUTO", "prof_auto", "2025-11-18T00:00:00.000Z"
-            )
-        )
-
         # Mock reconcile to return (agent, customer) — this is what stashes
         # ai_agent_info / author_info on the session pre-callback.
         mock_agent = ParticipantResponse(
@@ -731,13 +674,6 @@ class TestSMSChannel:
             pass
 
         tac.on_message_ready(message_callback)
-
-        # Start conversation via participant added
-        await channel.process_webhook(
-            create_participant_added_webhook(
-                "CH_NO_AUTO", "PA_NO_AUTO", "prof_no_auto", "2025-11-18T00:00:00.000Z"
-            )
-        )
 
         with patch.object(
             tac.conversation_orchestrator_client, "create_action"

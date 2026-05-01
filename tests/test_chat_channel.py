@@ -12,31 +12,6 @@ from tac.models.session import AuthorInfo, ConversationSession
 from tac.models.tac import TACMemoryResponse
 
 
-def create_participant_added_webhook(
-    conversation_id: str,
-    participant_id: str,
-    profile_id: str,
-    timestamp: str,
-    address: str = "user@example.com",
-) -> dict[str, Any]:
-    return {
-        "eventType": "PARTICIPANT_ADDED",
-        "timestamp": timestamp,
-        "data": {
-            "id": participant_id,
-            "conversationId": conversation_id,
-            "accountId": "ACtest123",
-            "serviceId": "IStest123",
-            "name": address,
-            "type": "CUSTOMER",
-            "profileId": profile_id,
-            "addresses": [{"channel": "CHAT", "address": address, "channelId": "CH_CHAT_SID_123"}],
-            "createdAt": timestamp,
-            "updatedAt": timestamp,
-        },
-    }
-
-
 def create_communication_created_webhook(
     conversation_id: str,
     participant_id: str,
@@ -131,45 +106,6 @@ class TestChatChannel:
         channel = ChatChannel(tac)
         assert channel.is_default_agent_address("ai-assistant") is True
         assert channel.is_default_agent_address("user@example.com") is False
-
-    @pytest.mark.asyncio
-    async def test_process_participant_added(self) -> None:
-        tac = TAC(get_test_config())
-        channel = ChatChannel(tac)
-
-        webhook = create_participant_added_webhook(
-            "CH123", "PA123", "profile_123", "2025-11-18T00:00:01.000Z"
-        )
-        await channel.process_webhook(webhook)
-
-        assert "CH123" in channel._conversations
-        assert channel._conversations["CH123"].profile_id == "profile_123"
-        assert channel._conversations["CH123"].channel == "chat"
-
-    @pytest.mark.asyncio
-    async def test_ignores_sms_participant(self) -> None:
-        """PARTICIPANT_ADDED with SMS address should be ignored by ChatChannel."""
-        tac = TAC(get_test_config())
-        channel = ChatChannel(tac)
-
-        webhook = {
-            "eventType": "PARTICIPANT_ADDED",
-            "timestamp": "2025-11-18T00:00:01.000Z",
-            "data": {
-                "id": "PA123",
-                "conversationId": "CH123",
-                "accountId": "ACtest123",
-                "serviceId": "IStest123",
-                "name": "+12345678901",
-                "type": "CUSTOMER",
-                "profileId": "profile_123",
-                "addresses": [{"channel": "SMS", "address": "+12345678901"}],
-                "createdAt": "2025-11-18T00:00:01.000Z",
-                "updatedAt": "2025-11-18T00:00:01.000Z",
-            },
-        }
-        await channel.process_webhook(webhook)
-        assert "CH123" not in channel._conversations
 
     @pytest.mark.asyncio
     async def test_process_message(self) -> None:
@@ -296,12 +232,9 @@ class TestChatChannel:
         tac = TAC(get_test_config())
         channel = ChatChannel(tac)
 
-        await channel.process_webhook(
-            create_participant_added_webhook(
-                "CH123", "PA123", "profile_123", "2025-11-18T00:00:01.000Z"
-            )
+        channel._conversations["CH123"] = ConversationSession(
+            conversation_id="CH123", channel="chat", profile_id="profile_123"
         )
-        assert "CH123" in channel._conversations
 
         await channel.process_webhook(
             create_conversation_updated_webhook("CH123", "CLOSED", "2025-11-18T00:10:00.000Z")
@@ -316,10 +249,8 @@ class TestChatChannel:
 
         tac.on_conversation_ended(lambda ctx: captured.append(ctx))
 
-        await channel.process_webhook(
-            create_participant_added_webhook(
-                "CH123", "PA123", "profile_123", "2025-11-18T00:00:01.000Z"
-            )
+        channel._conversations["CH123"] = ConversationSession(
+            conversation_id="CH123", channel="chat", profile_id="profile_123"
         )
         await channel.process_webhook(
             create_conversation_updated_webhook("CH123", "CLOSED", "2025-11-18T00:10:00.000Z")
@@ -499,7 +430,7 @@ class TestChatChannel:
         # Missing data field entirely
         await channel.process_webhook({"eventType": "COMMUNICATION_CREATED"})
         # Null data field
-        await channel.process_webhook({"eventType": "PARTICIPANT_ADDED", "data": None})
+        await channel.process_webhook({"eventType": "COMMUNICATION_CREATED", "data": None})
 
         assert len(captured) == 0
         assert len(channel._conversations) == 0
@@ -517,11 +448,13 @@ class TestChatChannel:
         )
         channel = ChatChannel(tac, config={"auto_retrieve_memory": True})
 
-        # Start conversation with profile_id via participant added
-        await channel.process_webhook(
-            create_participant_added_webhook(
-                "CH123", "PA_USER", "profile_test_123", "2025-11-18T00:00:01.000Z"
-            )
+        # Pre-seed session with profile_id so retrieve_memory skips the
+        # lookup_profile fallback path.
+        channel._conversations["CH123"] = ConversationSession(
+            conversation_id="CH123", channel="chat", profile_id="profile_test_123"
+        )
+        tac.conversation_memory_client.get_profile = AsyncMock(
+            side_effect=Exception("skip profile")
         )
 
         captured_memory: list[TACMemoryResponse | None] = []
@@ -582,16 +515,6 @@ class TestChatChannel:
 
         tac.on_message_ready(message_callback)
 
-        # Start conversation via participant added
-        await channel.process_webhook(
-            create_participant_added_webhook(
-                "CH_AUTO_SEND",
-                "PA_USER",
-                "prof_auto",
-                "2025-11-18T00:00:00.000Z",
-            )
-        )
-
         # Mock reconcile to return an agent (customer is None for chat —
         # ChatChannel has reconcile_customer_type=False and identifies the
         # customer author-driven from the webhook).
@@ -649,16 +572,6 @@ class TestChatChannel:
             pass
 
         tac.on_message_ready(message_callback)
-
-        # Start conversation via participant added
-        await channel.process_webhook(
-            create_participant_added_webhook(
-                "CH_NO_AUTO",
-                "PA_NO_AUTO",
-                "prof_no_auto",
-                "2025-11-18T00:00:00.000Z",
-            )
-        )
 
         with patch.object(
             tac.conversation_orchestrator_client, "create_action"

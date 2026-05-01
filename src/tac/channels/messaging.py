@@ -177,7 +177,6 @@ class MessagingChannel(BaseChannel):
         """Process messaging channel webhook event and manage conversation lifecycle.
 
         Handles:
-        - PARTICIPANT_ADDED: Initialize conversation and track profile_id
         - COMMUNICATION_CREATED: Process incoming messages from customers
         - CONVERSATION_UPDATED: Clean up when conversation is closed
 
@@ -189,9 +188,6 @@ class MessagingChannel(BaseChannel):
             webhook_data: Raw webhook event data from Twilio
             idempotency_token: Optional Twilio idempotency token from request headers
         """
-        if not self._is_event_for_this_channel(webhook_data):
-            return
-
         if idempotency_token:
             if self._is_duplicate_webhook(idempotency_token):
                 return
@@ -209,46 +205,10 @@ class MessagingChannel(BaseChannel):
         if not self._is_event_for_this_channel(webhook_data):
             return
 
-        if event_type == "PARTICIPANT_ADDED":
-            self._handle_participant_added(event_data)
-        elif event_type == "COMMUNICATION_CREATED":
+        if event_type == "COMMUNICATION_CREATED":
             await self._handle_communication_created(event_data)
         elif event_type == "CONVERSATION_UPDATED":
             await self._handle_conversation_updated(event_data)
-
-    def _handle_participant_added(self, event_data: Any) -> None:
-        """Handle PARTICIPANT_ADDED event.
-
-        Only processes CUSTOMER participants with addresses matching this channel type.
-        """
-        participant_data = ParticipantResponse.model_validate(event_data)
-        conv_id = participant_data.conversation_id
-        profile_id = participant_data.profile_id
-        participant_type = participant_data.type
-
-        if participant_type != "CUSTOMER":
-            return
-
-        has_matching_address = any(
-            address.channel == self.get_channel_type_upper()
-            for address in participant_data.addresses
-        )
-
-        if not has_matching_address:
-            return
-
-        if conv_id not in self._conversations:
-            self._start_conversation(conv_id, profile_id)
-
-        if profile_id:
-            session = self._conversations[conv_id]
-            session.profile_id = profile_id
-
-        self.logger.debug(
-            "Customer participant added",
-            conversation_id=conv_id,
-            profile_id=profile_id,
-        )
 
     async def _handle_communication_created(self, event_data: Any) -> None:
         """Handle COMMUNICATION_CREATED event (incoming message)."""
@@ -280,33 +240,74 @@ class MessagingChannel(BaseChannel):
         if communication_data.channel_id:
             session.metadata["channel_id"] = communication_data.channel_id
 
+        # TEMP DEBUG: participants as they arrive on the webhook.
+        self.logger.info(
+            "DEBUG webhook participants",
+            conversation_id=conv_id,
+            author_address=communication_data.author.address,
+            author_participant_id=communication_data.author.participant_id,
+            author_channel=communication_data.author.channel,
+            recipients=[
+                {
+                    "address": r.address,
+                    "channel": r.channel,
+                    "participant_id": r.participant_id,
+                }
+                for r in (communication_data.recipients or [])
+            ],
+            session_has_ai_agent_info=session.ai_agent_info is not None,
+            session_has_author_info=session.author_info is not None,
+        )
+
         # Reconcile participant types pre-LLM so v1-bridge's UNKNOWN gets
         # promoted to CUSTOMER (with a Memora profile attached when possible)
         # and to stash both participant ids on the session for send_response.
         # If reconciliation can't identify both sides, any eventual reply would
         # fail too — skip the callback so the LLM doesn't waste a turn on an
         # un-replyable conversation.
-        resolved = await self._reconcile_participants(conv_id)
-        if resolved is None:
-            self.logger.warning(
-                "Reconciliation failed; skipping callback for this inbound",
-                conversation_id=conv_id,
-            )
-            return
+        #
+        # Skip reconcile entirely when both sides are already stashed from a
+        # prior turn — Maestro's state was written by us and doesn't drift.
+        if session.ai_agent_info is None or session.author_info is None:
+            resolved = await self._reconcile_participants(conv_id)
+            if resolved is None:
+                self.logger.warning(
+                    "Reconciliation failed; skipping callback for this inbound",
+                    conversation_id=conv_id,
+                )
+                return
 
-        agent_participant, customer_participant = resolved
-        session.ai_agent_info = AuthorInfo(
-            address=self.get_agent_address(conv_id).address,
-            participant_id=agent_participant.id,
-        )
-        # When reconcile resolved a customer (SMS path — chat disables
-        # customer reconciliation and uses the author_info captured from
-        # the webhook above), use its authoritative participant id and
-        # lift any resolved profile.
-        if customer_participant is not None and session.author_info is not None:
-            session.author_info.participant_id = customer_participant.id
-            if customer_participant.profile_id and not session.profile_id:
-                session.profile_id = customer_participant.profile_id
+            agent_participant, customer_participant = resolved
+            # TEMP DEBUG: what reconcile resolved.
+            self.logger.info(
+                "DEBUG reconcile resolved",
+                conversation_id=conv_id,
+                agent_participant_id=agent_participant.id,
+                agent_participant_type=agent_participant.type,
+                agent_addresses=[
+                    {"channel": a.channel, "address": a.address}
+                    for a in agent_participant.addresses
+                ],
+                customer_participant_id=(customer_participant.id if customer_participant else None),
+                customer_participant_type=(
+                    customer_participant.type if customer_participant else None
+                ),
+                customer_profile_id=(
+                    customer_participant.profile_id if customer_participant else None
+                ),
+            )
+            session.ai_agent_info = AuthorInfo(
+                address=self.get_agent_address(conv_id).address,
+                participant_id=agent_participant.id,
+            )
+            # When reconcile resolved a customer (SMS path — chat disables
+            # customer reconciliation and uses the author_info captured from
+            # the webhook above), use its authoritative participant id and
+            # lift any resolved profile.
+            if customer_participant is not None and session.author_info is not None:
+                session.author_info.participant_id = customer_participant.id
+                if customer_participant.profile_id and not session.profile_id:
+                    session.profile_id = customer_participant.profile_id
 
         memory_response = await self._retrieve_memory_if_enabled(session, message_text, conv_id)
 
@@ -505,9 +506,11 @@ class MessagingChannel(BaseChannel):
 
         Returns:
             `(agent, customer_or_none)` on success. `customer` is `None` when
-            `reconcile_customer_type` is `False`. `None` overall when the
-            agent cannot be resolved (non-fatal — caller falls through to the
-            callback).
+            `reconcile_customer_type` is `False`. `None` overall when either
+            the agent or the customer cannot be resolved — the caller
+            (`_handle_communication_created`) treats `None` as a hard stop
+            and skips the message-ready callback, since any eventual reply
+            would fail too.
         """
         agent_address = self.get_agent_address(conversation_id)
 
