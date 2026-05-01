@@ -273,7 +273,6 @@ class TestBuildHttpSignatureDependency:
         request.url.netloc = "testserver"
         request.body.return_value = b'{"event": "test"}'
 
-        # Should not raise
         await dep(request)
 
     @pytest.mark.asyncio
@@ -347,7 +346,7 @@ class TestBuildHttpSignatureDependency:
         request.url.query = ""
         request.url.scheme = "http"
         request.url.netloc = "testserver"
-        request.body.return_value = b'\xff\xfe invalid utf8'
+        request.body.return_value = b"\xff\xfe invalid utf8"
 
         with pytest.raises(HTTPException) as exc_info:
             await dep(request)
@@ -374,7 +373,6 @@ class TestBuildWebsocketSignatureDependency:
         websocket.url.scheme = "wss"
         websocket.url.netloc = "testserver"
 
-        # Should not raise
         await dep(websocket)
         websocket.close.assert_not_called()
 
