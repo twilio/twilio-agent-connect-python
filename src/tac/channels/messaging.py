@@ -94,9 +94,7 @@ class MessagingChannel(BaseChannel):
         self.conversation_orchestrator_client: ConversationClient = (
             tac.conversation_orchestrator_client
         )
-        super().__init__(
-            tac, memory_mode=memory_mode, dedup_capacity=dedup_capacity
-        )
+        super().__init__(tac, memory_mode=memory_mode, dedup_capacity=dedup_capacity)
 
     @abstractmethod
     def is_default_agent_address(self, author_address: str) -> bool:

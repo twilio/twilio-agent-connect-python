@@ -232,10 +232,11 @@ class BaseChannel(ABC):
         self, session: ConversationSession, query: str | None, conv_id: str
     ) -> TACMemoryResponse | None:
         """
-        Retrieve memory if memory_mode is enabled.
+        Retrieve memory only when ``self.memory_mode == "always"``.
 
         This method handles the common logic for memory retrieval across all channels,
-        including error handling and debug logging.
+        including error handling and debug logging. If ``memory_mode`` is any value
+        other than ``"always"``, automatic memory retrieval is skipped.
 
         Args:
             session: Conversation session containing profile_id and context
@@ -263,7 +264,8 @@ class BaseChannel(ABC):
                 # Continue without memory rather than failing the entire message processing
         else:
             self.logger.debug(
-                "Auto memory retrieval disabled, skipping memory retrieval",
+                "Memory mode not set to 'always', skipping memory retrieval",
                 conversation_id=conv_id,
+                memory_mode=self.memory_mode,
             )
         return memory_response
