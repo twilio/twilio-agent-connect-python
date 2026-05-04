@@ -436,7 +436,7 @@ class TestChatChannel:
         assert len(channel._conversations) == 0
 
     @pytest.mark.asyncio
-    async def test_auto_retrieve_memory(self) -> None:
+    async def test_memory_mode(self) -> None:
         from tac.context.memory import MemoryClient
         from tac.models.conversation import ParticipantAddress, ParticipantResponse
 
@@ -446,7 +446,7 @@ class TestChatChannel:
             api_key=tac.config.api_key,
             api_secret=tac.config.api_secret,
         )
-        channel = ChatChannel(tac, config={"auto_retrieve_memory": True})
+        channel = ChatChannel(tac, config={"memory_mode": "always"})
 
         # Pre-seed session with profile_id so retrieve_memory skips the
         # lookup_profile fallback path.
@@ -503,7 +503,7 @@ class TestChatChannel:
         from tac.models.conversation import ParticipantAddress, ParticipantResponse
 
         tac = TAC(get_test_config())
-        channel = ChatChannel(tac, config={"auto_retrieve_memory": False})
+        channel = ChatChannel(tac, config={"memory_mode": "never"})
 
         # Callback that returns a string (should auto-send)
         async def message_callback(
@@ -560,7 +560,7 @@ class TestChatChannel:
     async def test_callback_no_auto_send_on_none(self) -> None:
         """Test that callback returning None does not auto-send (manual send_response required)."""
         tac = TAC(get_test_config())
-        channel = ChatChannel(tac, config={"auto_retrieve_memory": False})
+        channel = ChatChannel(tac, config={"memory_mode": "never"})
 
         # Callback that returns None (manual send_response flow)
         async def message_callback(

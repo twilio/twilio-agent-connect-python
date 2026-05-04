@@ -60,7 +60,7 @@ class ChatChannel(MessagingChannel):
         super().__init__(
             tac,
             dedup_capacity=config.dedup_capacity,
-            auto_retrieve_memory=config.auto_retrieve_memory,
+            memory_mode=config.memory_mode,
         )
         self.agent_address = config.agent_address
 

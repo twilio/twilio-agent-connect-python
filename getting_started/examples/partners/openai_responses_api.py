@@ -29,8 +29,8 @@ tac = TAC(config=TACConfig.from_env())
 
 # Create channel handlers for Voice and SMS
 # Channels process Twilio webhooks and manage conversation lifecycle
-voice_channel = VoiceChannel(tac, config=VoiceChannelConfig(auto_retrieve_memory=True))
-sms_channel = SMSChannel(tac, config=SMSChannelConfig(auto_retrieve_memory=True))
+voice_channel = VoiceChannel(tac, config=VoiceChannelConfig(memory_mode="always"))
+sms_channel = SMSChannel(tac, config=SMSChannelConfig(memory_mode="always"))
 
 # Initialize your LLM client (OpenAI in this example)
 openai_client = AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY"))

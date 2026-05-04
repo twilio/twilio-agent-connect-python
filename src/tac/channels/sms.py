@@ -25,7 +25,7 @@ from tac.utils.redaction import mask_phone
 class SMSChannelConfig(MessagingChannelConfig):
     """Configuration for SMS channel.
 
-    Inherits dedup_capacity and auto_retrieve_memory from MessagingChannelConfig.
+    Inherits dedup_capacity and memory_mode from MessagingChannelConfig.
     """
 
     dedup_capacity: int = Field(
@@ -55,7 +55,7 @@ class SMSChannel(MessagingChannel):
         super().__init__(
             tac,
             dedup_capacity=config.dedup_capacity,
-            auto_retrieve_memory=config.auto_retrieve_memory,
+            memory_mode=config.memory_mode,
         )
 
         if not tac.config.phone_number:

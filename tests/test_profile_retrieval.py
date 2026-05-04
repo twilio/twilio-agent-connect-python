@@ -260,7 +260,7 @@ class TestProfileInSMSChannel:
         config = get_test_config_with_trait_groups(trait_groups=["Contact"])
         tac = TAC(config)
         tac.conversation_memory_client = create_memory_client(tac)
-        channel = SMSChannel(tac, config={"auto_retrieve_memory": True})
+        channel = SMSChannel(tac, config={"memory_mode": "always"})
 
         received_context = None
 
@@ -320,7 +320,7 @@ class TestProfileInSMSChannel:
         config = get_test_config_with_trait_groups()
         tac = TAC(config)
         tac.conversation_memory_client = create_memory_client(tac)
-        channel = SMSChannel(tac, config={"auto_retrieve_memory": True})
+        channel = SMSChannel(tac, config={"memory_mode": "always"})
 
         mock_profile_v1 = ProfileResponse(
             id="profile_test_123",

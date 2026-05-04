@@ -2,6 +2,9 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
+# Memory retrieval mode for channels
+MemoryMode = Literal["always", "never"]
+
 
 class MemoryRetrievalRequest(BaseModel):
     """Request payload for retrieving conversation memories."""

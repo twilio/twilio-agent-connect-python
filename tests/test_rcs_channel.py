@@ -503,14 +503,14 @@ async def test_initiate_outbound_conversation(mock_tac: TAC) -> None:
 
 
 @pytest.mark.asyncio
-async def test_auto_retrieve_memory_enabled(mock_tac: TAC) -> None:
-    """Test RCS channel with auto_retrieve_memory enabled."""
+async def test_memory_mode_enabled(mock_tac: TAC) -> None:
+    """Test RCS channel with memory_mode enabled."""
     from tac.models.conversation import ParticipantAddress, ParticipantResponse
 
-    config = RCSChannelConfig(auto_retrieve_memory=True)
+    config = RCSChannelConfig(memory_mode="always")
     channel = RCSChannel(mock_tac, config=config)
 
-    assert channel.auto_retrieve_memory is True
+    assert channel.memory_mode == "always"
 
     # Mock retrieve_memory to return test data
     mock_memory = TACMemoryResponse(

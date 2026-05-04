@@ -35,7 +35,7 @@ tac = TAC(config=TACConfig.from_env())
 rcs_channel = RCSChannel(
     tac,
     config=RCSChannelConfig(
-        auto_retrieve_memory=True,
+        memory_mode="always",
     ),
 )
 

@@ -7,6 +7,7 @@ from typing import Any
 
 from tac import TAC
 from tac.core.logging import get_logger
+from tac.models.memory import MemoryMode
 from tac.models.session import ConversationSession
 from tac.models.tac import TACMemoryResponse
 
@@ -22,15 +23,19 @@ class BaseChannel(ABC):
     across all channel types.
     """
 
-    def __init__(self, tac: TAC, auto_retrieve_memory: bool = False, dedup_capacity: int = 10000):
+    def __init__(
+        self,
+        tac: TAC,
+        memory_mode: MemoryMode = "never",
+        dedup_capacity: int = 10000,
+    ):
         """
         Initialize base channel.
 
         Args:
             tac: TAC instance for memory/context operations
-            auto_retrieve_memory: If True, automatically retrieve memory
-                before invoking the on_message_ready callback. Default is False.
-                Set to True to enable automatic memory retrieval.
+            memory_mode: Memory retrieval mode. Default is "never".
+                Set to "always" to retrieve memory for every message.
             dedup_capacity: Maximum number of idempotency tokens to track for
                 webhook deduplication. Default 10000. Must be positive.
         """
@@ -39,7 +44,7 @@ class BaseChannel(ABC):
 
         self.tac = tac
         self.logger = get_logger(self.__class__.__module__)
-        self.auto_retrieve_memory = auto_retrieve_memory
+        self.memory_mode = memory_mode
 
         # Track active conversations (shared across all channel types)
         self._conversations: dict[str, ConversationSession] = {}
@@ -227,7 +232,7 @@ class BaseChannel(ABC):
         self, session: ConversationSession, query: str | None, conv_id: str
     ) -> TACMemoryResponse | None:
         """
-        Retrieve memory if auto_retrieve_memory is enabled.
+        Retrieve memory if memory_mode is enabled.
 
         This method handles the common logic for memory retrieval across all channels,
         including error handling and debug logging.
@@ -241,7 +246,7 @@ class BaseChannel(ABC):
             TACMemoryResponse wrapper if memory was retrieved, None otherwise
         """
         memory_response = None
-        if self.auto_retrieve_memory:
+        if self.memory_mode == "always":
             try:
                 memory_response = await self.tac.retrieve_memory(session, query=query)
                 self.logger.debug(

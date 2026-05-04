@@ -155,7 +155,7 @@ class TestTACIntegration:
         """Full inbound SMS flow: reconciliation + memory retrieval + callback."""
         tac = TAC(get_test_config())
         tac.conversation_memory_client = create_memory_client(tac)
-        channel = SMSChannel(tac, config={"auto_retrieve_memory": True})
+        channel = SMSChannel(tac, config={"memory_mode": "always"})
 
         callback_invoked = False
         received_context: ConversationSession | None = None

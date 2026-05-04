@@ -22,6 +22,7 @@ from tac.models.conversation import (
     SendMessageActionPayload,
     SendMessageActionRequest,
 )
+from tac.models.memory import MemoryMode
 from tac.models.outbound import InitiateConversationResult, InitiateMessagingConversationOptions
 from tac.models.session import AuthorInfo
 from tac.utils.redaction import mask_address
@@ -41,8 +42,8 @@ class MessagingChannelConfig(BaseModel):
         dedup_capacity: Maximum number of idempotency tokens to track.
             Default 10000 is suitable for most applications.
             Uses Twilio's i-twilio-idempotency-token header for deduplication.
-        auto_retrieve_memory: If True, automatically retrieve memory
-            before invoking the on_message_ready callback.
+        memory_mode: Memory retrieval mode. Default is "never".
+            Set to "always" to retrieve memory for every message.
     """
 
     dedup_capacity: int = Field(
@@ -50,9 +51,9 @@ class MessagingChannelConfig(BaseModel):
         gt=0,
         description="Maximum number of idempotency tokens to track for deduplication",
     )
-    auto_retrieve_memory: bool = Field(
-        default=False,
-        description="Automatically retrieve memory before on_message_ready callback",
+    memory_mode: MemoryMode = Field(
+        default="never",
+        description="Memory retrieval mode for this channel",
     )
 
 
@@ -83,7 +84,7 @@ class MessagingChannel(BaseChannel):
         self,
         tac: TAC,
         dedup_capacity: int = 10000,
-        auto_retrieve_memory: bool = False,
+        memory_mode: MemoryMode = "never",
     ):
         if tac.conversation_orchestrator_client is None:
             raise ValueError(
@@ -94,7 +95,7 @@ class MessagingChannel(BaseChannel):
             tac.conversation_orchestrator_client
         )
         super().__init__(
-            tac, auto_retrieve_memory=auto_retrieve_memory, dedup_capacity=dedup_capacity
+            tac, memory_mode=memory_mode, dedup_capacity=dedup_capacity
         )
 
     @abstractmethod

@@ -69,14 +69,14 @@ SYSTEM_INSTRUCTIONS = (
 )
 
 tac = TAC(config=TACConfig.from_env())
-voice_channel = VoiceChannel(tac, config=VoiceChannelConfig(auto_retrieve_memory=True))
-sms_channel = SMSChannel(tac, config=SMSChannelConfig(auto_retrieve_memory=True))
+voice_channel = VoiceChannel(tac, config=VoiceChannelConfig(memory_mode="always"))
+sms_channel = SMSChannel(tac, config=SMSChannelConfig(memory_mode="always"))
 
 # RCS channel requires rcs_sender_id configured in TAC config
 rcs_channel = RCSChannel(
     tac,
     config=RCSChannelConfig(
-        auto_retrieve_memory=True,
+        memory_mode="always",
     ),
 )
 

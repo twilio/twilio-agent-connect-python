@@ -53,7 +53,7 @@ class TestVoiceChannel:
 
     @pytest.mark.asyncio
     async def test_handle_prompt_message_without_memory_retrieval(self) -> None:
-        """Test handling prompt message when auto_retrieve_memory=False."""
+        """Test handling prompt message when memory_mode="never"."""
         tac = TAC(get_test_config())
         channel = VoiceChannel(tac)
 
@@ -70,11 +70,11 @@ class TestVoiceChannel:
         # Call handler directly
         await channel._handle_prompt("CALL123", prompt_msg)
 
-        # With auto_retrieve_memory=False, memory is not fetched - test passes if no exception
+        # With memory_mode="never", memory is not fetched - test passes if no exception
 
     @pytest.mark.asyncio
     async def test_handle_prompt_message_with_memory_retrieval(self) -> None:
-        """Test handling prompt message retrieves memory when auto_retrieve_memory=True."""
+        """Test handling prompt message retrieves memory when memory_mode="always"."""
         # Create config with memory enabled
         config = get_test_config()
         from tac.core.config import TwilioMemoryConfig
@@ -101,8 +101,8 @@ class TestVoiceChannel:
             return_value=mock_memory_response
         )
 
-        # Create channel with auto_retrieve_memory enabled (default is False)
-        channel = VoiceChannel(tac, config={"auto_retrieve_memory": True})
+        # Create channel with memory_mode enabled (default is "never")
+        channel = VoiceChannel(tac, config={"memory_mode": "always"})
 
         # Setup conversation with profile_id
         channel._start_conversation("CALL123", "profile_test_123")
@@ -888,7 +888,7 @@ class TestVoiceChannel:
         # Create session manager and voice channel
         session_manager = ThreadSafeSessionManager()
         voice_channel = VoiceChannel(
-            tac=tac, config={"session_manager": session_manager, "auto_retrieve_memory": False}
+            tac=tac, config={"session_manager": session_manager, "memory_mode": "never"}
         )
 
         # Setup conversation

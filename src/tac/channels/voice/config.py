@@ -2,6 +2,7 @@
 
 from pydantic import BaseModel, Field
 
+from tac.models.memory import MemoryMode
 from tac.session import SessionManager, ThreadSafeSessionManager
 
 
@@ -13,9 +14,8 @@ class VoiceChannelConfig(BaseModel):
         session_manager: SessionManager for tracking and canceling in-flight tasks.
             Defaults to ThreadSafeSessionManager for automatic task cancellation on
             interrupts and new prompts. Set to None only for debugging/testing.
-        auto_retrieve_memory: If True, automatically retrieve memory
-            before invoking the on_message_ready callback. Default is False.
-            Set to True to enable automatic memory retrieval.
+        memory_mode: Memory retrieval mode. Default is "never".
+            Set to "always" to retrieve memory for every message.
     """
 
     model_config = {"arbitrary_types_allowed": True}
@@ -27,7 +27,7 @@ class VoiceChannelConfig(BaseModel):
             "Set to None only for debugging/testing."
         ),
     )
-    auto_retrieve_memory: bool = Field(
-        default=False,
-        description="Automatically retrieve memory before on_message_ready callback",
+    memory_mode: MemoryMode = Field(
+        default="never",
+        description="Memory retrieval mode for this channel",
     )

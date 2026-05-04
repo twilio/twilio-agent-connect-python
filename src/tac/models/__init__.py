@@ -31,6 +31,7 @@ from tac.models.knowledge import Knowledge, KnowledgeBase, KnowledgeChunkResult
 from tac.models.memory import (
     MemoryCommunication,
     MemoryCommunicationContent,
+    MemoryMode,
     MemoryParticipant,
     MemoryRetrievalRequest,
     MemoryRetrievalResponse,
@@ -82,6 +83,7 @@ __all__ = [
     "KnowledgeChunkResult",
     "MemoryCommunication",
     "MemoryCommunicationContent",
+    "MemoryMode",
     "MemoryParticipant",
     "MemoryRetrievalRequest",
     "MemoryRetrievalResponse",

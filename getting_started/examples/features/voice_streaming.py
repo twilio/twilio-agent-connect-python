@@ -26,7 +26,7 @@ from tac.server import TACFastAPIServer
 load_dotenv()
 
 tac = TAC(config=TACConfig.from_env())
-voice_channel = VoiceChannel(tac, config=VoiceChannelConfig(auto_retrieve_memory=True))
+voice_channel = VoiceChannel(tac, config=VoiceChannelConfig(memory_mode="always"))
 openai_client = AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
 conversation_history: dict[str, list[ChatCompletionMessageParam]] = {}

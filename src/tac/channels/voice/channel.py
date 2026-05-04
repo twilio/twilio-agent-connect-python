@@ -62,7 +62,7 @@ class VoiceChannel(BaseChannel):
                 If None, uses default configuration.
 
         Examples:
-            >>> channel = VoiceChannel(tac, config={"auto_retrieve_memory": True})
+            >>> channel = VoiceChannel(tac, config={"memory_mode": "always"})
             >>> channel = VoiceChannel(tac, config=VoiceChannelConfig(session_manager=sm))
             >>> channel = VoiceChannel(tac)  # Use defaults
         """
@@ -72,7 +72,7 @@ class VoiceChannel(BaseChannel):
         elif config is None:
             config = VoiceChannelConfig()
 
-        super().__init__(tac, auto_retrieve_memory=config.auto_retrieve_memory)
+        super().__init__(tac, memory_mode=config.memory_mode)
         self.session_manager = config.session_manager
         self._websocket_manager = WebSocketManager()
         self._twilio_client: Client | None = None
@@ -656,7 +656,7 @@ class VoiceChannel(BaseChannel):
         message_body = message.voice_prompt or ""
         session = self._conversations[conv_id]
 
-        # Retrieve memory if auto_retrieve_memory is enabled and Twilio Memory is configured
+        # Retrieve memory if memory_mode is enabled and Twilio Memory is configured
         memory_response = await self._retrieve_memory_if_enabled(session, message_body, conv_id)
 
         # Trigger message ready callback
