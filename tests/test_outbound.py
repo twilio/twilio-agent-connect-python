@@ -1,4 +1,4 @@
-"""Tests for outbound conversation support (SMS, RCS, Chat, Voice)."""
+"""Tests for outbound conversation support (SMS, RCS, WhatsApp, Chat, Voice)."""
 
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -11,6 +11,7 @@ from tac.channels.chat import ChatChannel
 from tac.channels.rcs import RCSChannel
 from tac.channels.sms import SMSChannel
 from tac.channels.voice import VoiceChannel
+from tac.channels.whatsapp import WhatsAppChannel
 from tac.core.config import TwilioMemoryConfig
 from tac.models.conversation import (
     ActionResponse,
@@ -34,6 +35,7 @@ def get_test_config() -> dict[str, Any]:
         "conversation_configuration_id": "conv_configuration_test123",
         "phone_number": "+15551234567",
         "rcs_sender_id": "rcs:my_agent",
+        "whatsapp_number": "whatsapp:+15551234567",
         "memory_config": TwilioMemoryConfig(trait_groups=["Contact"]),
     }
 
@@ -797,3 +799,97 @@ class TestRCSOutbound:
 # =============================================================================
 # RCS sendResponse after outbound
 # =============================================================================
+
+# =============================================================================
+# WhatsApp outbound
+# =============================================================================
+
+
+def _mock_whatsapp_outbound(
+    tac: TAC,
+    conv_id: str = "CHwhatsapp_out",
+    *,
+    to: str = "whatsapp:+15559876543",
+    from_addr: str = "whatsapp:+15551234567",
+    reused: bool = False,
+) -> None:
+    co = tac.conversation_orchestrator_client
+    co.create_or_reuse_conversation = AsyncMock(return_value=(conv_id, reused))
+    co.list_participants = AsyncMock(
+        return_value=[
+            make_participant(
+                id="PAwhatsappcust",
+                conversation_id=conv_id,
+                type="CUSTOMER",
+                channel="WHATSAPP",
+                address=to,
+            ),
+            make_participant(
+                id="PAwhatsappagent",
+                conversation_id=conv_id,
+                type="AI_AGENT",
+                channel="WHATSAPP",
+                address=from_addr,
+            ),
+        ]
+    )
+    co.create_action = AsyncMock(return_value=make_action_response(conv_id))
+
+
+class TestWhatsAppOutbound:
+    @pytest.mark.asyncio
+    async def test_creates_conversation_and_sends_message(self) -> None:
+        tac = TAC(get_test_config())
+        from tac.channels.whatsapp import WhatsAppChannelConfig
+
+        channel = WhatsAppChannel(tac, config=WhatsAppChannelConfig())
+        _mock_whatsapp_outbound(tac)
+
+        result = await channel.initiate_outbound_conversation(
+            InitiateMessagingConversationOptions(
+                to="whatsapp:+15559876543", message="Hello from WhatsApp!"
+            )
+        )
+
+        assert result.conversation_id == "CHwhatsapp_out"
+        assert result.session.channel == "whatsapp"
+        assert result.session.metadata["direction"] == "outbound"
+        assert result.session.author_info is not None
+        assert result.session.author_info.address == "whatsapp:+15559876543"
+        tac.conversation_orchestrator_client.create_action.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_reuses_conversation_on_409(self) -> None:
+        tac = TAC(get_test_config())
+        from tac.channels.whatsapp import WhatsAppChannelConfig
+
+        channel = WhatsAppChannel(tac, config=WhatsAppChannelConfig())
+        _mock_whatsapp_outbound(tac, conv_id="CHwhatsapp_existing", reused=True)
+
+        result = await channel.initiate_outbound_conversation(
+            InitiateMessagingConversationOptions(to="whatsapp:+15559876543", message="Hello again")
+        )
+
+        assert result.conversation_id == "CHwhatsapp_existing"
+        assert result.session.metadata["direction"] == "outbound"
+
+    @pytest.mark.asyncio
+    async def test_passes_participants_in_create(self) -> None:
+        tac = TAC(get_test_config())
+        from tac.channels.whatsapp import WhatsAppChannelConfig
+
+        channel = WhatsAppChannel(tac, config=WhatsAppChannelConfig())
+        _mock_whatsapp_outbound(tac)
+
+        await channel.initiate_outbound_conversation(
+            InitiateMessagingConversationOptions(to="whatsapp:+15559876543", message="Test")
+        )
+
+        call_args = tac.conversation_orchestrator_client.create_or_reuse_conversation.call_args
+        participants = call_args.kwargs["participants"]
+        assert len(participants) == 2
+        assert participants[0].type == "CUSTOMER"
+        assert participants[0].addresses[0].channel == "WHATSAPP"
+        assert participants[0].addresses[0].address == "whatsapp:+15559876543"
+        assert participants[1].type == "AI_AGENT"
+        assert participants[1].addresses[0].address == "whatsapp:+15551234567"

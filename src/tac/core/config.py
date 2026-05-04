@@ -252,6 +252,11 @@ class TACConfig(BaseModel):
         description="Optional Twilio RCS Sender ID",
     )
 
+    whatsapp_number: str | None = Field(
+        default=None,
+        description="Optional Twilio WhatsApp-enabled phone number (format: whatsapp:+1234567890)",
+    )
+
     knowledge_base_id: str | None = Field(
         default=None,
         description="Optional Knowledge Base ID for knowledge search functionality",
@@ -318,6 +323,8 @@ class TACConfig(BaseModel):
 
         Optional:
         - TWILIO_RCS_SENDER_ID: RCS Sender ID for RCS channel
+        - TWILIO_WHATSAPP_NUMBER: WhatsApp-enabled phone number
+          (format: whatsapp:+1234567890)
         - TWILIO_KNOWLEDGE_BASE_ID: Knowledge Base ID for RAG search functionality
         - TWILIO_LOG_LEVEL: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL).
           Default: INFO
@@ -356,6 +363,7 @@ class TACConfig(BaseModel):
             api_secret=os.environ["TWILIO_API_SECRET"],
             phone_number=os.environ["TWILIO_PHONE_NUMBER"],
             rcs_sender_id=os.environ.get("TWILIO_RCS_SENDER_ID"),
+            whatsapp_number=os.environ.get("TWILIO_WHATSAPP_NUMBER"),
             knowledge_base_id=os.environ.get("TWILIO_KNOWLEDGE_BASE_ID"),
             log_level=os.environ.get("TWILIO_LOG_LEVEL", "INFO"),
             region=os.environ.get("TWILIO_REGION"),

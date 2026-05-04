@@ -1,19 +1,21 @@
 """
-Feature: Outbound Conversations (SMS, RCS, and Voice)
+Feature: Outbound Conversations (SMS, RCS, WhatsApp, and Voice)
 
 Demonstrates agent-initiated (outbound) conversations using TAC. Sends an SMS,
-RCS message, or places a voice call, then handles the full conversation loop with
-the OpenAI Agents SDK.
+RCS message, WhatsApp message, or places a voice call, then handles the full
+conversation loop with the OpenAI Agents SDK.
 
 Usage:
     python outbound.py --to +16505551234 --channel sms --message "Hello!"
     python outbound.py --to +16505551234 --channel rcs --message "Hello!"
+    python outbound.py --to whatsapp:+16505551234 --channel whatsapp --message "Hello!"
     python outbound.py --to +16505551234 --channel voice
     python outbound.py --to +16505551234 --channel voice --welcome-greeting "Hi there!"
 
 Requires ``OPENAI_API_KEY`` in addition to the usual TAC env vars.
 For voice calls, ``TWILIO_VOICE_PUBLIC_DOMAIN`` must also be set (e.g. via ngrok).
 For RCS, ``TWILIO_RCS_SENDER_ID`` must be set in environment variables.
+For WhatsApp, ``TWILIO_WHATSAPP_NUMBER`` must be set in environment variables.
 """
 
 import argparse
@@ -28,9 +30,11 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 
 from tac import TAC, TACConfig
+from tac.channels.messaging import MessagingChannel
 from tac.channels.rcs import RCSChannel, RCSChannelConfig
 from tac.channels.sms import SMSChannel, SMSChannelConfig
 from tac.channels.voice import VoiceChannel, VoiceChannelConfig
+from tac.channels.whatsapp import WhatsAppChannel, WhatsAppChannelConfig
 from tac.models.outbound import (
     InitiateMessagingConversationOptions,
     InitiateVoiceConversationOptions,
@@ -46,14 +50,18 @@ set_tracing_disabled(True)
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Outbound conversations with TAC")
-    parser.add_argument("--to", required=True, help="Destination phone number or RCS address")
+    parser.add_argument(
+        "--to",
+        required=True,
+        help="Destination phone number or address (e.g., whatsapp:+1234567890)",
+    )
     parser.add_argument(
         "--channel",
         required=True,
-        choices=["sms", "rcs", "voice"],
-        help="Channel (sms, rcs, or voice)",
+        choices=["sms", "rcs", "whatsapp", "voice"],
+        help="Channel (sms, rcs, whatsapp, or voice)",
     )
-    parser.add_argument("--message", help="Initial message (required for SMS and RCS)")
+    parser.add_argument("--message", help="Initial message (required for SMS, RCS, and WhatsApp)")
     parser.add_argument("--welcome-greeting", help="Optional voice welcome greeting")
     return parser.parse_args()
 
@@ -69,18 +77,21 @@ SYSTEM_INSTRUCTIONS = (
 )
 
 tac = TAC(config=TACConfig.from_env())
-voice_channel = VoiceChannel(tac, config=VoiceChannelConfig(memory_mode="always"))
-sms_channel = SMSChannel(tac, config=SMSChannelConfig(memory_mode="always"))
-
-# RCS channel requires rcs_sender_id configured in TAC config
-rcs_channel = RCSChannel(
-    tac,
-    config=RCSChannelConfig(
-        memory_mode="always",
-    ),
-)
-
 conversation_history: dict[str, list[Any]] = {}
+
+# Create channels based on configuration
+sms_channel = SMSChannel(tac, config=SMSChannelConfig(memory_mode="always"))
+rcs_channel = (
+    RCSChannel(tac, config=RCSChannelConfig(memory_mode="always"))
+    if tac.config.rcs_sender_id
+    else None
+)
+whatsapp_channel = (
+    WhatsAppChannel(tac, config=WhatsAppChannelConfig(memory_mode="always"))
+    if tac.config.whatsapp_number
+    else None
+)
+voice_channel = VoiceChannel(tac, config=VoiceChannelConfig(memory_mode="always"))
 
 
 async def handle_message_ready(
@@ -121,8 +132,7 @@ async def initiate_outbound(args: argparse.Namespace) -> None:
             print("\nWaiting for replies... (Ctrl+C to exit)\n")
 
         elif args.channel == "rcs":
-            # Validate RCS configuration
-            if not tac.config.rcs_sender_id:
+            if not rcs_channel:
                 print("Error: RCS requires TWILIO_RCS_SENDER_ID environment variable to be set.")
                 sys.exit(1)
 
@@ -131,6 +141,24 @@ async def initiate_outbound(args: argparse.Namespace) -> None:
             )
             print(f"RCS message sent to {args.to} (conversation: {rcs_result.conversation_id})")
             print(f"[{rcs_result.conversation_id}] Agent: {args.message}")
+            print("\nWaiting for replies... (Ctrl+C to exit)\n")
+
+        elif args.channel == "whatsapp":
+            if not whatsapp_channel:
+                print(
+                    "Error: WhatsApp requires TWILIO_WHATSAPP_NUMBER "
+                    "environment variable to be set."
+                )
+                sys.exit(1)
+
+            whatsapp_result = await whatsapp_channel.initiate_outbound_conversation(
+                InitiateMessagingConversationOptions(to=args.to, message=args.message)
+            )
+            print(
+                f"WhatsApp message sent to {args.to} "
+                f"(conversation: {whatsapp_result.conversation_id})"
+            )
+            print(f"[{whatsapp_result.conversation_id}] Agent: {args.message}")
             print("\nWaiting for replies... (Ctrl+C to exit)\n")
 
         elif args.channel == "voice":
@@ -159,9 +187,16 @@ async def initiate_outbound(args: argparse.Namespace) -> None:
 if __name__ == "__main__":
     args = parse_args()
 
-    if args.channel in ("sms", "rcs") and not args.message:
+    if args.channel in ("sms", "rcs", "whatsapp") and not args.message:
         print(f"--message is required for {args.channel.upper()} channel.")
         sys.exit(1)
+
+    # Build messaging channels list from already-created channel instances
+    messaging_channels: list[MessagingChannel] = [sms_channel]
+    if rcs_channel:
+        messaging_channels.append(rcs_channel)
+    if whatsapp_channel:
+        messaging_channels.append(whatsapp_channel)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -173,7 +208,7 @@ if __name__ == "__main__":
     server = TACFastAPIServer(
         tac=tac,
         voice_channel=voice_channel,
-        messaging_channels=[sms_channel, rcs_channel],
+        messaging_channels=messaging_channels,
         app=app,
     )
 

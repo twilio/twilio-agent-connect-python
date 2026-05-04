@@ -11,14 +11,14 @@ class InitiateMessagingConversationOptions(BaseModel):
     """Shared options for initiating an outbound messaging conversation.
 
     This base model is used for messaging-style outbound conversations,
-    including SMS, Chat, and RCS. Each channel may extend this with
+    including SMS, RCS, WhatsApp, and Chat. Each channel may extend this with
     channel-specific requirements (e.g., Chat requires channel_id).
 
     The sender is always TAC's configured address (``config.phone_number``
-    for SMS, ``ChatChannelConfig.agent_address`` for Chat,
-    ``config.rcs_sender_id`` for RCS). Multi-sender deployments should use
-    one TAC instance per sender so inbound webhook routing, memory scoping,
-    and configuration stay in sync.
+    for SMS, ``config.rcs_sender_id`` for RCS, ``config.whatsapp_number``
+    for WhatsApp, ``ChatChannelConfig.agent_address`` for Chat).
+    Multi-sender deployments should use one TAC instance per sender so
+    inbound webhook routing, memory scoping, and configuration stay in sync.
     """
 
     to: str = Field(..., min_length=1)

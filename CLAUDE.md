@@ -28,7 +28,7 @@ src/tac/
 ├── core/           # TAC class, TACConfig, context models
 ├── context/        # API clients: MemoryClient, ConversationClient, KnowledgeClient
 ├── models/         # Pydantic models (memory, conversation, session, voice, knowledge, intelligence)
-├── channels/       # Communication channels (base, sms, rcs, chat, messaging, voice/)
+├── channels/       # Communication channels (base, sms, rcs, whatsapp, chat, messaging, voice/)
 │   └── voice/      # Voice channel (channel.py, twiml.py, config.py)
 ├── intelligence/   # Conversation Intelligence webhook processing
 ├── tools/          # LLM tool integration (@function_tool decorator, TACTool)
@@ -36,7 +36,7 @@ src/tac/
 └── server/         # Optional TACFastAPIServer (FastAPI-based, install with tac[server])
 ```
 
-Tests are in `tests/` — one test file per module (e.g., `test_tac.py`, `test_sms_channel.py`, `test_rcs_channel.py`, `test_chat_channel.py`, `test_voice_channel.py`).
+Tests are in `tests/` — one test file per module (e.g., `test_tac.py`, `test_sms_channel.py`, `test_rcs_channel.py`, `test_whatsapp_channel.py`, `test_chat_channel.py`, `test_voice_channel.py`).
 
 ## Code Conventions
 
@@ -49,7 +49,7 @@ Tests are in `tests/` — one test file per module (e.g., `test_tac.py`, `test_s
 
 ## Key Architecture Concepts
 
-- **Channel-based**: Messaging channels (SMS, RCS, Chat) and Voice channel process Twilio webhooks, manage conversation lifecycle, and trigger `on_message_ready` / `on_conversation_ended` callbacks
+- **Channel-based**: Messaging channels (SMS, RCS, WhatsApp, Chat) and Voice channel process Twilio webhooks, manage conversation lifecycle, and trigger `on_message_ready` / `on_conversation_ended` callbacks
 - **Callback responses**: Callbacks return `str` (auto-sent) or `None` (manual `channel.send_response()`)
 - **Memory fallback**: `TAC.retrieve_memory()` tries Conversation Memory first, gracefully falls back to Conversation Orchestrator's `list_communications()` on any failure
 - **Profile resolution**: Automatic profile lookup by phone/email if `profile_id` not present in webhook
