@@ -509,14 +509,14 @@ async def test_initiate_outbound_conversation(mock_tac: TAC) -> None:
 
 
 @pytest.mark.asyncio
-async def test_auto_retrieve_memory_enabled(mock_tac: TAC) -> None:
-    """Test WhatsApp channel with auto_retrieve_memory enabled."""
+async def test_memory_mode_enabled(mock_tac: TAC) -> None:
+    """Test WhatsApp channel with memory_mode enabled."""
     from tac.models.conversation import ParticipantAddress, ParticipantResponse
 
-    config = WhatsAppChannelConfig(auto_retrieve_memory=True)
+    config = WhatsAppChannelConfig(memory_mode="always")
     channel = WhatsAppChannel(mock_tac, config=config)
 
-    assert channel.auto_retrieve_memory is True
+    assert channel.memory_mode == "always"
 
     # Mock retrieve_memory to return test data
     mock_memory = TACMemoryResponse(

@@ -34,7 +34,7 @@ tac = TAC(config=TACConfig.from_env())
 whatsapp_channel = WhatsAppChannel(
     tac,
     config=WhatsAppChannelConfig(
-        auto_retrieve_memory=True,
+        memory_mode="always",
     ),
 )
 
