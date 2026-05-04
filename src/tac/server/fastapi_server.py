@@ -28,7 +28,7 @@ try:
     from fastapi import Depends, FastAPI, Request, WebSocket, WebSocketDisconnect
     from fastapi.responses import JSONResponse, Response
 
-    from tac.server.webhook import (
+    from tac.server.signature_validation import (
         build_http_signature_dependency,
         build_websocket_signature_dependency,
     )

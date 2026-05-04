@@ -737,7 +737,7 @@ class TestSignatureValidation:
         from fastapi import Depends, FastAPI, WebSocket
         from fastapi.testclient import TestClient
 
-        from tac.server.webhook import build_websocket_signature_dependency
+        from tac.server.signature_validation import build_websocket_signature_dependency
 
         app = FastAPI()
         ws_sig = build_websocket_signature_dependency(AUTH_TOKEN)
