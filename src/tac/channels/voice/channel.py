@@ -700,7 +700,7 @@ class VoiceChannel(BaseChannel):
 
         In orchestrated mode, the conversation remains tracked in
         self._conversations until the CONVERSATION_UPDATED/CLOSED webhook
-        arrives from Maestro. In relay-only mode there is no such webhook,
+        arrives from Conversation Orchestrator. In relay-only mode there is no such webhook,
         so we also end the conversation here.
 
         Args:

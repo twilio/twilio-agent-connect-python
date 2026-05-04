@@ -100,7 +100,7 @@ class TwilioMemoryConfig(BaseModel):
     phone_trait_group: str = Field(
         default="Contact",
         description="Trait group name that holds the phone identifier on newly created profiles. "
-        "Must match the promoted-to-identifier configuration of the Memora store.",
+        "Must match the promoted-to-identifier configuration of the Conversation Memory store.",
     )
     phone_trait_field: str = Field(
         default="phone",

@@ -298,7 +298,7 @@ class TestChatChannel:
         """When TAC.conversations_v1_service_sid is cached, it's forwarded as
         channelSettings.chatService on the Action request.
 
-        TODO(maestro): Drop this test when the chatService workaround is removed.
+        TODO(conv-orch): Drop this test when the chatService workaround is removed.
         """
         tac = TAC(get_test_config())
         tac.conversations_v1_service_sid = "ISabcdef1234567890abcdef1234567890"

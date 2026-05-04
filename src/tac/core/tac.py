@@ -68,8 +68,9 @@ class TAC:
                     "omit conversation_configuration_id to run in ConversationRelay-only mode."
                 ) from e
 
-            # TODO(maestro): Remove once the Actions API resolves the V1 Chat service SID
-            # server-side. Maestro team confirmed this should not be required client-side;
+            # TODO(conv-orch): Remove once the Actions API resolves the V1 Chat service SID
+            # server-side. Conversation Orchestrator team confirmed this should not be
+            # required client-side;
             # until they ship the fix, CHAT sends fail with
             #   "chatService attribute is required for CHAT channel"
             # unless we pass it on channelSettings.chatService. We source it from the

@@ -113,7 +113,7 @@ class ConversationClient(BaseAPIClient):
         """
         Add a new participant to a conversation.
 
-        Used by `_reconcile_participants` when Maestro's v1-bridge emits only
+        Used by `_reconcile_participants` when Conversation Orchestrator's v1-bridge emits only
         the customer participant on an inbound SMS/chat — TAC adds itself as
         `AI_AGENT` before replying.
 
@@ -165,7 +165,7 @@ class ConversationClient(BaseAPIClient):
         """
         Replace an existing participant.
 
-        PUT is a full resource replacement per the Maestro spec — any field
+        PUT is a full resource replacement per the Conversation Orchestrator spec — any field
         omitted from the body is cleared on the server. Callers must pass the
         current `addresses` (and `name` if set) to preserve them; pass a new
         `profile_id` to attach a profile during reconciliation.
@@ -176,7 +176,7 @@ class ConversationClient(BaseAPIClient):
             participant_type: New participant type
             addresses: Current participant addresses (required to avoid wiping)
             name: Current participant display name (optional)
-            profile_id: Memora profile ID to attach (optional)
+            profile_id: Conversation Memory profile ID to attach (optional)
 
         Returns:
             ParticipantResponse reflecting the updated participant.

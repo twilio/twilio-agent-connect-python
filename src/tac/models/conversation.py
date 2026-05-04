@@ -93,10 +93,10 @@ class ParticipantAddress(BaseModel):
     model_config = {"populate_by_name": True}
 
 
-# TODO(maestro): Remove this class once the Actions API resolves the V1 Chat
+# TODO(conv-orch): Remove this class once the Actions API resolves the V1 Chat
 # service SID server-side. Currently used to extract `conversationsV1Bridge.serviceId`
 # from the Configuration so the chat channel can forward it as
-# channelSettings.chatService — drop together with the other TODO(maestro) sites.
+# channelSettings.chatService — drop together with the other TODO(conv-orch) sites.
 class ConversationsV1Bridge(BaseModel):
     """Conversations V1 bridge settings on a ConversationConfiguration."""
 
@@ -171,7 +171,7 @@ class ConversationConfiguration(BaseModel):
         max_length=5,
         description="List of Intelligence Configuration IDs for this configuration",
     )
-    # TODO(maestro): Drop this field once the Actions API resolves the V1 Chat
+    # TODO(conv-orch): Drop this field once the Actions API resolves the V1 Chat
     # service SID server-side — see ConversationsV1Bridge above.
     conversations_v1_bridge: ConversationsV1Bridge | None = Field(
         None,
@@ -450,7 +450,8 @@ class ActionParticipantRef(BaseModel):
     """Participant reference for the Actions API (`from`/`to` entries).
 
     Either `participant_id` or `address` must be supplied; `channel` is always required.
-    When both are provided, Maestro uses `participant_id` and `channel` disambiguates
+    When both are provided, Conversation Orchestrator uses `participant_id` and
+    `channel` disambiguates
     which of the participant's addresses to use.
     """
 
@@ -494,9 +495,9 @@ class ActionChannelSettings(BaseModel):
         alias="channelId",
         description="Backend-specific channel identifier (e.g. V1 Chat channel SID)",
     )
-    # TODO(maestro): Drop `chat_service` once the Actions API resolves the V1 Chat
-    # service SID server-side. Maestro team confirmed this should not be required
-    # client-side; keep the field until the server-side fix ships.
+    # TODO(conv-orch): Drop `chat_service` once the Actions API resolves the V1 Chat
+    # service SID server-side. Conversation Orchestrator team confirmed this should not be
+    # required client-side; keep the field until the server-side fix ships.
     chat_service: str | None = Field(
         default=None,
         alias="chatService",

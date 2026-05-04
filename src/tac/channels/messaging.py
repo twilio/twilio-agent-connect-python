@@ -28,10 +28,10 @@ from tac.models.session import AuthorInfo
 from tac.utils.redaction import mask_address
 
 # Participant types that represent TAC itself at TAC's (channel, address).
-# `AI_AGENT` is the canonical type; `AGENT` is the legacy Maestro form. A
-# participant typed either way at TAC's address is recognized as TAC and not
-# overwritten; anything else (HUMAN_AGENT, CUSTOMER, …) is someone else's
-# assignment.
+# `AI_AGENT` is the canonical type; `AGENT` is the legacy Conversation
+# Orchestrator form. A participant typed either way at TAC's address is
+# recognized as TAC and not overwritten; anything else (HUMAN_AGENT,
+# CUSTOMER, …) is someone else's assignment.
 AGENT_TYPES: frozenset[str] = frozenset({"AGENT", "AI_AGENT"})
 
 
@@ -248,14 +248,14 @@ class MessagingChannel(BaseChannel):
             session.metadata["channel_id"] = communication_data.channel_id
 
         # Reconcile participant types pre-LLM so v1-bridge's UNKNOWN gets
-        # promoted to CUSTOMER (with a Memora profile attached when possible)
+        # promoted to CUSTOMER (with a Conversation Memory profile attached when possible)
         # and to stash both participant ids on the session for send_response.
         # If reconciliation can't identify both sides, any eventual reply would
         # fail too — skip the callback so the LLM doesn't waste a turn on an
         # un-replyable conversation.
         #
         # Skip reconcile entirely when both sides are already stashed from a
-        # prior turn — Maestro's state was written by us and doesn't drift.
+        # prior turn — Conversation Orchestrator's state was written by us and doesn't drift.
         if session.ai_agent_info is None or session.author_info is None:
             resolved = await self._reconcile_participants(conv_id)
             if resolved is None:
@@ -447,7 +447,7 @@ class MessagingChannel(BaseChannel):
         self,
         conversation_id: str,
     ) -> tuple[ParticipantResponse, ParticipantResponse | None] | None:
-        """Reconcile Maestro's participants to the types TAC needs for sending.
+        """Reconcile Conversation Orchestrator's participants to the types TAC needs for sending.
 
         v1-bridge capture can leave TAC's agent participant as `UNKNOWN` (wrong
         type at our address), or omit it entirely (customer-only conversation).
@@ -528,7 +528,7 @@ class MessagingChannel(BaseChannel):
         elif agent_candidate.type not in AGENT_TYPES:
             self.logger.error(
                 "Participant at TAC's address has a conflicting type; refusing to "
-                "overwrite. Check Maestro participant state — a non-agent "
+                "overwrite. Check Conversation Orchestrator participant state — a non-agent "
                 "participant is holding TAC's (channel, address).",
                 conversation_id=conversation_id,
                 participant_id=agent_candidate.id,
@@ -581,7 +581,7 @@ class MessagingChannel(BaseChannel):
         customer: ParticipantResponse,
         channel: str,
     ) -> str | None:
-        """Find or mint a Memora profile for a customer being promoted from UNKNOWN.
+        """Find or mint a Conversation Memory profile for a customer being promoted from UNKNOWN.
 
         Only resolves for phone-based channels (SMS, VOICE). Looks up by phone
         identifier first; on miss, creates a new profile using the configured
@@ -641,14 +641,15 @@ class MessagingChannel(BaseChannel):
     ) -> ParticipantResponse | None:
         """PUT a participant to `new_type`.
 
-        Maestro's PUT is a full-resource replacement, so we pass the existing
-        `name` and `addresses` back unchanged to avoid wiping them. `profile_id`
-        defaults to the participant's current value; pass a non-None override
-        to attach a newly resolved profile during CUSTOMER reconciliation.
+        Conversation Orchestrator's PUT is a full-resource replacement, so we
+        pass the existing `name` and `addresses` back unchanged to avoid wiping
+        them. `profile_id` defaults to the participant's current value; pass a
+        non-None override to attach a newly resolved profile during CUSTOMER
+        reconciliation.
 
-        Returns None on any error (including 409). A 409 from Maestro here
-        means the promotion is structurally blocked — stop and surface it;
-        don't retry.
+        Returns None on any error (including 409). A 409 from Conversation
+        Orchestrator here means the promotion is structurally blocked — stop
+        and surface it; don't retry.
         """
         effective_profile_id = profile_id if profile_id is not None else participant.profile_id
         try:
@@ -671,9 +672,9 @@ class MessagingChannel(BaseChannel):
         except httpx.HTTPStatusError as e:
             if e.response is not None and e.response.status_code == 409:
                 self.logger.warning(
-                    "Maestro returned 409 on participant promotion; skipping — "
-                    "likely a conflicting conversation or grouping constraint. "
-                    "Check Maestro for duplicate active conversations.",
+                    "Conversation Orchestrator returned 409 on participant promotion; "
+                    "skipping — likely a conflicting conversation or grouping constraint. "
+                    "Check Conversation Orchestrator for duplicate active conversations.",
                     conversation_id=conversation_id,
                     participant_id=participant.id,
                     target_type=new_type,
@@ -724,9 +725,9 @@ class MessagingChannel(BaseChannel):
         except httpx.HTTPStatusError as e:
             if e.response is not None and e.response.status_code == 409:
                 self.logger.warning(
-                    "Maestro returned 409 on AI_AGENT participant add; skipping — "
-                    "address is already owned or the conversation can't accept a "
-                    "new AI_AGENT. Check Maestro participant state.",
+                    "Conversation Orchestrator returned 409 on AI_AGENT participant add; "
+                    "skipping — address is already owned or the conversation can't accept "
+                    "a new AI_AGENT. Check Conversation Orchestrator participant state.",
                     conversation_id=conversation_id,
                     conflicting_resource_id=e.response.headers.get("X-Conflicting-Resource-Id"),
                 )

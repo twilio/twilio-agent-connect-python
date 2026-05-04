@@ -139,7 +139,7 @@ class TestMemoryModels:
 
 
 class TestProfileLookupResponse:
-    """Memora's Lookup endpoint returns `profiles` as optional per its OpenAPI
+    """Conversation Memory's Lookup endpoint returns `profiles` as optional per its OpenAPI
     spec, so null and omitted variants must both parse to an empty list."""
 
     def test_accepts_null_profiles(self):

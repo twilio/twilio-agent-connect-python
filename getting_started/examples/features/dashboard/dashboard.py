@@ -3,7 +3,7 @@ TAC Dashboard — Lightweight observation dashboard for TAC examples.
 
 Provides two views:
 - **Active Sessions** — live conversations with message viewer and profile memory hover
-- **Conversation History** — closed conversations fetched from Maestro
+- **Conversation History** — closed conversations fetched from Conversation Orchestrator
 
 Mount onto any FastAPI app with ``create_dashboard_router()``.
 """
@@ -90,11 +90,11 @@ def create_dashboard_router(
 
     @router.get("/api/sessions")
     async def list_sessions() -> JSONResponse:
-        """List active conversations (only those with ACTIVE status in Maestro)."""
+        """List ACTIVE conversations (status=ACTIVE in Conversation Orchestrator)."""
         results: list[dict[str, Any]] = []
         sessions = _all_sessions()
 
-        # Get ACTIVE + INACTIVE conversations from Maestro (skip CLOSED)
+        # Get ACTIVE + INACTIVE conversations from Conversation Orchestrator (skip CLOSED)
         live_status: dict[str, str] | None = None
         if conversation_client:
             try:
@@ -103,10 +103,10 @@ def create_dashboard_router(
                 )
                 live_status = {c.id: c.status or "ACTIVE" for c in live_convs}
             except Exception as e:
-                logger.warning(f"Failed to fetch conversations from Maestro: {e}")
+                logger.warning(f"Failed to fetch conversations from Conversation Orchestrator: {e}")
 
         for conv_id, session in sessions.items():
-            # Skip sessions that Maestro reports as CLOSED
+            # Skip sessions that Conversation Orchestrator reports as CLOSED
             if live_status is not None and conv_id not in live_status:
                 continue
 
@@ -204,7 +204,7 @@ def create_dashboard_router(
             "ci_events": [],
         }
 
-        # Fetch communications from Maestro
+        # Fetch communications from Conversation Orchestrator
         if conversation_client:
             try:
                 twilio_phone = os.environ.get("TWILIO_PHONE_NUMBER", "")
@@ -249,7 +249,7 @@ def create_dashboard_router(
 
     @router.get("/api/history")
     async def list_history() -> JSONResponse:
-        """List closed conversations from Maestro."""
+        """List closed conversations from Conversation Orchestrator."""
         if not conversation_client:
             return JSONResponse(
                 content={"error": "Conversation client not available"}, status_code=404
@@ -325,7 +325,8 @@ def mount_dashboard(
 
     Args:
         app: FastAPI application instance.
-        tac: TAC instance (used for ``memora_client`` and ``maestro_client``).
+        tac: TAC instance. Uses ``conversation_memory_client`` and
+            ``conversation_orchestrator_client`` for data fetches.
         channels: Channel instances (SMSChannel, VoiceChannel, ChatChannel, etc.).
             Sessions are read from each channel's ``_conversations`` dict.
         messages: Conversation message history ``{conv_id: [{role, content}, ...]}``.

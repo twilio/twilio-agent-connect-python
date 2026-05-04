@@ -232,7 +232,7 @@ class MemoryClient(BaseAPIClient):
         """
         Create a profile via identity resolution (upsert).
 
-        Memora runs identity resolution on the submitted traits: if an
+        Conversation Memory runs identity resolution on the submitted traits: if an
         identifier match is found the existing canonical profile ID is
         returned, otherwise a new profile is minted. The body must contain
         at least one trait promoted-to-identifier per the store's identity

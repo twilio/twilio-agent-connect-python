@@ -1,7 +1,7 @@
 """Tests for `_reconcile_participants` in MessagingChannel.
 
 Covers the matrix of participant states that v1-bridge capture can leave us
-with. The resolution rules were agreed with the Maestro team.
+with. The resolution rules were agreed with the Conversation Orchestrator team.
 """
 
 from typing import Any
@@ -278,7 +278,7 @@ async def test_solo_customer_posts_agent() -> None:
 
 @pytest.mark.asyncio
 async def test_add_agent_409_returns_none() -> None:
-    """POST AI_AGENT returns 409 → skip inbound. Maestro is signaling a
+    """POST AI_AGENT returns 409 → skip inbound. Conversation Orchestrator is signaling a
     structural conflict (duplicate conversation, address owned, grouping
     constraint) that TAC can't safely paper over by retrying."""
     tac = _tac()
@@ -311,7 +311,7 @@ async def test_add_agent_409_returns_none() -> None:
 
 @pytest.mark.asyncio
 async def test_promote_409_returns_none() -> None:
-    """PUT returning 409 → skip inbound. Maestro is signaling that the
+    """PUT returning 409 → skip inbound. Conversation Orchestrator is signaling that the
     promotion is structurally blocked (likely a conflicting active
     conversation or grouping constraint); TAC should not retry."""
     tac = _tac()
@@ -345,7 +345,7 @@ async def test_promote_409_returns_none() -> None:
 
 @pytest.mark.asyncio
 async def test_list_participants_failure_returns_none() -> None:
-    """list_participants raising (e.g. Maestro down) skips the webhook."""
+    """list_participants raising (e.g. Conversation Orchestrator down) skips the webhook."""
     tac = _tac()
     channel = SMSChannel(tac)
 
@@ -353,7 +353,7 @@ async def test_list_participants_failure_returns_none() -> None:
         patch.object(
             tac.conversation_orchestrator_client,
             "list_participants",
-            new=AsyncMock(side_effect=httpx.ConnectError("maestro unreachable")),
+            new=AsyncMock(side_effect=httpx.ConnectError("conversation orchestrator unreachable")),
         ),
         patch.object(tac.conversation_orchestrator_client, "update_participant") as mock_update,
     ):
@@ -439,12 +439,12 @@ async def test_customer_promotion_proceeds_without_profile_on_errors() -> None:
         patch.object(
             tac.conversation_memory_client,
             "lookup_profile",
-            new=AsyncMock(side_effect=httpx.ConnectError("memora down")),
+            new=AsyncMock(side_effect=httpx.ConnectError("conversation memory down")),
         ),
         patch.object(
             tac.conversation_memory_client,
             "create_profile",
-            new=AsyncMock(side_effect=httpx.ConnectError("memora down")),
+            new=AsyncMock(side_effect=httpx.ConnectError("conversation memory down")),
         ),
     ):
         result = await channel._reconcile_participants("CH123")
@@ -467,7 +467,7 @@ async def test_reconciliation_lifts_customer_profile_onto_session() -> None:
 
     agent = _participant("PA_A", "AI_AGENT", "+15551234567")
     customer = _participant("PA_C", "CUSTOMER", "+12345678901")
-    # Give the CUSTOMER a profile_id the way a prior reconciliation / Memora
+    # Give the CUSTOMER a profile_id the way a prior reconciliation / Conversation Memory
     # identity-resolution would have.
     customer = customer.model_copy(update={"profile_id": "mem_profile_01abc"})
 

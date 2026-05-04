@@ -422,5 +422,6 @@ class ProfileLookupResponse(BaseModel):
     @field_validator("profiles", mode="before")
     @classmethod
     def _coerce_null_profiles(cls, v: Any) -> Any:
-        # Memora's Lookup response omits or nulls `profiles` when no match; treat both as [].
+        # Conversation Memory's Lookup response omits or nulls `profiles` when no match;
+        # treat both as [].
         return [] if v is None else v

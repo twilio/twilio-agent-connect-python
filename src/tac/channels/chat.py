@@ -136,9 +136,9 @@ class ChatChannel(MessagingChannel):
                 "session.metadata['channel_id'] explicitly in advanced usage."
             )
 
-        # TODO(maestro): Drop `chat_service` here once the Actions API resolves the
-        # V1 Chat service SID server-side. Maestro team confirmed this should not be
-        # required client-side; keep the workaround until the server-side fix ships.
+        # TODO(conv-orch): Drop `chat_service` here once the Actions API resolves the
+        # V1 Chat service SID server-side. Conversation Orchestrator team confirmed this
+        # should not be required client-side; keep the workaround until the server-side fix ships.
         # `channel_id` stays — it's a permanent per-conversation requirement.
         chat_service_sid = self.tac.conversations_v1_service_sid
         channel_settings = ActionChannelSettings(
