@@ -59,6 +59,7 @@ Production-ready examples using partner SDK adapters:
 - **`outbound.py`**: Agent-initiated outbound conversations via SMS, RCS, WhatsApp, or Voice channels
 - **`chat/`**: Twilio Conversations (Chat) channel examples
 - **`relay_only.py`**: ConversationRelay-only mode — get started with voice using just ConversationRelay
+- **`dashboard/`**: Real-time observation dashboard for monitoring active sessions, message history, and agent context during development
 
 ## Step 3: Run an Example
 
