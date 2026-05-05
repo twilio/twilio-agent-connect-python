@@ -516,7 +516,7 @@ class VoiceChannel(BaseChannel):
 
             if status == "CLOSED":
                 await self._end_conversation(conv_id)
-            elif status == "INACTIVE":
+            elif status == "INACTIVE" and self.memory_mode == "once":
                 # Invalidate cached memory when conversation becomes inactive
                 # Memory is updated by Conversation Orchestrator on INACTIVE transition
                 async with session.cache_lock:

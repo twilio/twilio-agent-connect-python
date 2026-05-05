@@ -102,6 +102,7 @@ async def test_once_mode_caches_memory_on_first_retrieval() -> None:
         summaries=[],
         meta=MemoryRetrievalMeta(queryTime=0),
     )
+    # Mock at memory client level so TAC.retrieve_memory() wraps it in TACMemoryResponse
     retrieve_memory_mock = AsyncMock(return_value=empty_response)
     tac.conversation_memory_client.retrieve_memory = retrieve_memory_mock
 
@@ -196,7 +197,14 @@ async def test_once_mode_uses_empty_query() -> None:
         summaries=[],
         meta=MemoryRetrievalMeta(queryTime=0),
     )
-    retrieve_memory_mock = AsyncMock(return_value=empty_response)
+
+    # Mock TAC.retrieve_memory directly but return a properly wrapped TACMemoryResponse
+    async def mock_retrieve_memory(
+        session: ConversationSession, query: str | None = None
+    ) -> TACMemoryResponse:
+        return TACMemoryResponse(empty_response)
+
+    retrieve_memory_mock = AsyncMock(side_effect=mock_retrieve_memory)
     tac.retrieve_memory = retrieve_memory_mock
 
     # Mock reconcile
@@ -273,6 +281,7 @@ async def test_once_mode_invalidates_cache_on_inactive() -> None:
         summaries=[],
         meta=MemoryRetrievalMeta(queryTime=0),
     )
+    # Mock at memory client level so TAC.retrieve_memory() wraps it in TACMemoryResponse
     retrieve_memory_mock = AsyncMock(return_value=empty_response)
     tac.conversation_memory_client.retrieve_memory = retrieve_memory_mock
 
@@ -379,6 +388,7 @@ async def test_once_mode_does_not_invalidate_on_active() -> None:
         summaries=[],
         meta=MemoryRetrievalMeta(queryTime=0),
     )
+    # Mock at memory client level so TAC.retrieve_memory() wraps it in TACMemoryResponse
     retrieve_memory_mock = AsyncMock(return_value=empty_response)
     tac.conversation_memory_client.retrieve_memory = retrieve_memory_mock
 
@@ -474,6 +484,7 @@ async def test_once_mode_clears_cache_on_closed() -> None:
         summaries=[],
         meta=MemoryRetrievalMeta(queryTime=0),
     )
+    # Mock at memory client level so TAC.retrieve_memory() wraps it in TACMemoryResponse
     retrieve_memory_mock = AsyncMock(return_value=empty_response)
     tac.conversation_memory_client.retrieve_memory = retrieve_memory_mock
 
@@ -541,13 +552,12 @@ async def test_once_mode_clears_cache_on_closed() -> None:
 
 @pytest.mark.asyncio
 async def test_once_mode_lock_prevents_race_conditions() -> None:
-    """Test that cache_lock prevents race conditions between fetch and invalidation.
+    """Test that cache_lock is present and functions correctly for 'once' mode.
 
-    This test verifies that the asyncio.Lock on ConversationSession properly
-    synchronizes cache operations, preventing scenarios where:
-    - Webhook clears cache while fetch is in progress
-    - Multiple concurrent fetches occur
-    - Cache read happens during invalidation
+    Verifies that:
+    - ConversationSession has a cache_lock field
+    - The lock can be acquired successfully
+    - INACTIVE webhook processing respects the lock when clearing cache
     """
     tac = TAC(get_test_config())
 
@@ -575,6 +585,7 @@ async def test_once_mode_lock_prevents_race_conditions() -> None:
         summaries=[],
         meta=MemoryRetrievalMeta(queryTime=0),
     )
+    # Mock at memory client level so TAC.retrieve_memory() wraps it in TACMemoryResponse
     retrieve_memory_mock = AsyncMock(return_value=empty_response)
     tac.conversation_memory_client.retrieve_memory = retrieve_memory_mock
 
