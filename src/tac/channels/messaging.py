@@ -45,8 +45,9 @@ class MessagingChannelConfig(BaseModel):
         memory_mode: Memory retrieval mode. Default is "never".
             - "always": Retrieve memory for every message with the query string
             - "once": Retrieve memory once at conversation start with empty query and cache it.
-                     Cache is invalidated when conversation becomes INACTIVE, so memory is
-                     refreshed when conversation transitions back to ACTIVE.
+                     Cache is invalidated when conversation becomes INACTIVE and is fetched
+                     again the next time a message triggers memory retrieval after the
+                     conversation becomes ACTIVE.
             - "never": Skip memory retrieval
     """
 

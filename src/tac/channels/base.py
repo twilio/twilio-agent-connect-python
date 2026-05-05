@@ -1,5 +1,6 @@
 """Base channel interface for TAC channels."""
 
+import asyncio
 from abc import ABC, abstractmethod
 from collections import OrderedDict
 from collections.abc import AsyncGenerator
@@ -260,6 +261,9 @@ class BaseChannel(ABC):
                     "Memory retrieved",
                     conversation_id=conv_id,
                 )
+            except asyncio.CancelledError:
+                # Re-raise to allow proper cancellation (e.g., Voice channel interrupts)
+                raise
             except Exception as e:
                 self.logger.error(
                     "Failed to retrieve memory",
@@ -287,6 +291,9 @@ class BaseChannel(ABC):
                             "Memory retrieved and cached",
                             conversation_id=conv_id,
                         )
+                    except asyncio.CancelledError:
+                        # Re-raise to allow proper cancellation (e.g., Voice channel interrupts)
+                        raise
                     except Exception as e:
                         self.logger.error(
                             "Failed to retrieve memory",
