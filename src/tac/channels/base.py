@@ -240,7 +240,7 @@ class BaseChannel(ABC):
         Memory modes:
         - "always": Fetch with query on every message
         - "once": Fetch once with empty query, cache it. Cache invalidated on INACTIVE.
-                  Uses session.cache_lock for thread safety.
+                  Uses session.cache_lock for task-safe concurrency within the event loop.
         - "never": Skip retrieval
 
         Args:

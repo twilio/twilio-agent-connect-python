@@ -63,7 +63,7 @@ class ConversationSession(BaseModel):
     )
     cache_lock: asyncio.Lock = Field(
         default_factory=asyncio.Lock,
-        description="Lock for thread-safe cache operations in 'once' mode",
+        description="Lock for task-safe cache operations within the event loop in 'once' mode",
         exclude=True,
     )
 

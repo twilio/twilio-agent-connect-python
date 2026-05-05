@@ -54,7 +54,7 @@ Tests are in `tests/` — one test file per module (e.g., `test_tac.py`, `test_s
 - **Memory modes**: Channels support three memory retrieval modes:
   - `"never"` (default): No automatic memory retrieval
   - `"always"`: Fetch memory on every message with the user's query string for semantic search
-  - `"once"`: Fetch once with empty query, cache it. Cache invalidated on INACTIVE (when Orchestrator updates memory). Uses `cache_lock` for thread safety
+  - `"once"`: Fetch once with empty query, cache it. Cache invalidated on INACTIVE (when Orchestrator updates memory). Uses `cache_lock` to coordinate concurrent async access
 - **Memory fallback**: `TAC.retrieve_memory()` tries Conversation Memory first, gracefully falls back to Conversation Orchestrator's `list_communications()` on any failure
 - **Profile resolution**: Automatic profile lookup by phone/email if `profile_id` not present in webhook
 - **Memory auto-init**: Memory client is always initialized from Conversation Orchestrator configuration's `memory_store_id`

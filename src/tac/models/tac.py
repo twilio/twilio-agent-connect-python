@@ -319,10 +319,3 @@ class TACMemoryResponse:
         data["recipients"] = [TACCommunicationAuthor(**r) for r in data["recipients"]]
 
         return TACCommunication(**data)
-
-
-# Rebuild ConversationSession now that TACMemoryResponse is defined
-# This is needed because ConversationSession uses TYPE_CHECKING import for TACMemoryResponse
-from tac.models.session import ConversationSession  # noqa: E402
-
-ConversationSession.model_rebuild()

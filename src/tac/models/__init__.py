@@ -56,6 +56,11 @@ from tac.models.tac import (
 )
 from tac.models.voice import TwiMLOptions
 
+# Rebuild ConversationSession to resolve TACMemoryResponse forward reference
+# This is necessary because ConversationSession uses TYPE_CHECKING import for TACMemoryResponse
+# Placing this here in __init__.py is the best practice as this module naturally imports both
+ConversationSession.model_rebuild()
+
 __all__ = [
     "ActionChannelSettings",
     "ActionParticipantRef",
