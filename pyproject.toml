@@ -66,6 +66,22 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/tac"]
 
+[tool.hatch.build.targets.sdist]
+exclude = [
+    "/.github",
+    "/.venv",
+    "/.claude",
+    "/__pycache__",
+    "*.pyc",
+    ".DS_Store",
+    "CLAUDE.md",
+    "/getting_started",
+    "/.pre-commit-config.yaml",
+    "/Makefile",
+    "/logo.svg",
+    "/uv.lock",
+]
+
 [tool.ruff]
 line-length = 100
 target-version = "py310"
