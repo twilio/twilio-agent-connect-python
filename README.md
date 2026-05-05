@@ -14,7 +14,7 @@
   <div align="center">
     <a href="https://github.com/twilio/twilio-agent-connect-python"><img alt="Python SDK" src="https://img.shields.io/badge/Python-3.10+-3776AB.svg"/></a>
     <a href="https://github.com/twilio/twilio-agent-connect-typescript"><img alt="TypeScript SDK" src="https://img.shields.io/badge/TypeScript-5.0+-3178C6.svg"/></a>
-    <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache%202.0-green.svg"/></a>
+    <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-green.svg"/></a>
     <a href="https://www.twilio.com/docs/platform/tac/quickstart"><img alt="Getting Started" src="https://img.shields.io/badge/Getting%20Started-Quickstart-F22F46.svg"/></a>
   </div>
   
