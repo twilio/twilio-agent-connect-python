@@ -28,6 +28,7 @@
 
 Seamlessly integrate with Twilio's Memory Store and Conversation Orchestrator to build LLM-powered agents with persistent memory and conversation context.
 
+> [!TIP]
 > **Building on AWS or Microsoft agent SDKs?** Connect AWS or Microsoft agents to Twilio's voice, messaging, and conversation context:
 > - **[TAC for AWS](https://github.com/twilio/twilio-agent-connect-aws)** — Strands, Bedrock Agents, Bedrock AgentCore
 > - **[TAC for Microsoft](https://github.com/twilio/twilio-agent-connect-microsoft)** — Microsoft Agent Framework, Azure AI Foundry (incl. Voice Live), Azure OpenAI
@@ -36,15 +37,12 @@ Seamlessly integrate with Twilio's Memory Store and Conversation Orchestrator to
 
 ## Key Features
 
-- **Multi-Channel Support**: Built-in webhook handling for SMS, RCS, WhatsApp, and Chat conversations
-- **Voice Channel Support**: WebSocket protocol handling for Twilio Voice with ConversationRelay
-- **Outbound Conversations**: Agent-initiated conversations via SMS, RCS, WhatsApp, and Voice channels
+- **Multi-Channel Support**: Built-in handling for Voice (ConversationRelay), SMS, RCS, WhatsApp, and Chat
+- **Outbound Conversations**: Agent-initiated conversations across all supported channels
 - **ConversationRelay-Only Mode**: Get started quickly with TAC's voice plumbing (TwiML, WebSocket, callbacks) before adding Conversation Orchestrator
 - **Memory Management**: Automatic integration with Twilio Memory for persistent user context
 - **Conversation Lifecycle**: Automatic tracking of conversation sessions and state
-- **Type-Safe**: Full type hints and Pydantic models throughout
-- **Callback-Based**: Simple `on_message_ready` callback for LLM integration with optional memory retrieval
-- **Production Ready**: Comprehensive test coverage and error handling
+- **Human Handoff**: Built-in tool to route conversations to human agents via Twilio Studio Flows (including Flex)
 
 ## Get Started
 
