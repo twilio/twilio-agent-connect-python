@@ -1,7 +1,7 @@
 """Tests for 'once' memory mode caching and invalidation.
 
 Tests memory caching behavior: fetch once with empty query, cache it,
-invalidate on INACTIVE, thread-safe with lock.
+invalidate on INACTIVE, task-safe with an async lock.
 """
 
 from typing import Any

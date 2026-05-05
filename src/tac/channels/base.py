@@ -296,8 +296,9 @@ class BaseChannel(ABC):
                         )
                         # Continue without memory rather than failing the entire message processing
         else:
+            # Handles "never" mode and any unexpected values
             self.logger.debug(
-                "Memory mode is 'never', skipping memory retrieval",
+                "Memory retrieval disabled",
                 conversation_id=conv_id,
                 memory_mode=self.memory_mode,
             )

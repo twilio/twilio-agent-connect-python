@@ -256,7 +256,6 @@ class TestVoiceChannel:
     @pytest.mark.asyncio
     async def test_process_webhook_conversation_inactive(self) -> None:
         """Test that INACTIVE invalidates cached memory when memory_mode='once'."""
-        from unittest.mock import MagicMock
 
         from tac.channels.voice.config import VoiceChannelConfig
 
@@ -268,9 +267,9 @@ class TestVoiceChannel:
         session = channel._start_conversation("CONV123", "profile_123")
         assert "CONV123" in channel._conversations
 
-        # Simulate cached memory
-        mock_memory = MagicMock()
-        session.cached_memory = mock_memory
+        # Simulate cached memory with proper type
+        empty_response = MemoryRetrievalResponse(observations=[], summaries=[], communications=[])
+        session.cached_memory = TACMemoryResponse(empty_response)
 
         # Process CONVERSATION_UPDATED with INACTIVE status
         webhook_data = {
