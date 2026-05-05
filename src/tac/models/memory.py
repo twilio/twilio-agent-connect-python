@@ -3,7 +3,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, field_validator
 
 # Memory retrieval mode for channels
-MemoryMode = Literal["always", "never"]
+MemoryMode = Literal["always", "never", "once"]
 
 
 class MemoryRetrievalRequest(BaseModel):

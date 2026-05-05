@@ -471,10 +471,12 @@ class VoiceChannel(BaseChannel):
     async def process_webhook(
         self, webhook_data: dict[str, Any], idempotency_token: str | None = None
     ) -> None:
-        """Process conversation webhooks for cleanup.
+        """Process conversation webhooks for cleanup and cache invalidation.
 
-        Voice channel only processes CONVERSATION_UPDATED events with CLOSED status
-        to clean up local session state. All other events are ignored.
+        Voice channel processes CONVERSATION_UPDATED events:
+        - CLOSED status: Clean up local session state
+        - INACTIVE status: Invalidate cached memory (memory will be updated by
+          Conversation Orchestrator)
 
         Note: Conversation tracking uses instance-local memory. In multi-instance
         deployments, webhooks may route to a different instance, preventing cleanup.
@@ -505,10 +507,25 @@ class VoiceChannel(BaseChannel):
             conv_id = event_data.get("id")
             status = event_data.get("status")
 
-            if status == "CLOSED" and conv_id:
-                session = self._conversations.get(conv_id)
-                if session and session.channel == self.get_channel_name():
-                    await self._end_conversation(conv_id)
+            if not conv_id:
+                return
+
+            session = self._conversations.get(conv_id)
+            if not session or session.channel != self.get_channel_name():
+                return
+
+            if status == "CLOSED":
+                await self._end_conversation(conv_id)
+            elif status == "INACTIVE":
+                # Invalidate cached memory when conversation becomes inactive
+                # Memory is updated by Conversation Orchestrator on INACTIVE transition
+                async with session.cache_lock:
+                    if session.cached_memory is not None:
+                        session.cached_memory = None
+                        self.logger.debug(
+                            "Invalidated cached memory on INACTIVE status",
+                            conversation_id=conv_id,
+                        )
 
     async def send_response(
         self,

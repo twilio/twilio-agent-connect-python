@@ -35,7 +35,10 @@ class BaseChannel(ABC):
         Args:
             tac: TAC instance for memory/context operations
             memory_mode: Memory retrieval mode. Default is "never".
-                Set to "always" to retrieve memory for every message.
+                - "always": Retrieve memory for every message with the query string
+                - "once": Retrieve memory once at conversation start with empty query and cache it.
+                         Cache is invalidated when conversation becomes INACTIVE.
+                - "never": Skip memory retrieval
             dedup_capacity: Maximum number of idempotency tokens to track for
                 webhook deduplication. Default 10000. Must be positive.
         """
@@ -232,21 +235,24 @@ class BaseChannel(ABC):
         self, session: ConversationSession, query: str | None, conv_id: str
     ) -> TACMemoryResponse | None:
         """
-        Retrieve memory only when ``self.memory_mode == "always"``.
+        Retrieve memory based on memory_mode setting.
 
-        This method handles the common logic for memory retrieval across all channels,
-        including error handling and debug logging. If ``memory_mode`` is any value
-        other than ``"always"``, automatic memory retrieval is skipped.
+        Memory modes:
+        - "always": Fetch with query on every message
+        - "once": Fetch once with empty query, cache it. Cache invalidated on INACTIVE.
+                  Uses session.cache_lock for thread safety.
+        - "never": Skip retrieval
 
         Args:
             session: Conversation session containing profile_id and context
-            query: Optional query string for memory retrieval
+            query: Optional query string for memory retrieval (ignored in "once" mode)
             conv_id: Conversation ID for logging
 
         Returns:
             TACMemoryResponse wrapper if memory was retrieved, None otherwise
         """
         memory_response = None
+
         if self.memory_mode == "always":
             try:
                 memory_response = await self.tac.retrieve_memory(session, query=query)
@@ -262,9 +268,36 @@ class BaseChannel(ABC):
                     exc_info=True,
                 )
                 # Continue without memory rather than failing the entire message processing
+        elif self.memory_mode == "once":
+            # Use lock to prevent race conditions between cache read/write and webhook invalidation
+            async with session.cache_lock:
+                # Check if memory is already cached
+                if session.cached_memory is not None:
+                    self.logger.debug(
+                        "Using cached memory",
+                        conversation_id=conv_id,
+                    )
+                    memory_response = session.cached_memory
+                else:
+                    # First retrieval - use empty query and cache result
+                    try:
+                        memory_response = await self.tac.retrieve_memory(session, query=None)
+                        session.cached_memory = memory_response
+                        self.logger.debug(
+                            "Memory retrieved and cached",
+                            conversation_id=conv_id,
+                        )
+                    except Exception as e:
+                        self.logger.error(
+                            "Failed to retrieve memory",
+                            conversation_id=conv_id,
+                            error=str(e),
+                            exc_info=True,
+                        )
+                        # Continue without memory rather than failing the entire message processing
         else:
             self.logger.debug(
-                "Memory mode not set to 'always', skipping memory retrieval",
+                "Memory mode is 'never', skipping memory retrieval",
                 conversation_id=conv_id,
                 memory_mode=self.memory_mode,
             )

@@ -1,4 +1,6 @@
+import asyncio
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -48,6 +50,17 @@ class ConversationSession(BaseModel):
         default=None,
         description="Pending handoff payload set by the handoff tool. "
         "Voice channel sends this as a WS 'end' message after the LLM's final response.",
+    )
+    cached_memory: Any = Field(
+        default=None,
+        description="Cached memory for 'once' mode (TACMemoryResponse | None). "
+        "Set on first retrieval, cleared on INACTIVE.",
+        exclude=True,
+    )
+    cache_lock: asyncio.Lock = Field(
+        default_factory=asyncio.Lock,
+        description="Lock for thread-safe cache operations in 'once' mode",
+        exclude=True,
     )
 
     model_config = ConfigDict(arbitrary_types_allowed=True)

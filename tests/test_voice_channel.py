@@ -255,13 +255,19 @@ class TestVoiceChannel:
 
     @pytest.mark.asyncio
     async def test_process_webhook_conversation_inactive(self) -> None:
-        """Test that process_webhook does NOT clean up on INACTIVE status."""
+        """Test that process_webhook invalidates cached memory on INACTIVE status."""
+        from unittest.mock import MagicMock
+
         tac = TAC(get_test_config())
         channel = VoiceChannel(tac)
 
         # Start a conversation
-        channel._start_conversation("CONV123", "profile_123")
+        session = channel._start_conversation("CONV123", "profile_123")
         assert "CONV123" in channel._conversations
+
+        # Simulate cached memory
+        mock_memory = MagicMock()
+        session.cached_memory = mock_memory
 
         # Process CONVERSATION_UPDATED with INACTIVE status
         webhook_data = {
@@ -270,8 +276,10 @@ class TestVoiceChannel:
         }
         await channel.process_webhook(webhook_data)
 
-        # Should NOT clean up (only CLOSED triggers cleanup)
+        # Should NOT clean up conversation (only CLOSED triggers cleanup)
         assert "CONV123" in channel._conversations
+        # But should invalidate cached memory
+        assert session.cached_memory is None
 
     @pytest.mark.asyncio
     async def test_process_webhook_not_tracked_locally(self) -> None:

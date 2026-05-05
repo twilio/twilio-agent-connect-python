@@ -43,7 +43,11 @@ class MessagingChannelConfig(BaseModel):
             Default 10000 is suitable for most applications.
             Uses Twilio's i-twilio-idempotency-token header for deduplication.
         memory_mode: Memory retrieval mode. Default is "never".
-            Set to "always" to retrieve memory for every message.
+            - "always": Retrieve memory for every message with the query string
+            - "once": Retrieve memory once at conversation start with empty query and cache it.
+                     Cache is invalidated when conversation becomes INACTIVE, so memory is
+                     refreshed when conversation transitions back to ACTIVE.
+            - "never": Skip memory retrieval
     """
 
     dedup_capacity: int = Field(
@@ -297,19 +301,32 @@ class MessagingChannel(BaseChannel):
     async def _handle_conversation_updated(self, event_data: Any) -> None:
         """Handle CONVERSATION_UPDATED event.
 
-        Only processes CLOSED status for conversations tracked by this channel.
+        - CLOSED: Remove session (clears cache)
+        - INACTIVE: Invalidate cached memory (Orchestrator updates memory on INACTIVE)
         """
         conversation_data = ConversationResponse.model_validate(event_data)
         conv_id = conversation_data.id
         status = conversation_data.status
 
-        if (
-            conversation_data.configuration_id == self.tac.config.conversation_configuration_id
-            and status == "CLOSED"
-        ):
-            session = self._conversations.get(conv_id)
-            if session and session.channel == self.get_channel_name():
-                await self._end_conversation(conv_id)
+        if conversation_data.configuration_id != self.tac.config.conversation_configuration_id:
+            return
+
+        session = self._conversations.get(conv_id)
+        if not session or session.channel != self.get_channel_name():
+            return
+
+        if status == "CLOSED":
+            await self._end_conversation(conv_id)
+        elif status == "INACTIVE":
+            # Invalidate cached memory when conversation becomes inactive
+            # Memory is updated by Conversation Orchestrator on INACTIVE transition
+            async with session.cache_lock:
+                if session.cached_memory is not None:
+                    session.cached_memory = None
+                    self.logger.debug(
+                        "Invalidated cached memory on INACTIVE status",
+                        conversation_id=conv_id,
+                    )
 
     async def _initiate_messaging_conversation(
         self,

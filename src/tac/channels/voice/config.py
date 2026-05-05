@@ -15,7 +15,10 @@ class VoiceChannelConfig(BaseModel):
             Defaults to ThreadSafeSessionManager for automatic task cancellation on
             interrupts and new prompts. Set to None only for debugging/testing.
         memory_mode: Memory retrieval mode. Default is "never".
-            Set to "always" to retrieve memory for every message.
+            - "always": Retrieve memory for every message with the query string
+            - "once": Retrieve memory once at conversation start with empty query and cache it.
+                     Cache is invalidated when conversation becomes INACTIVE.
+            - "never": Skip memory retrieval
     """
 
     model_config = {"arbitrary_types_allowed": True}
