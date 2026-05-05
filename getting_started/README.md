@@ -135,9 +135,9 @@ See `examples/.env.example` for all available configuration options. Key variabl
 - Add tool calling to enable agent actions beyond text responses
 - Explore the main [README](../README.md) for advanced features
 
-## Connectors for agent SDKs and APIs
+## AWS and Microsoft connectors
 
-Connect AWS or Microsoft agents to Twilio's voice, messaging, and conversation context with these dedicated packages:
+Building AI agents on AWS or Microsoft? Connect them to Twilio's voice, messaging, and conversation context with these dedicated packages:
 
 - **[TAC for AWS](https://github.com/twilio/twilio-agent-connect-aws)** — `StrandsConnector`, `BedrockConnector`, `BedrockAgentCoreConnector` for AWS Strands, Bedrock Agents, and Bedrock AgentCore
 - **[TAC for Microsoft](https://github.com/twilio/twilio-agent-connect-microsoft)** — `AgentFrameworkConnector` and `VoiceLiveConnector` for Microsoft Agent Framework, Azure AI Foundry (including Voice Live), and Azure OpenAI

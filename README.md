@@ -29,7 +29,7 @@
 Seamlessly integrate with Twilio Conversation Memory and Conversation Orchestrator to build LLM-powered agents with persistent memory and conversation context.
 
 > [!TIP]
-> **Building on AWS or Microsoft agent SDKs?** Connect AWS or Microsoft agents to Twilio's voice, messaging, and conversation context:
+> **Building AI agents on AWS or Microsoft?** Connect them to Twilio's voice, messaging, and conversation context:
 > - **[TAC for AWS](https://github.com/twilio/twilio-agent-connect-aws)** — Strands, Bedrock Agents, Bedrock AgentCore
 > - **[TAC for Microsoft](https://github.com/twilio/twilio-agent-connect-microsoft)** — Microsoft Agent Framework, Azure AI Foundry (incl. Voice Live), Azure OpenAI
 
@@ -187,7 +187,7 @@ For detailed architecture and advanced usage, see [CLAUDE.md](CLAUDE.md).
 - **[ConversationRelay-Only Mode](getting_started/examples/features/relay_only.py)** - Get started with voice using just ConversationRelay
 - More examples coming soon
 
-**Connectors for agent SDKs and APIs:**
+**AWS and Microsoft connectors:**
 - **[TAC for AWS](https://github.com/twilio/twilio-agent-connect-aws)** — `StrandsConnector`, `BedrockConnector`, `BedrockAgentCoreConnector` for AWS Strands, Bedrock Agents, and Bedrock AgentCore
 - **[TAC for Microsoft](https://github.com/twilio/twilio-agent-connect-microsoft)** — `AgentFrameworkConnector` and `VoiceLiveConnector` for Microsoft Agent Framework, Azure AI Foundry (including Voice Live), and Azure OpenAI
 
