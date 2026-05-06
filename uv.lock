@@ -2124,7 +2124,7 @@ wheels = [
 
 [[package]]
 name = "twilio-agent-connect"
-version = "0.0.3"
+version = "1.0.1"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },
