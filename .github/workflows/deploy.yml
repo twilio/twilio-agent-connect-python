@@ -69,4 +69,4 @@ jobs:
         run: uv build
 
       - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@76f52bc884231f62b9a034ebfe128415bbaabdfc # v1.12.4
+        uses: pypa/gh-action-pypi-publish@4cf0fdb7e1623e99dab752bc00bab23c0b69d050 # v1.14.0
