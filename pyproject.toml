@@ -1,6 +1,6 @@
 [project]
 name = "twilio-agent-connect"
-version = "0.0.3"
+version = "1.0.0"
 description = "A Python framework for building agentic applications with Twilio"
 authors = [{ name = "Twilio Conversation AI", email = "team_conversational-ai@twilio.com" }]
 readme = "README.md"
@@ -69,6 +69,10 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/tac"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/tac", "LICENSE", "README.md", "pyproject.toml"]
+
 
 [tool.ruff]
 line-length = 100
