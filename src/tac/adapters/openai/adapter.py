@@ -86,9 +86,9 @@ class _BaseResponsesNamespace:
         self._context = context
         self._options = options
 
-    def _enhance_instructions(self, instructions: str | None) -> str | None:
-        """Enhance instructions with memory injection."""
-        return _inject_memory_to_instructions(
+    def _enhance_instructions(self, instructions: str | None) -> str:
+        """Enhance instructions with memory injection. Always returns a string."""
+        return MemoryPromptBuilder.compose(
             instructions, self._memory_response, self._context, self._options
         )
 
@@ -330,40 +330,3 @@ def _inject_memory(
     enhanced_messages.insert(0, memory_message)
 
     return enhanced_messages
-
-
-def _inject_memory_to_instructions(
-    instructions: str | None,
-    memory_response: TACMemoryResponse | None,
-    context: ConversationSession | None,
-    options: AdapterOptions | None,
-) -> str | None:
-    """
-    Inject TAC memory and profile into OpenAI Responses API instructions.
-
-    Uses MemoryPromptBuilder to create a memory prompt, then prepends it
-    to the instructions parameter.
-
-    Args:
-        instructions: Original instructions for the Responses API
-        memory_response: Memory data from TAC.retrieve_memory()
-        context: Conversation session with profile data
-        options: Adapter options for trait filtering
-
-    Returns:
-        Enhanced instructions with memory prepended,
-        or original instructions if no memory data is available.
-    """
-    # Build memory prompt using shared builder
-    memory_content = MemoryPromptBuilder.build(memory_response, context, options)
-
-    # No memory to inject
-    if not memory_content:
-        return instructions
-
-    logger.debug("[ADAPTER:OPENAI] Injecting memory into instructions")
-
-    # Prepend memory to instructions
-    if instructions:
-        return f"{memory_content}\n\n{instructions}"
-    return memory_content

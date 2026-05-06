@@ -17,8 +17,7 @@ from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletionMessageParam
 
 from tac import TAC, TACConfig
-from tac.adapters import MemoryPromptBuilder
-from tac.channels.voice import VoiceChannel, VoiceChannelConfig
+from tac.channels.voice import VoiceChannel
 from tac.models.session import ConversationSession
 from tac.models.tac import TACMemoryResponse
 from tac.server import TACFastAPIServer
@@ -26,7 +25,7 @@ from tac.server import TACFastAPIServer
 load_dotenv()
 
 tac = TAC(config=TACConfig.from_env())
-voice_channel = VoiceChannel(tac, config=VoiceChannelConfig(memory_mode="always"))
+voice_channel = VoiceChannel(tac)
 openai_client = AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
 conversation_history: dict[str, list[ChatCompletionMessageParam]] = {}
@@ -52,13 +51,8 @@ async def handle_message_ready(
 
     conversation_history[conv_id].append({"role": "user", "content": user_message})
 
-    # Build messages with memory
+    # Use conversation history for streaming
     messages = conversation_history[conv_id][:]  # Copy list
-    if memory_response:
-        memory_prompt = MemoryPromptBuilder.build(memory_response, context)
-        if memory_prompt:
-            # Insert memory after system message
-            messages.insert(1, {"role": "system", "content": memory_prompt})
 
     async def stream_tokens() -> AsyncGenerator[str, None]:
         response_tokens = []

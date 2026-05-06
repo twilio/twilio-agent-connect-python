@@ -93,6 +93,36 @@ class MemoryPromptBuilder:
         return MemoryPromptBuilder._assemble_prompt(sections)
 
     @staticmethod
+    def compose(
+        system_prompt: str | None = None,
+        memory_response: TACMemoryResponse | None = None,
+        context: ConversationSession | None = None,
+        options: AdapterOptions | None = None,
+    ) -> str:
+        """
+        Compose system prompt with memory context.
+
+        Appends memory to system_prompt if available. Always returns a string.
+
+        Example:
+            >>> prompt = MemoryPromptBuilder.compose(
+            ...     "You are a helpful assistant", memory_response, context
+            ... )
+        """
+        memory_content = MemoryPromptBuilder.build(memory_response, context, options)
+
+        if not system_prompt and not memory_content:
+            return ""
+
+        if not system_prompt:
+            return memory_content or ""
+
+        if not memory_content:
+            return system_prompt
+
+        return f"{system_prompt}\n\n{memory_content}"
+
+    @staticmethod
     def _assemble_prompt(sections: list[str]) -> str:
         """
         Assemble sections into final prompt with header.

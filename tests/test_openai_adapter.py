@@ -526,7 +526,7 @@ def test_responses_api_memory_injection(
     call_args = mock_openai_client.responses.create.call_args
     enhanced_instructions = call_args[1]["instructions"]
 
-    # Should have memory prepended to instructions
+    # Should have memory appended to instructions (instructions first, then memory)
     assert "Customer prefers email communication" in enhanced_instructions
     assert "You are a helpful assistant." in enhanced_instructions
 
@@ -724,7 +724,7 @@ async def test_async_responses_api_memory_injection(
     call_args = mock_async_openai_client.responses.create.call_args
     enhanced_instructions = call_args[1]["instructions"]
 
-    # Should have memory prepended to instructions
+    # Should have memory appended to instructions (instructions first, then memory)
     assert "Customer prefers email communication" in enhanced_instructions
     assert "You are a helpful assistant." in enhanced_instructions
 

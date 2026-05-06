@@ -64,24 +64,19 @@ async def handle_message_ready(
         if conv_id not in conversation_messages:
             conversation_messages[conv_id] = []
 
-        # Use TAC's MemoryPromptBuilder to format memory and profile data
+        # Build your system prompt with memory context using compose()
         # This is the official way to format TAC memory for any agent/framework
-        memory_context = MemoryPromptBuilder.build(
-            memory_response=memory_response,
-            context=context,
-        )
-
-        # Build your system prompt with memory context
         base_prompt = (
             "You are a customer service agent speaking with a user over voice or SMS. "
             "Keep responses short and conversational — a sentence or two. "
             "Do not use markdown, asterisks, bullets, or emojis; your words will be "
             "spoken aloud or sent as plain text."
         )
-        if memory_context:
-            system_prompt = f"{base_prompt}\n\n{memory_context}"
-        else:
-            system_prompt = base_prompt
+        system_prompt = MemoryPromptBuilder.compose(
+            base_prompt,
+            memory_response=memory_response,
+            context=context,
+        )
 
         # Add user message to conversation history
         conversation_messages[conv_id].append({"role": "user", "content": user_message})
@@ -120,9 +115,10 @@ if __name__ == "__main__":
 
     1. TAC provides memory via `memory_response` and `context` parameters
 
-    2. Use `MemoryPromptBuilder.build()` to format memory and profile data
+    2. Use `MemoryPromptBuilder.compose(base_prompt, memory_response, context)` to
+       automatically append memory to your system prompt - no if/else needed!
 
-    3. Inject the formatted prompt into your agent's system prompt:
+    3. Pass the composed prompt to your agent/LLM:
        - OpenAI: Add to system message
        - AWS Bedrock: Add to system prompt
        - Azure AI: Add to system message
