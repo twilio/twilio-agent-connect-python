@@ -233,10 +233,8 @@ Do not use markdown."""
         """Should handle empty base prompt by composing with memory."""
         result = MemoryPromptBuilder.compose("", sample_memory_response, None)
 
-        # Empty string is truthy for concatenation, so result is "" + "\n\n" + memory
-        # which simplifies to "\n\n" + memory (empty prefix is stripped in final result)
-        assert result is not None
+        # Empty string is falsy in Python, so compose() treats "" like None:
+        # it returns the memory content directly without concatenation
         assert "# Customer Context" in result
         assert "Customer prefers email communication" in result
-        # When system_prompt is empty, we still compose: "" + "\n\n" + memory
-        assert result.startswith("")  # Empty string followed by separator and memory
+        assert result.startswith("# Customer Context")  # Memory content only, no prefix
