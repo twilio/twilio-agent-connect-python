@@ -1,6 +1,6 @@
 [project]
 name = "twilio-agent-connect"
-version = "0.0.3"
+version = "1.0.1"
 description = "A Python framework for building agentic applications with Twilio"
 authors = [{ name = "Twilio Conversation AI", email = "team_conversational-ai@twilio.com" }]
 readme = "README.md"
