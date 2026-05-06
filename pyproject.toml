@@ -4,8 +4,6 @@ version = "0.0.3"
 description = "A Python framework for building agentic applications with Twilio"
 authors = [{ name = "Twilio Conversation AI", email = "team_conversational-ai@twilio.com" }]
 readme = "README.md"
-homepage = "https://github.com/twilio/twilio-agent-connect-python"
-repository = "https://github.com/twilio/twilio-agent-connect-python"
 requires-python = ">=3.10,<4"
 classifiers = [
     "Typing :: Typed",
@@ -25,6 +23,12 @@ dependencies = [
     "httpx>=0.27.0,<1",
     "twilio>=9.8.3,<10",
 ]
+
+[project.urls]
+Homepage = "https://github.com/twilio/twilio-agent-connect-python"
+Documentation = "https://www.twilio.com/docs/conversations/agent-connect"
+Repository = "https://github.com/twilio/twilio-agent-connect-python"
+Issues = "https://github.com/twilio/twilio-agent-connect-python/issues"
 
 [project.optional-dependencies]
 server = [
