@@ -15,15 +15,15 @@
     <a href="https://github.com/twilio/twilio-agent-connect-python"><img alt="Python SDK" src="https://img.shields.io/badge/Python-3.10+-3776AB.svg"/></a>
     <a href="https://pypi.org/project/twilio-agent-connect/"><img alt="PyPI" src="https://img.shields.io/pypi/v/twilio-agent-connect.svg"/></a>
     <a href="https://github.com/twilio/twilio-agent-connect-python/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/twilio/twilio-agent-connect-python/actions/workflows/ci.yml/badge.svg"/></a>
-    <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-green.svg"/></a>
-    <a href="https://www.twilio.com/docs/conversations/agent-connect"><img alt="Getting Started" src="https://img.shields.io/badge/Getting%20Started-Quickstart-F22F46.svg"/></a>
+    <a href="https://github.com/twilio/twilio-agent-connect-python/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-green.svg"/></a>
+    <a href="https://www.twilio.com/docs/conversations/agent-connect/quickstart"><img alt="Getting Started" src="https://img.shields.io/badge/Getting%20Started-Quickstart-F22F46.svg"/></a>
   </div>
   
   <p>
     <a href="https://www.twilio.com/docs/conversations/agent-connect">Documentation</a>
     ◆ <a href="https://github.com/twilio/twilio-agent-connect-python">Python SDK</a>
     ◆ <a href="https://github.com/twilio/twilio-agent-connect-typescript">TypeScript SDK</a>
-    ◆ <a href="getting_started/examples">Examples</a>
+    ◆ <a href="https://github.com/twilio/twilio-agent-connect-python/tree/main/getting_started/examples">Examples</a>
   </p>
 </div>
 
@@ -88,7 +88,7 @@ make setup  # Open http://localhost:8080
 
 **Option 2: Manual Setup**
 
-You can also create a Memory Store and Conversation Configuration manually through the [Twilio Console](https://1console.twilio.com). For a full walkthrough — credentials, Console navigation, and webhook configuration — see the [TAC Quickstart](https://www.twilio.com/docs/conversations/agent-connect).
+You can also create a Memory Store and Conversation Configuration manually through the [Twilio Console](https://1console.twilio.com). For a full walkthrough — credentials, Console navigation, and webhook configuration — see the [TAC Quickstart](https://www.twilio.com/docs/conversations/agent-connect/quickstart).
 
 ---
 
