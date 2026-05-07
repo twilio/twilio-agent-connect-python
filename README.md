@@ -194,9 +194,17 @@ uv --version
 ### Setup Development Environment
 
 ```bash
-# Install all dependencies (including dev tools)
+# Install all dependencies (including dev tools) and set up pre-commit hooks
+make dev-setup
+
+# Or just install dependencies
 make sync
 ```
+
+**Prerequisites:**
+- Python 3.10+
+- [uv](https://docs.astral.sh/uv/) package manager
+- [Docker Desktop](https://www.docker.com/products/docker-desktop) (required for secret detection)
 
 ### Running Tests and Checks
 
@@ -216,3 +224,44 @@ make test
 # Run all checks at once
 make check
 ```
+
+### Secret Detection
+
+TAC uses [gitleaks](https://github.com/gitleaks/gitleaks) to prevent credentials from being committed to the repository. This runs automatically:
+
+- **Locally**: Pre-commit hook scans staged files before each commit
+- **CI**: GitHub Actions job scans all commits in PRs and pushes
+
+**Setup:**
+
+The `make dev-setup` command automatically installs the pre-commit hooks. You need Docker Desktop installed and running.
+
+**If secrets are detected:**
+
+1. Remove the secret from the file (never commit real credentials)
+2. Stage the corrected file: `git add <file>`
+3. Try committing again
+
+**For false positives:**
+
+Create a `.gitleaks.toml` file to add the pattern to the allowlist. Example:
+
+```toml
+[allowlist]
+description = "Allow test fixtures"
+regexes = [
+  '''EXAMPLE_API_KEY_FOR_TESTING'''
+]
+paths = [
+  '''tests/fixtures/'''
+]
+```
+
+**Important:**
+- Never bypass the pre-commit hook with `--no-verify` for actual secrets
+- CI will catch bypassed secrets and fail the build
+- The secret scanner uses a SHA-pinned Docker image for supply chain security
+
+**Updating gitleaks:**
+
+To update to a new version of gitleaks, modify `.gitleaks/versions.env` with the new Docker image SHA256 digest from [Docker Hub](https://hub.docker.com/r/zricethezav/gitleaks/tags).

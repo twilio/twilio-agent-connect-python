@@ -20,4 +20,13 @@ repos:
     rev: v1.5.1
     hooks:
       - id: mypy
-        additional_dependencies: [types-all]
+        additional_dependencies: [pydantic>=2.0.0]
+        files: ^(src/tac|getting_started)/.*\.py$
+
+  - repo: local
+    hooks:
+      - id: gitleaks
+        name: gitleaks secret detection
+        entry: .gitleaks/run-gitleaks.sh
+        language: script
+        pass_filenames: false
