@@ -44,11 +44,12 @@ Learn the core pattern for manually extracting and injecting TAC memory into **a
 
 ### `partners/` - Partner SDK Examples
 
-Production-ready examples using partner SDK adapters:
-- **`openai_chat_completions.py`**: OpenAI Chat Completions API
-- **`openai_responses_api.py`**: OpenAI Responses API
-- Automatic memory injection with `with_tac_memory()`
-- Less boilerplate, more convention-based
+Production-ready examples integrating TAC with partner SDKs:
+- **`openai_chat_completions.py`**: OpenAI Chat Completions API with automatic memory injection via `with_tac_memory()`
+- **`openai_responses_api.py`**: OpenAI Responses API with automatic memory injection
+- **`aws_bedrock_agent.py`**: AWS Bedrock Agent integration
+- **`aws_bedrock_agentcore.py`**: AWS Bedrock AgentCore integration
+- **`aws_strands.py`**: AWS Strands agents integration
 
 ### `features/` - Feature Examples
 
@@ -84,6 +85,9 @@ walks up from the script's directory, so it'll find
 uv run getting_started/examples/overview.py
 uv run getting_started/examples/partners/openai_chat_completions.py
 uv run getting_started/examples/partners/openai_responses_api.py
+uv run getting_started/examples/partners/aws_bedrock_agent.py
+uv run getting_started/examples/partners/aws_bedrock_agentcore.py
+uv run getting_started/examples/partners/aws_strands.py
 uv run getting_started/examples/features/voice_streaming.py
 uv run getting_started/examples/features/handoff.py
 uv run getting_started/examples/features/relay_only.py
