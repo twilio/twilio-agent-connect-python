@@ -14,9 +14,11 @@ See README.md in this directory for setup and usage instructions.
 
 import asyncio
 import os
+import sys
 from pathlib import Path
 from typing import Any
 
+import httpx
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
 from openai.types.chat import (
@@ -46,6 +48,56 @@ openai_client = AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 # Note: TAC.__init__ calls setup_logging with config.log_level, so set it here
 # or use TWILIO_LOG_LEVEL=DEBUG in your .env
 tac = TAC(config=TACConfig.from_env())
+
+
+def _assert_chat_traffic_configured() -> None:
+    """Fail fast if the Conversation Orchestrator configuration has no classic
+    Conversations (V1) service attached.
+
+    This check is example-level setup validation, not part of the chat
+    integration. The TAC SDK does not require this — but the V1 Chat backend
+    this example uses does, and misconfiguration surfaces as cryptic failures
+    on the first inbound message. Enable it in the Twilio Console under
+    Conversation Orchestrator -> Conversation Configuration -> Channel traffic
+    -> "+ Add messaging & chat traffic", which attaches a classic Conversations
+    service to the configuration.
+    """
+    configuration_id = os.environ.get("TWILIO_CONVERSATION_CONFIGURATION_ID")
+    api_key = os.environ.get("TWILIO_API_KEY")
+    api_secret = os.environ.get("TWILIO_API_SECRET")
+    if not (configuration_id and api_key and api_secret):
+        return  # Let TAC's own credential checks surface the error.
+
+    url = (
+        "https://conversations.twilio.com/v2/ControlPlane/Configurations/"
+        f"{configuration_id}"
+    )
+    try:
+        response = httpx.get(url, auth=(api_key, api_secret), timeout=10.0)
+        response.raise_for_status()
+        config_json = response.json()
+    except Exception as e:
+        logger.warning(
+            "Could not verify CO configuration has classic Conversations attached; "
+            "skipping chat-traffic check",
+            error=str(e),
+        )
+        return
+
+    v1_bridge = config_json.get("conversationsV1Bridge") or {}
+    if not v1_bridge.get("serviceId"):
+        sys.exit(
+            "\nError: Conversation Orchestrator configuration "
+            f"'{configuration_id}' has no classic Conversations (V1) service "
+            "attached — the chat example requires one.\n\n"
+            "To enable it: Twilio Console -> Conversation Orchestrator -> "
+            "Conversation Configuration -> Channel traffic -> "
+            '"+ Add messaging & chat traffic". Attach a classic Conversations '
+            "service that has Chat enabled.\n"
+        )
+
+
+_assert_chat_traffic_configured()
 
 # Override logging to DEBUG after TAC init (which resets it to config.log_level)
 setup_logging(log_level="DEBUG", log_format="console")
