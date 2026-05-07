@@ -39,13 +39,8 @@ voice_channel = VoiceChannel(tac, config=VoiceChannelConfig(memory_mode="always"
 sms_channel = SMSChannel(tac, config=SMSChannelConfig(memory_mode="always"))
 
 # Get AgentCore configuration
-agent_arn = os.environ.get("BEDROCK_AGENTCORE_AGENT_ARN")
-region = os.environ.get("AWS_REGION")
-
-if not agent_arn:
-    raise ValueError("BEDROCK_AGENTCORE_AGENT_ARN environment variable is required")
-if not region:
-    raise ValueError("AWS_REGION environment variable is required")
+agent_arn = os.environ["BEDROCK_AGENTCORE_AGENT_ARN"]
+region = os.environ["AWS_REGION"]
 
 # Create Bedrock AgentCore client
 agentcore_client = boto3.client("bedrock-agentcore", region_name=region)
@@ -93,22 +88,22 @@ async def handle_message_ready(
         content = []
         if "text/event-stream" in response.get("contentType", ""):
             # Handle streaming response
-            for line in response["response"].iter_lines():
-                if line:
-                    line = line.decode("utf-8")
+            for line_bytes in response["response"].iter_lines():
+                if line_bytes:
+                    line = line_bytes.decode("utf-8")
                     if line.startswith("data: "):
-                        line = line[6:]  # Remove "data: " prefix
-                        if line and line != "[DONE]":
+                        chunk_text = line[6:]  # Remove "data: " prefix
+                        if chunk_text and chunk_text != "[DONE]":
                             # Parse JSON to extract token
                             try:
-                                data = json.loads(line)
+                                data = json.loads(chunk_text)
                                 if isinstance(data, dict) and data.get("type") == "text":
                                     token = data.get("token", "")
                                     if token:
                                         content.append(token)
                             except json.JSONDecodeError:
                                 # If not JSON, use raw text
-                                content.append(line)
+                                content.append(chunk_text)
 
         return "".join(content) if content else "No response from agent."
 

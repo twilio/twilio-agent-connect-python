@@ -39,16 +39,9 @@ voice_channel = VoiceChannel(tac, config=VoiceChannelConfig(memory_mode="always"
 sms_channel = SMSChannel(tac, config=SMSChannelConfig(memory_mode="always"))
 
 # Get Bedrock Agent configuration
-agent_id = os.environ.get("BEDROCK_AGENT_ID")
-agent_alias_id = os.environ.get("BEDROCK_AGENT_ALIAS_ID")
-region = os.environ.get("AWS_REGION")
-
-if not agent_id:
-    raise ValueError("BEDROCK_AGENT_ID environment variable is required")
-if not agent_alias_id:
-    raise ValueError("BEDROCK_AGENT_ALIAS_ID environment variable is required")
-if not region:
-    raise ValueError("AWS_REGION environment variable is required")
+agent_id = os.environ["BEDROCK_AGENT_ID"]
+agent_alias_id = os.environ["BEDROCK_AGENT_ALIAS_ID"]
+region = os.environ["AWS_REGION"]
 
 # Create Bedrock Agent Runtime client
 bedrock_client = boto3.client("bedrock-agent-runtime", region_name=region)
