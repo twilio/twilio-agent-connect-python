@@ -196,9 +196,6 @@ uv --version
 ```bash
 # Install all dependencies (including dev tools)
 make sync
-
-# Or manually with uv
-uv sync --all-extras --all-groups
 ```
 
 ### Running Tests and Checks
