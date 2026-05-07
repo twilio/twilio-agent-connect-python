@@ -67,7 +67,7 @@ async def handle_message_ready(
     conv_id = context.conversation_id
 
     try:
-        # Compose user message with memory context
+        # Compose user message with memory context (user message first, then memory)
         prompt = MemoryPromptBuilder.compose(
             system_prompt=user_message,
             memory_response=memory_response,

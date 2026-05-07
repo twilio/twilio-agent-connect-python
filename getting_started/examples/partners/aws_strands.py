@@ -19,13 +19,15 @@ Prerequisites:
     For more details: https://strandsagents.com/docs/user-guide/quickstart/python/
 
 Environment Variables:
-    AWS_REGION - AWS Region
+    AWS_REGION - AWS Region (required)
+    STRANDS_MODEL_ID - Bedrock model ID (required, e.g., us.amazon.nova-pro-v1:0)
 """
 
 import os
 
 from dotenv import load_dotenv
 from strands import Agent
+from strands.models import BedrockModel
 from strands.session.file_session_manager import FileSessionManager
 
 from tac import TAC, TACConfig
@@ -41,6 +43,9 @@ load_dotenv()
 
 logger = get_logger(__name__)
 
+# Get the directory where this script is located
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
 # Initialize TAC with configuration from environment variables
 tac = TAC(config=TACConfig.from_env())
 
@@ -48,10 +53,15 @@ tac = TAC(config=TACConfig.from_env())
 voice_channel = VoiceChannel(tac, config=VoiceChannelConfig(memory_mode="always"))
 sms_channel = SMSChannel(tac, config=SMSChannelConfig(memory_mode="always"))
 
-# Verify AWS_REGION is set
+# Get AWS region from environment
 region = os.environ.get("AWS_REGION")
 if not region:
     raise ValueError("AWS_REGION environment variable is required")
+
+# Get model ID from environment
+model_id = os.environ.get("STRANDS_MODEL_ID")
+if not model_id:
+    raise ValueError("STRANDS_MODEL_ID environment variable is required")
 
 # Store session managers per conversation
 session_managers: dict[str, FileSessionManager] = {}
@@ -82,7 +92,7 @@ async def handle_message_ready(
         if conv_id not in session_managers:
             session_managers[conv_id] = FileSessionManager(
                 session_id=conv_id,
-                storage_dir=".strands_sessions",
+                storage_dir=os.path.join(SCRIPT_DIR, ".strands_sessions"),
             )
 
         session_manager = session_managers[conv_id]
@@ -101,7 +111,7 @@ async def handle_message_ready(
 
         # Create agent with session manager to maintain conversation history
         agent = Agent(
-            model="us.amazon.nova-pro-v1:0",
+            model=BedrockModel(model_id=model_id, region_name=region),
             system_prompt=system_prompt,
             session_manager=session_manager,
         )

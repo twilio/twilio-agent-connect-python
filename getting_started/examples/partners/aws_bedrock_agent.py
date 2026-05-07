@@ -68,10 +68,9 @@ async def handle_message_ready(
     conv_id = context.conversation_id
 
     try:
-        # Compose user message with memory context
+        # Compose user message with memory context (user message first, then memory)
         # Note: Bedrock Agents don't support system prompt at invocation time.
         # The agent's instructions are configured when deploying the agent in AWS Bedrock.
-        # We prepend memory context to the user message in inputText.
         input_text = MemoryPromptBuilder.compose(
             system_prompt=user_message,
             memory_response=memory_response,
