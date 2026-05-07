@@ -61,7 +61,7 @@ response.raise_for_status()
 if not (response.json().get("conversationsV1Bridge") or {}).get("serviceId"):
     sys.exit(
         f"Configuration '{configuration_id}' has no classic Conversations service attached. "
-        'Attach one (with Chat enabled) via Console → Conversation Orchestrator → '
+        "Attach one (with Chat enabled) via Console → Conversation Orchestrator → "
         'Conversation Configuration → Channel traffic → "+ Add messaging & chat traffic".'
     )
 
