@@ -7,6 +7,9 @@ for voice and SMS channels.
 Prerequisites:
     pip install boto3
 
+For an enhanced integration experience with Amazon Bedrock AgentCore, check out our
+dedicated connector: https://github.com/twilio/twilio-agent-connect-aws
+
 Environment Variables:
     BEDROCK_AGENTCORE_AGENT_ARN - ARN of deployed AgentCore runtime
     AWS_REGION - AWS Region

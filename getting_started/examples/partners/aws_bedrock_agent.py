@@ -7,6 +7,9 @@ for voice and SMS channels using boto3 directly.
 Prerequisites:
     pip install boto3
 
+For an enhanced integration experience with Amazon Bedrock Agents, check out our
+dedicated connector: https://github.com/twilio/twilio-agent-connect-aws
+
 Environment Variables:
     BEDROCK_AGENT_ID - Your Bedrock Agent ID
     BEDROCK_AGENT_ALIAS_ID - Agent Alias ID

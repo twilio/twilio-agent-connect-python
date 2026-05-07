@@ -18,6 +18,9 @@ Prerequisites:
 
     For more details: https://strandsagents.com/docs/user-guide/quickstart/python/
 
+For an enhanced integration experience with AWS Strands, check out our dedicated connector:
+    https://github.com/twilio/twilio-agent-connect-aws
+
 Environment Variables:
     AWS_REGION - AWS Region (required)
     STRANDS_MODEL_ID - Bedrock model ID (required, e.g., us.amazon.nova-pro-v1:0)
