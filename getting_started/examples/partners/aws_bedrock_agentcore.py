@@ -87,14 +87,12 @@ async def handle_message_ready(
         # Process streaming response
         content = []
         if "text/event-stream" in response.get("contentType", ""):
-            # Handle streaming response
             for line_bytes in response["response"].iter_lines():
                 if line_bytes:
                     line = line_bytes.decode("utf-8")
                     if line.startswith("data: "):
-                        chunk_text = line[6:]  # Remove "data: " prefix
+                        chunk_text = line[6:]
                         if chunk_text and chunk_text != "[DONE]":
-                            # Parse JSON to extract token
                             try:
                                 data = json.loads(chunk_text)
                                 if isinstance(data, dict) and data.get("type") == "text":
@@ -102,7 +100,6 @@ async def handle_message_ready(
                                     if token:
                                         content.append(token)
                             except json.JSONDecodeError:
-                                # If not JSON, use raw text
                                 content.append(chunk_text)
 
         return "".join(content) if content else "No response from agent."

@@ -26,6 +26,7 @@ import os
 
 from dotenv import load_dotenv
 from strands import Agent
+from strands.session.file_session_manager import FileSessionManager
 
 from tac import TAC, TACConfig
 from tac.adapters import MemoryPromptBuilder
@@ -52,8 +53,8 @@ region = os.environ.get("AWS_REGION")
 if not region:
     raise ValueError("AWS_REGION environment variable is required")
 
-# Store agent instances per conversation
-conversation_agents: dict[str, Agent] = {}
+# Store session managers per conversation
+session_managers: dict[str, FileSessionManager] = {}
 
 
 async def handle_message_ready(
@@ -77,32 +78,38 @@ async def handle_message_ready(
     conv_id = context.conversation_id
 
     try:
-        # Create agent for this conversation (only once per conversation)
-        if conv_id not in conversation_agents:
-            # Compose system prompt with memory context
-            system_prompt = MemoryPromptBuilder.compose(
-                system_prompt=(
-                    "You are a customer service agent speaking with a user over voice or SMS. "
-                    "Keep responses short and conversational — a sentence or two. "
-                    "Do not use markdown, asterisks, bullets, or emojis; your words will be "
-                    "spoken aloud or sent as plain text."
-                ),
-                memory_response=memory_response,
-                context=context,
+        # Get or create session manager for this conversation
+        if conv_id not in session_managers:
+            session_managers[conv_id] = FileSessionManager(
+                session_id=conv_id,
+                storage_dir=".strands_sessions",
             )
 
-            conversation_agents[conv_id] = Agent(
-                model="us.amazon.nova-pro-v1:0",  # Use cross-region inference profile
-                system_prompt=system_prompt,
-            )
+        session_manager = session_managers[conv_id]
 
-        agent = conversation_agents[conv_id]
+        # Compose system prompt with memory context
+        system_prompt = MemoryPromptBuilder.compose(
+            system_prompt=(
+                "You are a customer service agent speaking with a user over voice or SMS. "
+                "Keep responses short and conversational — a sentence or two. "
+                "Do not use markdown, asterisks, bullets, or emojis; your words will be "
+                "spoken aloud or sent as plain text."
+            ),
+            memory_response=memory_response,
+            context=context,
+        )
 
-        # Call Strands agent (invoke_async for async compatibility)
+        # Create agent with session manager to maintain conversation history
+        agent = Agent(
+            model="us.amazon.nova-pro-v1:0",
+            system_prompt=system_prompt,
+            session_manager=session_manager,
+        )
+
+        # Call Strands agent
         result = await agent.invoke_async(user_message)
 
         # Extract response text from result
-        # result.message is a dict: {"role": "assistant", "content": [{"text": "..."}]}
         response_text = ""
         if result and hasattr(result, "message") and result.message:
             if isinstance(result.message, dict):

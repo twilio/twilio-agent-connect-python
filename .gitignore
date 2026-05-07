@@ -160,5 +160,8 @@ Desktop.ini
 *.swp
 *.swo
 
+# Strands session storage
+getting_started/examples/partners/.strands_sessions/
+
 # Local Makefile overrides
 Makefile.local
