@@ -294,37 +294,6 @@ class TestChatChannel:
             assert request.payload.channel_settings.channel_id == "CH_CHAT_SID_123"
 
     @pytest.mark.asyncio
-    async def test_send_response_forwards_chat_service_when_set(self) -> None:
-        """When TAC.conversations_v1_service_sid is cached, it's forwarded as
-        channelSettings.chatService on the Action request.
-
-        TODO(conv-orch): Drop this test when the chatService workaround is removed.
-        """
-        tac = TAC(get_test_config())
-        tac.conversations_v1_service_sid = "ISabcdef1234567890abcdef1234567890"
-        channel = ChatChannel(tac)
-
-        channel._conversations["CH123"] = ConversationSession(
-            conversation_id="CH123",
-            channel="chat",
-            author_info=AuthorInfo(address="user@example.com", participant_id="PA_USER"),
-            ai_agent_info=AuthorInfo(address="ai-assistant", participant_id="PA_AGENT"),
-            metadata={"channel_id": "CH_CHAT_SID_123"},
-        )
-
-        with patch.object(tac.conversation_orchestrator_client, "create_action") as mock_send:
-            await channel.send_response("CH123", "Hello!")
-
-            mock_send.assert_called_once()
-            request = mock_send.call_args[0][1]
-            assert request.payload.channel_settings is not None
-            assert (
-                request.payload.channel_settings.chat_service
-                == "ISabcdef1234567890abcdef1234567890"
-            )
-            assert request.payload.channel_settings.channel_id == "CH_CHAT_SID_123"
-
-    @pytest.mark.asyncio
     async def test_send_response_no_session(self) -> None:
         """Missing session → send_response raises (no conversation to reply to)."""
         tac = TAC(get_test_config())

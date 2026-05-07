@@ -136,15 +136,7 @@ class ChatChannel(MessagingChannel):
                 "session.metadata['channel_id'] explicitly in advanced usage."
             )
 
-        # TODO(conv-orch): Drop `chat_service` here once the Actions API resolves the
-        # V1 Chat service SID server-side. Conversation Orchestrator team confirmed this
-        # should not be required client-side; keep the workaround until the server-side fix ships.
-        # `channel_id` stays — it's a permanent per-conversation requirement.
-        chat_service_sid = self.tac.conversations_v1_service_sid
-        channel_settings = ActionChannelSettings(
-            channel_id=chat_channel_sid,
-            chat_service=chat_service_sid,
-        )
+        channel_settings = ActionChannelSettings(channel_id=chat_channel_sid)
 
         try:
             action_request = SendMessageActionRequest(
@@ -192,21 +184,11 @@ class ChatChannel(MessagingChannel):
         If an active conversation with the same addresses already exists
         (group-by dedup), CO returns 409 and the existing conversation is reused.
         """
-        chat_service_sid = self.tac.conversations_v1_service_sid
-        if not chat_service_sid:
-            raise RuntimeError(
-                "conversations_v1_service_sid is not set — the Conversation Orchestrator "
-                "configuration has no Conversations V1 bridge. Chat outbound requires it."
-            )
-
         return await self._initiate_messaging_conversation(
             options=options,
             from_address=self.agent_address,
             customer_address_kwargs={"channel_id": options.channel_id},
             agent_address_kwargs={"channel_id": options.channel_id},
             extra_metadata={"channel_id": options.channel_id},
-            channel_settings=ActionChannelSettings(
-                channel_id=options.channel_id,
-                chat_service=chat_service_sid,
-            ),
+            channel_settings=ActionChannelSettings(channel_id=options.channel_id),
         )

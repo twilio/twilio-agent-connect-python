@@ -93,18 +93,6 @@ class ParticipantAddress(BaseModel):
     model_config = {"populate_by_name": True}
 
 
-# TODO(conv-orch): Remove this class once the Actions API resolves the V1 Chat
-# service SID server-side. Currently used to extract `conversationsV1Bridge.serviceId`
-# from the Configuration so the chat channel can forward it as
-# channelSettings.chatService — drop together with the other TODO(conv-orch) sites.
-class ConversationsV1Bridge(BaseModel):
-    """Conversations V1 bridge settings on a ConversationConfiguration."""
-
-    service_id: str = Field(..., alias="serviceId", description="V1 Conversations service SID")
-
-    model_config = {"populate_by_name": True}
-
-
 class ConversationConfiguration(BaseModel):
     """Configuration settings for a conversation response."""
 
@@ -170,13 +158,6 @@ class ConversationConfiguration(BaseModel):
         alias="intelligenceConfigurationIds",
         max_length=5,
         description="List of Intelligence Configuration IDs for this configuration",
-    )
-    # TODO(conv-orch): Drop this field once the Actions API resolves the V1 Chat
-    # service SID server-side — see ConversationsV1Bridge above.
-    conversations_v1_bridge: ConversationsV1Bridge | None = Field(
-        None,
-        alias="conversationsV1Bridge",
-        description="V1 Conversations bridge (carries the V1 service SID)",
     )
     created_at: str | None = Field(
         None, alias="createdAt", description="Timestamp when this configuration was created"
@@ -494,14 +475,6 @@ class ActionChannelSettings(BaseModel):
         default=None,
         alias="channelId",
         description="Backend-specific channel identifier (e.g. V1 Chat channel SID)",
-    )
-    # TODO(conv-orch): Drop `chat_service` once the Actions API resolves the V1 Chat
-    # service SID server-side. Conversation Orchestrator team confirmed this should not be
-    # required client-side; keep the field until the server-side fix ships.
-    chat_service: str | None = Field(
-        default=None,
-        alias="chatService",
-        description="V1 Chat service SID (IS...); required by V1 Chat backend when channel=CHAT",
     )
 
     model_config = {"populate_by_name": True, "extra": "allow"}

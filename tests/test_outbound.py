@@ -310,7 +310,6 @@ def _mock_chat_outbound(
     channel_id: str = "CHSIDabc",
     reused: bool = False,
 ) -> None:
-    tac.conversations_v1_service_sid = "IStestchatservice"
     co = tac.conversation_orchestrator_client
     co.create_or_reuse_conversation = AsyncMock(return_value=(conv_id, reused))
     co.list_participants = AsyncMock(
