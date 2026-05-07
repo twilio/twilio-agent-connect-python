@@ -115,6 +115,30 @@ jobs:
           . .venv/bin/activate
           uv run pytest
 
+  secrets-scan:
+    name: Secret Detection
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          fetch-depth: 0  # Need history for detecting changed files
+
+      - name: Run gitleaks with SHA-pinned image
+        run: |
+          source .gitleaks/versions.env
+          echo "Using gitleaks image: $GITLEAKS_IMAGE"
+
+          # For PRs: scan commits in the PR
+          # For pushes to main: scan the single commit
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            SCAN_RANGE="${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}"
+          else
+            SCAN_RANGE="${{ github.event.before }}..${{ github.sha }}"
+          fi
+
+          docker run --rm -v "$(pwd):/repo" -w /repo "$GITLEAKS_IMAGE" \
+            detect --source="." --log-opts="$SCAN_RANGE" --no-git --verbose --redact
+
   build:
     name: Build Package
     runs-on: ubuntu-latest
@@ -157,7 +181,7 @@ jobs:
 
   all-checks:
     name: All Checks Passed
-    needs: [lint, type-check, test, build]
+    needs: [lint, type-check, test, build, secrets-scan]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -166,7 +190,8 @@ jobs:
           if [ "${{ needs.lint.result }}" != "success" ] || \
              [ "${{ needs['type-check'].result }}" != "success" ] || \
              [ "${{ needs.test.result }}" != "success" ] || \
-             [ "${{ needs.build.result }}" != "success" ]; then
+             [ "${{ needs.build.result }}" != "success" ] || \
+             [ "${{ needs['secrets-scan'].result }}" != "success" ]; then
             echo "One or more checks failed"
             exit 1
           fi

@@ -21,3 +21,11 @@ repos:
     hooks:
       - id: mypy
         additional_dependencies: [types-all]
+
+  - repo: local
+    hooks:
+      - id: gitleaks
+        name: gitleaks secret detection
+        entry: .gitleaks/run-gitleaks.sh
+        language: script
+        pass_filenames: false
