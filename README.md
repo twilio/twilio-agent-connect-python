@@ -45,34 +45,19 @@ Seamlessly integrate with Twilio Conversation Memory and Conversation Orchestrat
 - **Conversation Lifecycle**: Automatic tracking of conversation sessions and state
 - **Human Handoff**: Built-in tool to route conversations to human agents via Twilio Studio Flows (including Flex)
 
-## Get Started
-
-To get started, set up your Python environment (Python 3.10 or newer required), and then install TAC SDK package.
-
-### uv (Recommended)
-
-We recommend using [uv](https://docs.astral.sh/uv/) for the best development experience:
+## Installation
 
 ```bash
-uv init
-uv add git+https://github.com/twilio/twilio-agent-connect-python.git
-
-# Install with server support (includes FastAPI and uvicorn for TACFastAPIServer)
-uv add git+https://github.com/twilio/twilio-agent-connect-python.git --extra server
+pip install twilio-agent-connect
 ```
 
-### pip/venv (Alternative)
-
-If you prefer using pip and venv:
+For server support (includes FastAPI and uvicorn for TACFastAPIServer):
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-pip install git+https://github.com/twilio/twilio-agent-connect-python.git
-
-# Install with server support
-pip install "git+https://github.com/twilio/twilio-agent-connect-python.git[server]"
+pip install "twilio-agent-connect[server]"
 ```
+
+TAC requires **Python 3.10 or newer**.
 
 ## Quick Examples
 
@@ -101,7 +86,7 @@ Use the OpenAI adapter to automatically inject conversation memory and user cont
 First, install the required packages:
 
 ```bash
-uv add openai python-dotenv
+pip install openai python-dotenv
 ```
 
 > **Note**: `python-dotenv` is optional — TAC works with environment variables from any source (`.env` files, Docker, Kubernetes, CI/CD, shell exports, etc.).
