@@ -53,15 +53,9 @@ tac = TAC(config=TACConfig.from_env())
 voice_channel = VoiceChannel(tac, config=VoiceChannelConfig(memory_mode="always"))
 sms_channel = SMSChannel(tac, config=SMSChannelConfig(memory_mode="always"))
 
-# Get AWS region from environment
-region = os.environ.get("AWS_REGION")
-if not region:
-    raise ValueError("AWS_REGION environment variable is required")
-
-# Get model ID from environment
-model_id = os.environ.get("STRANDS_MODEL_ID")
-if not model_id:
-    raise ValueError("STRANDS_MODEL_ID environment variable is required")
+# Get AWS region and model ID from environment
+region = os.environ["AWS_REGION"]
+model_id = os.environ["STRANDS_MODEL_ID"]
 
 # Store session managers per conversation
 session_managers: dict[str, FileSessionManager] = {}
