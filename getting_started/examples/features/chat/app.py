@@ -51,9 +51,8 @@ tac = TAC(config=TACConfig.from_env())
 
 
 # Example-level setup check (not required by the SDK): the V1 Chat backend
-# behind this example needs a classic Conversations service attached to the CO
-# configuration. Enable it in Console → Conversation Orchestrator →
-# Conversation Configuration → Channel traffic → "+ Add messaging & chat traffic".
+# behind this example needs a classic Conversations service — with Chat enabled
+# on it — attached to the CO configuration.
 configuration_id = os.environ["TWILIO_CONVERSATION_CONFIGURATION_ID"]
 response = httpx.get(
     f"https://conversations.twilio.com/v2/ControlPlane/Configurations/{configuration_id}",
@@ -63,8 +62,8 @@ response.raise_for_status()
 if not (response.json().get("conversationsV1Bridge") or {}).get("serviceId"):
     sys.exit(
         f"Configuration '{configuration_id}' has no classic Conversations service attached. "
-        'Enable it in Console → Conversation Orchestrator → Conversation Configuration → '
-        'Channel traffic → "+ Add messaging & chat traffic".'
+        'Attach one (with Chat enabled) via Console → Conversation Orchestrator → '
+        'Conversation Configuration → Channel traffic → "+ Add messaging & chat traffic".'
     )
 
 # Override logging to DEBUG after TAC init (which resets it to config.log_level)
