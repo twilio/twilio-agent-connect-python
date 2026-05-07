@@ -33,7 +33,7 @@ logger = get_logger(__name__)
 tac = TAC(config=TACConfig.from_env())
 
 # Create channel handlers for Voice and SMS
-voice_channel = VoiceChannel(tac, config=VoiceChannelConfig(memory_mode="always"))
+voice_channel = VoiceChannel(tac, config=VoiceChannelConfig(memory_mode="once"))
 sms_channel = SMSChannel(tac, config=SMSChannelConfig(memory_mode="always"))
 
 # Initialize OpenAI client
