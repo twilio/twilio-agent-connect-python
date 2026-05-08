@@ -169,7 +169,7 @@ For detailed architecture and advanced usage, see [CLAUDE.md](https://github.com
 
 **Examples & Guides:**
 - **[Getting Started Guide](https://github.com/twilio/twilio-agent-connect-python/tree/main/getting_started/)** - Setup wizard, examples, and comprehensive documentation
-- **[Partner SDK Examples](https://github.com/twilio/twilio-agent-connect-python/tree/main/getting_started/examples/partners/)** - Integration examples for OpenAI, AWS Bedrock Agent, AWS Bedrock AgentCore, and AWS Strands
+- **[Partner SDK Examples](https://github.com/twilio/twilio-agent-connect-python/tree/main/getting_started/examples/partners/)** - Integration examples for OpenAI (Chat Completions, Responses API, Agents SDK), LangChain, AWS Bedrock Agent, AWS Bedrock AgentCore, and AWS Strands
 - **[ConversationRelay-Only Mode](https://github.com/twilio/twilio-agent-connect-python/blob/main/getting_started/examples/features/relay_only.py)** - Get started with voice using just ConversationRelay
 - More examples coming soon
 
