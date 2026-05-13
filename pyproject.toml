@@ -36,6 +36,12 @@ server = [
     "uvicorn[standard]>=0.32.0,<1",
     "python-multipart>=0.0.20,<1",
 ]
+telemetry = [
+    "opentelemetry-api>=1.30.0,<2.0.0",
+    "opentelemetry-sdk>=1.30.0,<2.0.0",
+    "opentelemetry-exporter-otlp-proto-http>=1.30.0,<2.0.0",
+    "langfuse>=4.6.1",
+]
 
 [dependency-groups]
 dev = [
@@ -100,6 +106,8 @@ select = [
     "N",   # pep8-naming
 ]
 
+[tool.ruff.lint.per-file-ignores]
+"getting_started/examples/**/*.py" = ["E402"]  # Allow module imports after code in examples
 
 [tool.ruff.lint.isort]
 known-first-party = ["tac"]

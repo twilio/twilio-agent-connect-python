@@ -1,3 +1,4 @@
+import time
 from typing import Any
 
 import httpx
@@ -76,6 +77,8 @@ class MemoryClient(BaseAPIClient):
         )
         request_payload = request_data.model_dump(by_alias=True, exclude_none=True)
 
+        start_time = time.time()
+
         try:
             # POST request with JSON body as per API spec
             async with self._get_client() as client:
@@ -90,10 +93,21 @@ class MemoryClient(BaseAPIClient):
                 data = response.json()
                 memory_response = MemoryRetrievalResponse(**data)
 
+                # Record successful API metrics
+                self._record_api_request("POST", start_time, status_code=response.status_code)
+
                 # Return full response with observations, summaries, sessions, and metadata
                 return memory_response
 
         except httpx.HTTPError as e:
+            # Extract status code if available
+            status_code = (
+                getattr(e.response, "status_code", None) if hasattr(e, "response") else None
+            )
+
+            # Record API metrics for error
+            self._record_api_request("POST", start_time, status_code=status_code, error=e)
+
             response_text = (
                 getattr(e.response, "text", "No response body")
                 if hasattr(e, "response")
@@ -109,6 +123,9 @@ class MemoryClient(BaseAPIClient):
             return MemoryRetrievalResponse()
 
         except Exception as e:
+            # Record metrics for general errors (no status code available)
+            self._record_api_request("POST", start_time, error=e)
+
             self.logger.error(f"Failed to parse Conversation Memory response: {e}")
             # Return empty response on parsing errors
             return MemoryRetrievalResponse()

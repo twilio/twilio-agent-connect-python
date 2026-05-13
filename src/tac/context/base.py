@@ -1,4 +1,5 @@
 import platform
+import time
 from enum import Enum
 
 import httpx
@@ -60,6 +61,14 @@ class BaseAPIClient:
         self._partner_package_version: str | None = None
         self.logger = get_logger(self.__class__.__name__)
 
+        # Initialize metrics client
+        try:
+            from tac.telemetry.metrics import MetricsClient
+
+            self._metrics = MetricsClient()
+        except ImportError:
+            self._metrics = None
+
     @staticmethod
     def _build_base_url(product: str, region: str | None) -> str:
         if region:
@@ -112,3 +121,77 @@ class BaseAPIClient:
             timeout=30.0,
             follow_redirects=True,
         )
+
+    def _record_api_request(
+        self,
+        method: str,
+        start_time: float,
+        status_code: int | None = None,
+        error: Exception | None = None,
+    ) -> None:
+        """Record API request metrics.
+
+        Args:
+            method: HTTP method (GET, POST, etc.)
+            start_time: Request start timestamp
+            status_code: HTTP response status code (if available)
+            error: Exception if request failed
+        """
+        if not self._metrics:
+            return
+
+        client_type = self.__class__.__name__.replace("Client", "").lower()
+        duration = time.time() - start_time
+
+        # Base attributes for all metrics
+        base_attrs = {"client_type": client_type, "method": method}
+
+        # 📊 Metric 7: API request count
+        self._metrics.api_request_count.add(1, attributes=base_attrs)
+
+        # 📊 Metric 8: API request duration
+        self._metrics.api_request_duration.record(duration, attributes=base_attrs)
+
+        # 📊 Metric 9: API error count
+        if error:
+            # Categorize error types to limit cardinality
+            error_category = self._categorize_error(error)
+            error_attrs = {**base_attrs, "error_type": error_category}
+
+            # Add status code if available (from HTTPError)
+            if status_code:
+                error_attrs["status_code"] = str(status_code)
+
+            self._metrics.api_error_count.add(1, attributes=error_attrs)
+
+    @staticmethod
+    def _categorize_error(error: Exception) -> str:
+        """Categorize errors to limit metric cardinality.
+
+        Args:
+            error: Exception to categorize
+
+        Returns:
+            Error category string
+        """
+        # HTTPError with status codes
+        if hasattr(error, "response") and hasattr(error.response, "status_code"):
+            status_code = error.response.status_code
+            if 400 <= status_code < 500:
+                return "http_4xx"
+            elif 500 <= status_code < 600:
+                return "http_5xx"
+
+        # Network errors
+        error_name = type(error).__name__
+        if "Timeout" in error_name or "timeout" in str(error).lower():
+            return "timeout"
+        if "Connect" in error_name or "connection" in str(error).lower():
+            return "connection"
+
+        # Validation/parsing errors
+        if "Validation" in error_name or "Parse" in error_name:
+            return "validation"
+
+        # Generic fallback
+        return "other"
