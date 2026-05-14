@@ -169,15 +169,10 @@ async def initiate_outbound(args: argparse.Namespace) -> None:
                 print("TWILIO_VOICE_PUBLIC_DOMAIN is required for voice calls.")
                 sys.exit(1)
 
-            # TwiML can be customized at two layers (merged per-field,
-            # highest precedence first):
-            #   - Per-call: pass `twiml_options=` here (used below for the
-            #     greeting, which varies per recipient/campaign, and the
-            #     action_url, which depends on the server's public domain).
-            #   - Channel-wide: set `twiml_options=` on VoiceChannelConfig
-            #     for settings that don't vary per call — voice, language,
-            #     interruptible, <Language> children, etc. Those apply to
-            #     both inbound and outbound calls.
+            # Per-call TwiML for outbound calls. Inbound's equivalent is
+            # `customize_twiml_options` on VoiceChannelConfig (see
+            # voice_twiml_customization.py). Use VoiceChannelConfig.twiml_options
+            # for settings that don't vary per call (voice, language, etc.).
             voice_result = await voice_channel.initiate_outbound_conversation(
                 InitiateVoiceConversationOptions(
                     to=args.to,
