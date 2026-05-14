@@ -1394,10 +1394,8 @@ class TestHandleIncomingCallMerge:
         assert "conv_configuration_test123" not in twiml
 
     @pytest.mark.asyncio
-    async def test_action_url_studio_handoff_when_flow_sid_set_and_no_callback_url(
-        self,
-    ) -> None:
-        """Studio handoff URL is the last-resort fallback when no callback URL is passed."""
+    async def test_studio_handoff_used_when_flow_sid_set(self) -> None:
+        """Studio handoff URL is used when configured and no higher layer set action_url."""
         flow_sid = "FW" + "a" * 32
         tac = TAC({**get_test_config(), "studio_handoff_flow_sid": flow_sid})
         channel = VoiceChannel(tac)
@@ -1411,9 +1409,11 @@ class TestHandleIncomingCallMerge:
         assert expected in twiml
 
     @pytest.mark.asyncio
-    async def test_callback_url_beats_studio_handoff(self) -> None:
-        """server_urls.action_url wins over Studio handoff so
-        relay-only session cleanup callbacks aren't silently swallowed."""
+    async def test_studio_handoff_beats_server_action_url(self) -> None:
+        """Studio handoff is a user-expressed intent (explicit config) and
+        wins over server_urls.action_url (the SDK's generated cleanup
+        default). Setting both is a user choice — if they want cleanup,
+        they don't set studio_handoff_flow_sid."""
         flow_sid = "FW" + "a" * 32
         tac = TAC({**get_test_config(), "studio_handoff_flow_sid": flow_sid})
         channel = VoiceChannel(tac)
@@ -1423,11 +1423,15 @@ class TestHandleIncomingCallMerge:
                 action_url="https://cleanup.example.com/end",
             ),
         )
-        assert 'action="https://cleanup.example.com/end"' in twiml
-        assert "webhooks.twilio.com" not in twiml
+        expected = (
+            f'action="https://webhooks.twilio.com/v1/Accounts/ACtest123'
+            f'/Flows/{flow_sid}?Trigger=incomingCall"'
+        )
+        assert expected in twiml
+        assert "cleanup.example.com" not in twiml
 
     @pytest.mark.asyncio
-    async def test_action_url_uses_callback_url(self) -> None:
+    async def test_action_url_uses_server_url(self) -> None:
         tac = TAC(get_test_config())
         channel = VoiceChannel(tac)
         twiml = await channel.handle_incoming_call(
@@ -1439,7 +1443,7 @@ class TestHandleIncomingCallMerge:
         assert 'action="https://fallback.example.com/end"' in twiml
 
     @pytest.mark.asyncio
-    async def test_action_url_omitted_when_no_callback_url(self) -> None:
+    async def test_action_url_omitted_when_no_server_url(self) -> None:
         tac = TAC(get_test_config())
         channel = VoiceChannel(tac)
         twiml = await channel.handle_incoming_call(
@@ -1448,9 +1452,9 @@ class TestHandleIncomingCallMerge:
         assert "action=" not in twiml
 
     @pytest.mark.asyncio
-    async def test_static_options_action_url_beats_callback_url(self) -> None:
-        """A static action_url on VoiceChannelConfig.twiml_options is treated as an
-        explicit user override and wins over the server's cleanup callback URL."""
+    async def test_static_options_action_url_beats_server_url(self) -> None:
+        """A static action_url on VoiceChannelConfig.twiml_options is an
+        explicit user override and wins over the server's cleanup URL."""
         from tac.channels.voice import VoiceChannelConfig
 
         tac = TAC(get_test_config())
@@ -1463,7 +1467,7 @@ class TestHandleIncomingCallMerge:
         twiml = await channel.handle_incoming_call(
             VoiceServerURLs(
                 websocket_url="wss://example.com/ws",
-                action_url="https://callback.example.com/end",
+                action_url="https://cleanup.example.com/end",
             ),
         )
         assert 'action="https://static.example.com/end"' in twiml

@@ -120,9 +120,9 @@ class VoiceChannel(BaseChannel):
         2. ``VoiceChannelConfig.twiml_options`` — static per-channel defaults.
         3. TAC defaults: ``welcome_greeting`` from ``VoiceChannelConfig``,
            ``conversation_configuration`` from ``TACConfig``, and ``action_url``
-           resolved via ``server_urls.action_url`` (set by the server in
-           relay-only mode for session cleanup), otherwise via Studio handoff
-           flow if ``studio_handoff_flow_sid`` is configured.
+           resolved via Studio handoff (when ``studio_handoff_flow_sid`` is
+           configured), else ``server_urls.action_url`` (the SDK-generated
+           session-cleanup default).
 
         Lists (``languages``) and nested models (``custom_parameters``) replace
         wholesale when set at a higher-priority layer.
@@ -179,12 +179,17 @@ class VoiceChannel(BaseChannel):
     ) -> str | None:
         """Resolve the TwiML ``<Connect action=...>`` URL.
 
-        Precedence: customizer → channel-static ``twiml_options`` →
-        ``server_urls.action_url`` → Studio handoff (if configured).
+        Precedence (highest to lowest):
+          1. customizer
+          2. channel-static ``twiml_options``
+          3. Studio handoff (when ``studio_handoff_flow_sid`` is configured)
+          4. ``server_urls.action_url`` (SDK-generated session-cleanup default)
 
-        The server-supplied URL beats Studio handoff because it is what drives
-        session cleanup in relay-only mode; leaking sessions is worse than
-        skipping the Studio flow for that call.
+        User-expressed intent (Studio handoff is configured explicitly on
+        ``TACConfig``) beats the SDK's generated cleanup default. If a user
+        sets both Studio handoff and runs in relay-only mode, Studio wins
+        for that call — the session-cleanup URL is skipped, same as if they
+        had set any other action_url via customizer or static options.
         """
         if (
             customized is not None
@@ -198,13 +203,13 @@ class VoiceChannel(BaseChannel):
             and self._static_twiml_options.action_url is not None
         ):
             return self._static_twiml_options.action_url
-        if server_urls.action_url is not None:
-            return server_urls.action_url
         if self.tac.config.studio_handoff_flow_sid:
             return studio_voice_handoff_url(
                 self.tac.config.account_sid,
                 self.tac.config.studio_handoff_flow_sid,
             )
+        if server_urls.action_url is not None:
+            return server_urls.action_url
         return None
 
     async def handle_conversation_relay_callback(

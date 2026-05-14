@@ -571,7 +571,10 @@ class TestTwiMLConnectAction:
         )
         assert expected in resp.text
 
-    def test_connect_action_omitted_when_no_handoff_flow(self) -> None:
+    def test_connect_action_uses_cleanup_url_when_no_handoff_flow(self) -> None:
+        """Without Studio handoff, action_url falls back to the server's
+        session-cleanup URL — no-op in orchestrated mode, drives cleanup in
+        relay-only mode."""
         client = self._build_server()  # no studio_handoff_flow_sid
         resp = client.post(  # type: ignore[attr-defined]
             "/twiml",
@@ -579,9 +582,7 @@ class TestTwiMLConnectAction:
         )
 
         assert resp.status_code == 200
-        # No action URL when no handoff flow configured (orchestrated mode)
-        assert "<Connect>" in resp.text
-        assert "action=" not in resp.text
+        assert 'action="https://test.ngrok.io/conversation-relay-callback"' in resp.text
 
 
 class TestSignatureValidation:

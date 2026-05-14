@@ -207,16 +207,10 @@ class TACFastAPIServer:
             @app.post(config.twiml_path, dependencies=[Depends(http_sig)])
             async def post_twiml(request: Request) -> Response:
                 """Generate TwiML for incoming voice calls."""
-                # action_url is the server's session-cleanup URL. Only pass it
-                # when there's no Conversation Orchestrator to clean up for us —
-                # otherwise leave action_url resolution to the channel so Studio
-                # handoff (when configured) isn't shadowed.
                 server_urls = VoiceServerURLs(
                     websocket_url=f"wss://{config.public_domain}{config.websocket_path}",
                     action_url=(
                         f"https://{config.public_domain}{config.conversation_relay_callback_path}"
-                        if not self.tac.is_orchestrator_enabled()
-                        else None
                     ),
                 )
 
