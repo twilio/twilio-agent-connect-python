@@ -75,8 +75,11 @@ class VoiceChannel(BaseChannel):
             config = VoiceChannelConfig()
 
         super().__init__(tac, memory_mode=config.memory_mode)
+        self.config = config
         self.session_manager = config.session_manager
-        self._resolve_twiml_options = config.resolve_twiml_options
+        self._welcome_greeting = config.welcome_greeting
+        self._static_twiml_options = config.twiml_options
+        self._customize_twiml_options = config.customize_twiml_options
         self._websocket_manager = WebSocketManager()
         self._twilio_client: Client | None = None
 
@@ -100,7 +103,7 @@ class VoiceChannel(BaseChannel):
 
     async def handle_incoming_call(
         self,
-        options: TwiMLOptions | dict[str, Any],
+        options: TwiMLOptions | dict[str, Any] | None = None,
         default_action_url: str | None = None,
         request_context: TwiMLRequestContext | None = None,
     ) -> str:
@@ -112,49 +115,60 @@ class VoiceChannel(BaseChannel):
 
         Merge precedence (highest to lowest):
 
-        1. Output of ``VoiceChannelConfig.resolve_twiml_options`` if configured and
-           ``request_context`` is given. Fields the resolver explicitly sets win.
+        1. Output of ``VoiceChannelConfig.customize_twiml_options`` if configured
+           and ``request_context`` is given. Fields it explicitly sets win.
         2. ``options`` supplied by the caller (typically the server's per-request
-           defaults — websocket URL, server ``welcome_greeting``).
-        3. TAC defaults: ``welcome_greeting``, ``conversation_configuration`` from
-           ``TACConfig``, and ``action_url`` resolved via Studio handoff flow if
-           ``studio_handoff_flow_sid`` is set, otherwise ``default_action_url``.
+           plumbing — websocket URL).
+        3. ``VoiceChannelConfig.twiml_options`` — static per-channel defaults.
+        4. TAC defaults: ``welcome_greeting`` from ``VoiceChannelConfig``,
+           ``conversation_configuration`` from ``TACConfig``, and ``action_url``
+           resolved via ``default_action_url`` if set, otherwise via Studio
+           handoff flow if ``studio_handoff_flow_sid`` is configured.
 
         Lists (``languages``) and nested models (``custom_parameters``) replace
         wholesale when set at a higher-priority layer.
 
         Args:
-            options: TwiML generation options (TwiMLOptions or dict).
-            default_action_url: Fallback ``action_url`` used when no layer sets one
-                and ``studio_handoff_flow_sid`` isn't configured.
-            request_context: Parsed Twilio webhook fields. Passed to the resolver
-                if one is configured on the channel.
+            options: TwiML generation options (TwiMLOptions or dict). Typically
+                used by the server to inject ``websocket_url``.
+            default_action_url: Fallback ``action_url`` used when no layer sets
+                one. When passed (e.g. by ``TACFastAPIServer`` in relay-only
+                mode for session cleanup), it takes precedence over Studio
+                handoff so the relay callback always fires.
+            request_context: Parsed Twilio webhook fields. Passed to the
+                customizer if one is configured on the channel.
 
         Returns:
             TwiML XML string for call connection
         """
         # Handle dict input (convert to TwiMLOptions)
-        if isinstance(options, dict):
+        if options is None:
+            options = TwiMLOptions()
+        elif isinstance(options, dict):
             options = TwiMLOptions(**options)
 
-        # Invoke the resolver if configured and we have a request context.
-        resolver_output: TwiMLOptions | None = None
-        if self._resolve_twiml_options is not None and request_context is not None:
-            resolver_output = await self._resolve_twiml_options(request_context)
+        # Invoke the customizer if configured and we have a request context.
+        customized: TwiMLOptions | None = None
+        if self._customize_twiml_options is not None and request_context is not None:
+            customized = await self._customize_twiml_options(request_context)
 
         # Start from TAC defaults.
         merged = TwiMLOptions(
-            welcome_greeting="Hello! How can I assist you today?",
+            welcome_greeting=self._welcome_greeting,
             conversation_configuration=self.tac.config.conversation_configuration_id,
-            action_url=self._resolve_action_url(options, resolver_output, default_action_url),
+            action_url=self._resolve_action_url(options, customized, default_action_url),
         )
 
-        # Overlay caller-supplied options (typically server per-request defaults).
+        # Overlay channel-static twiml_options.
+        if self._static_twiml_options is not None:
+            self._overlay_fields(merged, self._static_twiml_options)
+
+        # Overlay caller-supplied options (server per-request plumbing).
         self._overlay_fields(merged, options)
 
-        # Overlay resolver output (highest priority).
-        if resolver_output is not None:
-            self._overlay_fields(merged, resolver_output)
+        # Overlay customizer output (highest priority).
+        if customized is not None:
+            self._overlay_fields(merged, customized)
 
         return twiml.generate_twiml(merged)
 
@@ -172,27 +186,40 @@ class VoiceChannel(BaseChannel):
     def _resolve_action_url(
         self,
         options: TwiMLOptions,
-        resolver_output: TwiMLOptions | None,
+        customized: TwiMLOptions | None,
         default_action_url: str | None,
     ) -> str | None:
         """Resolve the TwiML ``<Connect action=...>`` URL.
 
-        Precedence: resolver → caller options → Studio handoff (if configured) → default.
+        Precedence: customizer → caller options → channel-static twiml_options
+        → ``default_action_url`` → Studio handoff (if configured).
+
+        ``default_action_url`` beats Studio handoff because the server passes it
+        for session cleanup in relay-only mode, and leaking sessions is worse
+        than skipping the Studio flow for that call.
         """
         if (
-            resolver_output is not None
-            and "action_url" in resolver_output.model_fields_set
-            and resolver_output.action_url is not None
+            customized is not None
+            and "action_url" in customized.model_fields_set
+            and customized.action_url is not None
         ):
-            return resolver_output.action_url
+            return customized.action_url
         if "action_url" in options.model_fields_set and options.action_url is not None:
             return options.action_url
+        if (
+            self._static_twiml_options is not None
+            and "action_url" in self._static_twiml_options.model_fields_set
+            and self._static_twiml_options.action_url is not None
+        ):
+            return self._static_twiml_options.action_url
+        if default_action_url is not None:
+            return default_action_url
         if self.tac.config.studio_handoff_flow_sid:
             return studio_voice_handoff_url(
                 self.tac.config.account_sid,
                 self.tac.config.studio_handoff_flow_sid,
             )
-        return default_action_url
+        return None
 
     async def handle_conversation_relay_callback(
         self,

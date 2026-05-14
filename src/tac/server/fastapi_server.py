@@ -84,9 +84,11 @@ class TACFastAPIServer:
           ``start()``.
         - To customize TwiML attributes (voice, language, transcription provider,
           interruption behavior, ``<Language>`` children, etc.) set a
-          ``resolve_twiml_options`` on ``VoiceChannelConfig``. The resolver
+          ``customize_twiml_options`` on ``VoiceChannelConfig``. The customizer
           receives a framework-neutral ``TwiMLRequestContext`` and returns a
           ``TwiMLOptions``; any field it explicitly sets overrides TAC defaults.
+          For same-on-every-call settings, set ``twiml_options`` on
+          ``VoiceChannelConfig`` directly.
 
     Example:
         from fastapi import FastAPI
@@ -116,6 +118,16 @@ class TACFastAPIServer:
         self.config = config or TACServerConfig.from_env()
         self.voice_channel = voice_channel
         self.messaging_channels: list[MessagingChannel] = messaging_channels or []
+
+        # Forward deprecated TACServerConfig.welcome_greeting to the voice channel
+        # if the channel wasn't given its own. Drop this forwarding when the
+        # field is removed from TACServerConfig.
+        if (
+            self.config.welcome_greeting is not None
+            and self.voice_channel is not None
+            and "welcome_greeting" not in self.voice_channel.config.model_fields_set
+        ):
+            self.voice_channel._welcome_greeting = self.config.welcome_greeting
 
         # Gather all channels that need webhook processing
         self.webhook_channels: list[BaseChannel] = []
@@ -207,13 +219,9 @@ class TACFastAPIServer:
                     else None
                 )
 
-                # Server-owned defaults: websocket URL and the welcome greeting from
-                # TACServerConfig. The channel applies TAC defaults under these, and
-                # any VoiceChannelConfig.resolve_twiml_options output over them.
-                options = TwiMLOptions(
-                    websocket_url=websocket_url,
-                    welcome_greeting=config.welcome_greeting,
-                )
+                # Server-owned plumbing: only websocket_url. Greeting and other
+                # TwiML attributes live on VoiceChannelConfig.
+                options = TwiMLOptions(websocket_url=websocket_url)
 
                 try:
                     form = await request.form()

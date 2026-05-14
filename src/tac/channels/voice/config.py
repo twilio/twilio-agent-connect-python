@@ -8,7 +8,7 @@ from tac.models.memory import MemoryMode
 from tac.models.voice import TwiMLOptions, TwiMLRequestContext
 from tac.session import SessionManager, ThreadSafeSessionManager
 
-TwiMLOptionsResolver = Callable[[TwiMLRequestContext], Awaitable[TwiMLOptions]]
+TwiMLOptionsCustomizer = Callable[[TwiMLRequestContext], Awaitable[TwiMLOptions]]
 
 
 class VoiceChannelConfig(BaseModel):
@@ -24,11 +24,18 @@ class VoiceChannelConfig(BaseModel):
             - "once": Retrieve memory once at conversation start with empty query and cache it.
                      Cache is invalidated when conversation becomes INACTIVE.
             - "never": Skip memory retrieval
-        resolve_twiml_options: Optional async callable that customizes the
-            ConversationRelay TwiML per call. Receives a framework-neutral
-            ``TwiMLRequestContext`` (parsed Twilio webhook fields) and returns
-            ``TwiMLOptions`` overrides. Fields the resolver explicitly sets
-            override TAC defaults; unset fields keep TAC's defaults.
+        welcome_greeting: Default greeting spoken at the start of every call.
+            Equivalent to setting ``twiml_options=TwiMLOptions(welcome_greeting=...)``
+            but shorter for the common case.
+        twiml_options: Static ``TwiMLOptions`` applied to every call (voice,
+            language, transcription provider, ``<Language>`` children, etc.).
+            Use this when the same ConversationRelay configuration is correct
+            for every call. For per-call customization see ``customize_twiml_options``.
+        customize_twiml_options: Optional async callable producing per-call
+            ``TwiMLOptions`` overrides. Receives a framework-neutral
+            ``TwiMLRequestContext`` (parsed Twilio webhook fields). Any field the
+            function explicitly sets wins over ``twiml_options`` and TAC defaults;
+            unset fields fall through.
     """
 
     model_config = {"arbitrary_types_allowed": True}
@@ -44,9 +51,19 @@ class VoiceChannelConfig(BaseModel):
         default="never",
         description="Memory retrieval mode for this channel",
     )
-    resolve_twiml_options: TwiMLOptionsResolver | None = Field(
+    welcome_greeting: str = Field(
+        default="Hello! How can I assist you today?",
+        description="Default greeting spoken at the start of every call. "
+        "Shortcut for TwiMLOptions(welcome_greeting=...).",
+    )
+    twiml_options: TwiMLOptions | None = Field(
         default=None,
-        description="Optional async callable returning TwiMLOptions overrides per call. "
-        "Receives a TwiMLRequestContext and returns TwiMLOptions; only fields explicitly "
-        "set on the returned options override TAC defaults.",
+        description="Static TwiMLOptions applied to every call. Use for same-on-every-call "
+        "configuration; use customize_twiml_options for per-call logic.",
+    )
+    customize_twiml_options: TwiMLOptionsCustomizer | None = Field(
+        default=None,
+        description="Optional async callable returning per-call TwiMLOptions overrides. "
+        "Receives a TwiMLRequestContext; only fields explicitly set on the returned "
+        "options override lower layers.",
     )

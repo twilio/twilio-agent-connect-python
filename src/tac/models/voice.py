@@ -204,7 +204,7 @@ class TwiMLRequestContext(BaseModel):
     """Framework-neutral view of the Twilio TwiML webhook form.
 
     Populated by ``TACFastAPIServer`` from the incoming Twilio webhook, then
-    passed to an optional ``resolve_twiml_options`` so the application can
+    passed to an optional ``customize_twiml_options`` so the application can
     produce per-call ``TwiMLOptions`` overrides without depending on FastAPI
     types.
     """

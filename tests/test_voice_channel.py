@@ -1437,19 +1437,33 @@ class TestHandleIncomingCallMerge:
         assert 'action="https://caller.example.com/end"' in twiml
 
     @pytest.mark.asyncio
-    async def test_action_url_studio_handoff_when_flow_sid_set(self) -> None:
+    async def test_action_url_studio_handoff_when_flow_sid_set_and_no_default(self) -> None:
+        """Studio handoff URL is the last-resort fallback when no default is passed."""
         flow_sid = "FW" + "a" * 32
         tac = TAC({**get_test_config(), "studio_handoff_flow_sid": flow_sid})
         channel = VoiceChannel(tac)
         twiml = await channel.handle_incoming_call(
             options={"websocket_url": "wss://example.com/ws"},
-            default_action_url="https://ignored.example.com/end",
         )
         expected = (
             f'action="https://webhooks.twilio.com/v1/Accounts/ACtest123'
             f'/Flows/{flow_sid}?Trigger=incomingCall"'
         )
         assert expected in twiml
+
+    @pytest.mark.asyncio
+    async def test_default_action_url_beats_studio_handoff(self) -> None:
+        """default_action_url wins over Studio handoff so relay-only session cleanup
+        callbacks aren't silently swallowed by a configured Studio flow."""
+        flow_sid = "FW" + "a" * 32
+        tac = TAC({**get_test_config(), "studio_handoff_flow_sid": flow_sid})
+        channel = VoiceChannel(tac)
+        twiml = await channel.handle_incoming_call(
+            options={"websocket_url": "wss://example.com/ws"},
+            default_action_url="https://cleanup.example.com/end",
+        )
+        assert 'action="https://cleanup.example.com/end"' in twiml
+        assert "webhooks.twilio.com" not in twiml
 
     @pytest.mark.asyncio
     async def test_action_url_falls_back_to_default(self) -> None:
@@ -1471,23 +1485,71 @@ class TestHandleIncomingCallMerge:
         assert "action=" not in twiml
 
 
-class TestTwiMLOptionsResolver:
-    """Resolver layer runs on top of caller-supplied options and TAC defaults."""
+class TestStaticTwiMLOptions:
+    """VoiceChannelConfig.twiml_options applies to every call without a callback."""
 
     @pytest.mark.asyncio
-    async def test_resolver_skipped_without_request_context(self) -> None:
+    async def test_static_options_applied(self) -> None:
+        from tac.channels.voice import VoiceChannelConfig
+
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(
+            tac,
+            config=VoiceChannelConfig(
+                twiml_options=TwiMLOptions(voice="en-US-Journey-D", language="en-US"),
+            ),
+        )
+        twiml = await channel.handle_incoming_call(
+            options={"websocket_url": "wss://example.com/ws"},
+        )
+        assert 'voice="en-US-Journey-D"' in twiml
+        assert 'language="en-US"' in twiml
+
+    @pytest.mark.asyncio
+    async def test_welcome_greeting_shortcut(self) -> None:
+        from tac.channels.voice import VoiceChannelConfig
+
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac, config=VoiceChannelConfig(welcome_greeting="Bonjour!"))
+        twiml = await channel.handle_incoming_call(
+            options={"websocket_url": "wss://example.com/ws"},
+        )
+        assert 'welcomeGreeting="Bonjour!"' in twiml
+
+    @pytest.mark.asyncio
+    async def test_caller_options_beat_static(self) -> None:
+        from tac.channels.voice import VoiceChannelConfig
+
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(
+            tac,
+            config=VoiceChannelConfig(
+                twiml_options=TwiMLOptions(voice="en-US-Journey-D"),
+            ),
+        )
+        twiml = await channel.handle_incoming_call(
+            options={"websocket_url": "wss://example.com/ws", "voice": "es-MX-Neural2-A"},
+        )
+        assert 'voice="es-MX-Neural2-A"' in twiml
+
+
+class TestCustomizeTwiMLOptions:
+    """Per-call customizer runs on top of static options and TAC defaults."""
+
+    @pytest.mark.asyncio
+    async def test_customizer_skipped_without_request_context(self) -> None:
         from tac.channels.voice import VoiceChannelConfig
         from tac.models.voice import TwiMLRequestContext
 
         called = False
 
-        async def resolver(ctx: TwiMLRequestContext) -> TwiMLOptions:
+        async def customizer(ctx: TwiMLRequestContext) -> TwiMLOptions:
             nonlocal called
             called = True
             return TwiMLOptions(voice="en-US-Journey-D")
 
         tac = TAC(get_test_config())
-        channel = VoiceChannel(tac, config=VoiceChannelConfig(resolve_twiml_options=resolver))
+        channel = VoiceChannel(tac, config=VoiceChannelConfig(customize_twiml_options=customizer))
         twiml = await channel.handle_incoming_call(
             options={"websocket_url": "wss://example.com/ws"},
         )
@@ -1495,18 +1557,18 @@ class TestTwiMLOptionsResolver:
         assert "voice=" not in twiml
 
     @pytest.mark.asyncio
-    async def test_resolver_invoked_with_request_context(self) -> None:
+    async def test_customizer_invoked_with_request_context(self) -> None:
         from tac.channels.voice import VoiceChannelConfig
         from tac.models.voice import TwiMLRequestContext
 
         seen: dict[str, TwiMLRequestContext] = {}
 
-        async def resolver(ctx: TwiMLRequestContext) -> TwiMLOptions:
+        async def customizer(ctx: TwiMLRequestContext) -> TwiMLOptions:
             seen["ctx"] = ctx
             return TwiMLOptions(voice="en-US-Journey-D", interruptible="speech")
 
         tac = TAC(get_test_config())
-        channel = VoiceChannel(tac, config=VoiceChannelConfig(resolve_twiml_options=resolver))
+        channel = VoiceChannel(tac, config=VoiceChannelConfig(customize_twiml_options=customizer))
         ctx = TwiMLRequestContext(from_number="+14155551234", caller_country="US")
         twiml = await channel.handle_incoming_call(
             options={"websocket_url": "wss://example.com/ws"},
@@ -1517,64 +1579,68 @@ class TestTwiMLOptionsResolver:
         assert 'interruptible="speech"' in twiml
 
     @pytest.mark.asyncio
-    async def test_resolver_output_beats_caller_options(self) -> None:
+    async def test_customizer_output_beats_static(self) -> None:
         from tac.channels.voice import VoiceChannelConfig
         from tac.models.voice import TwiMLRequestContext
 
-        async def resolver(ctx: TwiMLRequestContext) -> TwiMLOptions:
-            return TwiMLOptions(welcome_greeting="Hola!")
+        async def customizer(ctx: TwiMLRequestContext) -> TwiMLOptions:
+            return TwiMLOptions(voice="es-MX-Neural2-A")
 
         tac = TAC(get_test_config())
-        channel = VoiceChannel(tac, config=VoiceChannelConfig(resolve_twiml_options=resolver))
+        channel = VoiceChannel(
+            tac,
+            config=VoiceChannelConfig(
+                twiml_options=TwiMLOptions(voice="en-US-Journey-D"),
+                customize_twiml_options=customizer,
+            ),
+        )
         twiml = await channel.handle_incoming_call(
-            options={
-                "websocket_url": "wss://example.com/ws",
-                "welcome_greeting": "Server default",
-            },
+            options={"websocket_url": "wss://example.com/ws"},
             request_context=TwiMLRequestContext(),
         )
-        # Resolver's value wins.
-        assert 'welcomeGreeting="Hola!"' in twiml
+        assert 'voice="es-MX-Neural2-A"' in twiml
 
     @pytest.mark.asyncio
-    async def test_resolver_unset_fields_keep_caller_options(self) -> None:
+    async def test_customizer_unset_fields_keep_lower_layers(self) -> None:
         from tac.channels.voice import VoiceChannelConfig
         from tac.models.voice import TwiMLRequestContext
 
-        async def resolver(ctx: TwiMLRequestContext) -> TwiMLOptions:
+        async def customizer(ctx: TwiMLRequestContext) -> TwiMLOptions:
             return TwiMLOptions(voice="en-US-Journey-D")
 
         tac = TAC(get_test_config())
-        channel = VoiceChannel(tac, config=VoiceChannelConfig(resolve_twiml_options=resolver))
+        channel = VoiceChannel(
+            tac,
+            config=VoiceChannelConfig(
+                welcome_greeting="Channel default",
+                customize_twiml_options=customizer,
+            ),
+        )
         twiml = await channel.handle_incoming_call(
-            options={
-                "websocket_url": "wss://example.com/ws",
-                "welcome_greeting": "Server default",
-            },
+            options={"websocket_url": "wss://example.com/ws"},
             request_context=TwiMLRequestContext(),
         )
-        # Resolver didn't set welcome_greeting; server's default survives.
-        assert 'welcomeGreeting="Server default"' in twiml
-        # Resolver's voice still wins where it did set.
+        # Customizer didn't set welcome_greeting; channel default survives.
+        assert 'welcomeGreeting="Channel default"' in twiml
         assert 'voice="en-US-Journey-D"' in twiml
 
     @pytest.mark.asyncio
-    async def test_resolver_action_url_wins_over_studio_handoff(self) -> None:
+    async def test_customizer_action_url_wins_over_studio_handoff(self) -> None:
         from tac.channels.voice import VoiceChannelConfig
         from tac.models.voice import TwiMLRequestContext
 
         flow_sid = "FW" + "a" * 32
 
-        async def resolver(ctx: TwiMLRequestContext) -> TwiMLOptions:
-            return TwiMLOptions(action_url="https://resolver.example.com/end")
+        async def customizer(ctx: TwiMLRequestContext) -> TwiMLOptions:
+            return TwiMLOptions(action_url="https://customizer.example.com/end")
 
         tac = TAC({**get_test_config(), "studio_handoff_flow_sid": flow_sid})
-        channel = VoiceChannel(tac, config=VoiceChannelConfig(resolve_twiml_options=resolver))
+        channel = VoiceChannel(tac, config=VoiceChannelConfig(customize_twiml_options=customizer))
         twiml = await channel.handle_incoming_call(
             options={"websocket_url": "wss://example.com/ws"},
             request_context=TwiMLRequestContext(),
         )
-        assert 'action="https://resolver.example.com/end"' in twiml
+        assert 'action="https://customizer.example.com/end"' in twiml
 
 
 class TestConversationInitializationFlow:

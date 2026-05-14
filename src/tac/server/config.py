@@ -1,8 +1,9 @@
 """Configuration for TAC server implementations."""
 
 import os
+import warnings
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class TACServerConfig(BaseModel):
@@ -17,10 +18,23 @@ class TACServerConfig(BaseModel):
     public_domain: str = Field(
         default="", description="Public domain for WebSocket URL (e.g., 'example.ngrok.io')"
     )
-    welcome_greeting: str = Field(
-        default="Hello! How can I assist you today?",
-        description="Initial greeting message for callers",
+    welcome_greeting: str | None = Field(
+        default=None,
+        description="DEPRECATED: set welcome_greeting on VoiceChannelConfig instead. "
+        "When set here, it is forwarded to the voice channel as a default; it will be "
+        "removed in a future release.",
     )
+
+    @model_validator(mode="after")
+    def _warn_deprecated_welcome_greeting(self) -> "TACServerConfig":
+        if self.welcome_greeting is not None:
+            warnings.warn(
+                "TACServerConfig.welcome_greeting is deprecated and will be removed "
+                "in a future release. Set welcome_greeting on VoiceChannelConfig instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        return self
 
     conversation_webhook_path: str = Field(
         default="/webhook", description="Path for conversation webhook endpoint (for all channels)"

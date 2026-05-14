@@ -1,18 +1,19 @@
 """
 Feature: Per-call TwiML customization
 
-Demonstrates using ``VoiceChannelConfig.resolve_twiml_options`` to tailor the
-ConversationRelay TwiML on every incoming voice call. The resolver receives a
-``TwiMLRequestContext`` parsed from the Twilio webhook (``From``, ``To``,
-``CallerCountry``, etc.) and returns ``TwiMLOptions`` overrides. Any field the
-resolver explicitly sets replaces TAC's default; everything else (websocket
-URL, ``action_url``, ``conversation_configuration``, welcome greeting)
-continues to come from TAC/server config.
+Demonstrates using ``VoiceChannelConfig.customize_twiml_options`` to tailor the
+ConversationRelay TwiML on every incoming voice call. The customizer receives a
+framework-neutral ``TwiMLRequestContext`` parsed from the Twilio webhook
+(``From``, ``To``, ``CallerCountry``, etc.) and returns ``TwiMLOptions``
+overrides. Any field it explicitly sets replaces TAC's defaults; everything
+else (websocket URL, ``action_url``, ``conversation_configuration``) continues
+to come from TAC config.
+
+For same-on-every-call customization, set ``twiml_options`` on
+``VoiceChannelConfig`` directly — no function needed.
 
 This example picks voice and language based on the caller's country and adds
-``<Language>`` children so the caller can switch mid-call. For static
-customization (same settings on every call), return constant ``TwiMLOptions``
-from the resolver — no request inspection needed.
+``<Language>`` children so the caller can switch mid-call.
 """
 
 from dotenv import load_dotenv
@@ -40,7 +41,7 @@ async def handle_message_ready(
 tac.on_message_ready(handle_message_ready)
 
 
-async def resolve_twiml(ctx: TwiMLRequestContext) -> TwiMLOptions:
+async def customize_twiml(ctx: TwiMLRequestContext) -> TwiMLOptions:
     """Return TwiMLOptions overrides for this incoming call.
 
     Only set the fields you want to override — TAC fills in the rest
@@ -74,7 +75,9 @@ async def resolve_twiml(ctx: TwiMLRequestContext) -> TwiMLOptions:
     )
 
 
-voice_channel = VoiceChannel(tac, config=VoiceChannelConfig(resolve_twiml_options=resolve_twiml))
+voice_channel = VoiceChannel(
+    tac, config=VoiceChannelConfig(customize_twiml_options=customize_twiml)
+)
 
 
 if __name__ == "__main__":

@@ -35,7 +35,7 @@ class TestTACServerConfig:
         assert config.host == "0.0.0.0"
         assert config.port == 8000
         assert config.public_domain == "example.ngrok.io"
-        assert config.welcome_greeting == "Hello! How can I assist you today?"
+        assert config.welcome_greeting is None
         assert config.conversation_webhook_path == "/webhook"
         assert config.twiml_path == "/twiml"
         assert config.websocket_path == "/ws"
@@ -793,10 +793,10 @@ class TestSignatureValidation:
                 pass
 
 
-class TestTwiMLResolverEndToEnd:
-    """Smoke test: server parses Twilio form and channel resolver shapes TwiML."""
+class TestTwiMLCustomizerEndToEnd:
+    """Smoke test: server parses Twilio form and channel customizer shapes TwiML."""
 
-    def test_resolver_on_voice_channel_receives_parsed_context_and_overrides_twiml(
+    def test_customizer_on_voice_channel_receives_parsed_context_and_overrides_twiml(
         self,
     ) -> None:
         from fastapi.testclient import TestClient
@@ -807,12 +807,12 @@ class TestTwiMLResolverEndToEnd:
 
         captured: dict[str, TwiMLRequestContext] = {}
 
-        async def resolver(ctx: TwiMLRequestContext) -> TwiMLOptions:
+        async def customizer(ctx: TwiMLRequestContext) -> TwiMLOptions:
             captured["ctx"] = ctx
             return TwiMLOptions(voice="en-US-Journey-D", language="en-US")
 
         tac = TAC(get_test_config())
-        vc = VoiceChannel(tac, config=VoiceChannelConfig(resolve_twiml_options=resolver))
+        vc = VoiceChannel(tac, config=VoiceChannelConfig(customize_twiml_options=customizer))
         server = TACFastAPIServer(
             tac=tac,
             config=TACServerConfig(public_domain="test.ngrok.io"),
@@ -832,13 +832,56 @@ class TestTwiMLResolverEndToEnd:
             headers={"X-Twilio-Signature": signature},
         )
         assert resp.status_code == 200
-        # Resolver saw the parsed context with known fields + extras.
         ctx = captured["ctx"]
         assert ctx.from_number == "+14155551234"
         assert ctx.caller_country == "US"
         assert ctx.extra == {"ApiVersion": "2010-04-01"}
-        # Resolver output flowed through to TwiML; server defaults still present.
         body = resp.text
         assert 'voice="en-US-Journey-D"' in body
         assert 'language="en-US"' in body
         assert 'url="wss://test.ngrok.io/ws"' in body
+
+
+class TestDeprecatedWelcomeGreetingForwarding:
+    """TACServerConfig.welcome_greeting is deprecated; verify it still reaches the channel."""
+
+    def test_deprecated_field_emits_warning(self) -> None:
+        with pytest.warns(DeprecationWarning, match="welcome_greeting"):
+            TACServerConfig(public_domain="test.ngrok.io", welcome_greeting="Legacy!")
+
+    def test_forwarded_when_channel_did_not_set_greeting(self) -> None:
+        from fastapi.testclient import TestClient
+
+        from tac.channels.voice import VoiceChannel
+        from tac.server import TACFastAPIServer
+
+        tac = TAC(get_test_config())
+        vc = VoiceChannel(tac)  # no welcome_greeting on channel
+        with pytest.warns(DeprecationWarning):
+            server_config = TACServerConfig(
+                public_domain="test.ngrok.io", welcome_greeting="Legacy!"
+            )
+        server = TACFastAPIServer(tac=tac, config=server_config, voice_channel=vc)
+        client = TestClient(server.app)
+        signature = compute_signature("http://testserver/twiml")
+        resp = client.post("/twiml", headers={"X-Twilio-Signature": signature})
+        assert 'welcomeGreeting="Legacy!"' in resp.text
+
+    def test_channel_greeting_wins_over_deprecated_server_field(self) -> None:
+        from fastapi.testclient import TestClient
+
+        from tac.channels.voice import VoiceChannel, VoiceChannelConfig
+        from tac.server import TACFastAPIServer
+
+        tac = TAC(get_test_config())
+        vc = VoiceChannel(tac, config=VoiceChannelConfig(welcome_greeting="Channel!"))
+        with pytest.warns(DeprecationWarning):
+            server_config = TACServerConfig(
+                public_domain="test.ngrok.io", welcome_greeting="Legacy!"
+            )
+        server = TACFastAPIServer(tac=tac, config=server_config, voice_channel=vc)
+        client = TestClient(server.app)
+        signature = compute_signature("http://testserver/twiml")
+        resp = client.post("/twiml", headers={"X-Twilio-Signature": signature})
+        assert 'welcomeGreeting="Channel!"' in resp.text
+        assert "Legacy!" not in resp.text
