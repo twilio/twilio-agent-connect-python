@@ -173,6 +173,11 @@ class VoiceChannel(BaseChannel):
     def _overlay_fields(target: TwiMLOptions, source: TwiMLOptions) -> None:
         """Apply fields explicitly set on ``source`` onto ``target``.
 
+        Nested models (``custom_parameters``) and lists (``languages``,
+        ``extra``) replace wholesale — there's no per-key merging. If you add
+        a field that should merge (e.g. a dict of headers), special-case it
+        here instead of getting the default overwrite behavior.
+
         ``action_url`` is handled separately by ``_resolve_action_url``.
         """
         for field in source.model_fields_set:

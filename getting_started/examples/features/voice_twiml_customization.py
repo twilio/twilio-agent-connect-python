@@ -1,14 +1,15 @@
 """
 Feature: ConversationRelay TwiML customization
 
-TAC exposes two layers of TwiML customization on VoiceChannelConfig:
+TAC exposes two user-facing layers of TwiML customization on
+VoiceChannelConfig (under these, TAC fills in the websocket URL, action URL,
+conversation_configuration, and a default welcome greeting):
 
 1. ``twiml_options`` — static TwiMLOptions applied to every call.
 2. ``customize_twiml_options`` — async callable for per-call logic, receives
    a TwiMLRequest (parsed Twilio webhook fields: From, To, CallerCountry, …).
 
-The customizer wins over static options, and TAC fills anything you didn't
-set (websocket URL, action URL, conversation_configuration).
+The customizer wins over static options, which win over TAC defaults.
 
 This example shows the static path (voice + language the same for every
 call). The customizer version for per-call localization is below in a

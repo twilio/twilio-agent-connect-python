@@ -36,7 +36,7 @@ class VoiceChannelConfig(BaseModel):
             unset fields fall through.
     """
 
-    model_config = {"arbitrary_types_allowed": True}
+    model_config = {"arbitrary_types_allowed": True, "extra": "forbid"}
 
     session_manager: SessionManager | None = Field(
         default_factory=ThreadSafeSessionManager,
