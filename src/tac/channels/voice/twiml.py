@@ -5,7 +5,22 @@ from typing import Any
 from pydantic import BaseModel
 from twilio.twiml.voice_response import VoiceResponse
 
+from tac.core.logging import get_logger
 from tac.models.voice import TwiMLOptions
+
+logger = get_logger(__name__)
+
+_OPTIONAL_RELAY_ATTRS = (
+    "welcome_greeting",
+    "conversation_configuration",
+    "voice",
+    "language",
+    "transcription_provider",
+    "tts_provider",
+    "interruptible",
+    "dtmf_detection",
+    "debug",
+)
 
 
 def generate_twiml(
@@ -23,10 +38,9 @@ def generate_twiml(
     Args:
         websocket_url: Public WebSocket URL for ConversationRelay
             (e.g. ``'wss://example.ngrok.app/ws'``).
-        options: Optional ``TwiMLOptions`` (or dict) with any combination of
-            custom_parameters, welcome_greeting, action_url,
-            conversation_configuration, voice, language, transcription_provider,
-            tts_provider, interruptible, dtmf_detection, debug, or languages.
+        options: Optional ``TwiMLOptions`` (or dict). See ``TwiMLOptions``
+            for supported fields. Newly-added ConversationRelay attributes
+            not yet typed on the model can be passed via ``extra``.
 
     Returns:
         TwiML XML string ready to return to Twilio.
@@ -56,21 +70,21 @@ def generate_twiml(
     # Build ConversationRelay kwargs. The twilio SDK converts snake_case to
     # camelCase automatically, and serializes bool/str as TwiML attribute values.
     relay_kwargs: dict[str, Any] = {"url": websocket_url}
-    optional_attrs = (
-        "welcome_greeting",
-        "conversation_configuration",
-        "voice",
-        "language",
-        "transcription_provider",
-        "tts_provider",
-        "interruptible",
-        "dtmf_detection",
-        "debug",
-    )
-    for attr in optional_attrs:
+    for attr in _OPTIONAL_RELAY_ATTRS:
         value = getattr(options, attr)
         if value is not None:
             relay_kwargs[attr] = value
+
+    if options.extra:
+        typed_keys = set(_OPTIONAL_RELAY_ATTRS)
+        for key, value in options.extra.items():
+            if key in typed_keys:
+                logger.warning(
+                    "TwiMLOptions.extra shadows a typed field; typed field wins.",
+                    shadowed_key=key,
+                )
+                continue
+            relay_kwargs[key] = value
 
     relay = connect.conversation_relay(**relay_kwargs)
 

@@ -216,6 +216,13 @@ class TwiMLOptions(BaseModel):
     languages: list[LanguageConfig] | None = Field(
         None, description="Additional <Language> children for multi-language support"
     )
+    extra: dict[str, str | bool | int] | None = Field(
+        None,
+        description="Escape hatch for ConversationRelay attributes not yet typed on "
+        "this model. Keys are emitted as-is on <ConversationRelay>; Twilio's SDK "
+        "converts snake_case to camelCase. Prefer a typed field when one exists — "
+        "use ``extra`` only for newly-added Twilio attributes not yet in this SDK.",
+    )
 
     model_config = {"populate_by_name": True}
 

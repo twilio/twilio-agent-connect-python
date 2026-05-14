@@ -1363,6 +1363,50 @@ class TestGenerateTwiMLConversationRelayAttrs:
             assert attr not in twiml
 
 
+class TestTwiMLOptionsExtra:
+    """`extra` lets users pass through ConversationRelay attributes not yet typed."""
+
+    def test_extra_attrs_emitted(self) -> None:
+        twiml = generate_twiml(
+            "wss://example.com/ws",
+            TwiMLOptions(extra={"future_feature": "on", "another_attr": True}),
+        )
+        # Twilio SDK snake_case → camelCase
+        assert 'futureFeature="on"' in twiml
+        assert 'anotherAttr="true"' in twiml
+
+    def test_extra_does_not_shadow_typed_field(self, caplog: pytest.LogCaptureFixture) -> None:
+        """If a user puts a typed-field name in extra, the typed value wins and
+        a warning is logged."""
+        import logging
+
+        # TAC's setup_logging (called from TAC()) sets propagate=False on the
+        # "tac" logger so pytest's caplog doesn't see its records. Flip it for
+        # this test and restore after.
+        tac_logger = logging.getLogger("tac")
+        original_propagate = tac_logger.propagate
+        tac_logger.propagate = True
+        try:
+            with caplog.at_level("WARNING"):
+                twiml = generate_twiml(
+                    "wss://example.com/ws",
+                    TwiMLOptions(
+                        voice="en-US-Journey-D",
+                        extra={"voice": "should-not-appear"},
+                    ),
+                )
+        finally:
+            tac_logger.propagate = original_propagate
+        assert 'voice="en-US-Journey-D"' in twiml
+        assert "should-not-appear" not in twiml
+        assert any("shadows a typed field" in r.message for r in caplog.records)
+
+    def test_extra_none_emits_nothing(self) -> None:
+        twiml = generate_twiml("wss://example.com/ws", TwiMLOptions())
+        # Sanity: no trailing garbage from extra handling when it's unset.
+        assert "<ConversationRelay url=" in twiml
+
+
 class TestHandleIncomingCallMerge:
     """Merge layers: customizer → static twiml_options → TAC defaults."""
 
