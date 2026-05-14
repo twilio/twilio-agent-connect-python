@@ -3,8 +3,11 @@
 from tac.models.voice import (
     CustomParameters,
     InterruptMessage,
+    LanguageConfig,
     PromptMessage,
     SetupMessage,
+    TwiMLOptions,
+    TwiMLRequestContext,
 )
 
 
@@ -212,3 +215,73 @@ class TestVoiceMessageAliases:
 
         assert msg.utterance_until_interrupt == "Test utterance"
         assert msg.duration_until_interrupt_ms == 2000
+
+
+class TestTwiMLRequestContext:
+    """TwiMLRequestContext parses Twilio webhook form fields."""
+
+    def test_from_form_known_fields(self) -> None:
+        ctx = TwiMLRequestContext.from_form(
+            {
+                "From": "+14155551234",
+                "To": "+15551234567",
+                "CallSid": "CA" + "1" * 32,
+                "CallerCountry": "US",
+                "CallerState": "CA",
+                "CallerCity": "San Francisco",
+                "Direction": "inbound",
+            }
+        )
+        assert ctx.from_number == "+14155551234"
+        assert ctx.to_number == "+15551234567"
+        assert ctx.call_sid == "CA" + "1" * 32
+        assert ctx.caller_country == "US"
+        assert ctx.caller_state == "CA"
+        assert ctx.caller_city == "San Francisco"
+        assert ctx.direction == "inbound"
+        assert ctx.extra == {}
+
+    def test_from_form_unknown_fields_bucketed_into_extra(self) -> None:
+        ctx = TwiMLRequestContext.from_form(
+            {
+                "From": "+14155551234",
+                "ApiVersion": "2010-04-01",
+                "ForwardedFrom": "+15559999999",
+            }
+        )
+        assert ctx.from_number == "+14155551234"
+        assert ctx.extra == {
+            "ApiVersion": "2010-04-01",
+            "ForwardedFrom": "+15559999999",
+        }
+
+    def test_from_form_empty(self) -> None:
+        ctx = TwiMLRequestContext.from_form({})
+        assert ctx.from_number is None
+        assert ctx.extra == {}
+
+
+class TestTwiMLOptionsFieldsSet:
+    """Merge semantics rely on Pydantic's model_fields_set."""
+
+    def test_unset_scalar_fields_are_none(self) -> None:
+        options = TwiMLOptions(websocket_url="wss://x")
+        assert options.voice is None
+        assert "voice" not in options.model_fields_set
+
+    def test_explicitly_set_fields_tracked(self) -> None:
+        options = TwiMLOptions(
+            websocket_url="wss://x",
+            voice="en-US-Journey-D",
+            dtmf_detection=False,
+        )
+        assert "voice" in options.model_fields_set
+        assert "dtmf_detection" in options.model_fields_set
+        # Unset fields not tracked
+        assert "interruptible" not in options.model_fields_set
+
+    def test_language_config_optional_fields(self) -> None:
+        lang = LanguageConfig(code="es-MX")
+        assert lang.voice is None
+        assert lang.tts_provider is None
+        assert lang.transcription_provider is None

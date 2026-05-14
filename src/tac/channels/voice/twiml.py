@@ -47,41 +47,53 @@ def generate_twiml(
     if isinstance(options, dict):
         options = TwiMLOptions(**options)
 
-    websocket_url = options.websocket_url
-    custom_parameters = options.custom_parameters
-    welcome_greeting = options.welcome_greeting
-    action_url = options.action_url
-    conversation_configuration = options.conversation_configuration
-
     # Create VoiceResponse
     response = VoiceResponse()
 
     # Create Connect verb with optional action
     connect_kwargs: dict[str, str] = {}
-    if action_url:
-        connect_kwargs["action"] = action_url
+    if options.action_url:
+        connect_kwargs["action"] = options.action_url
     connect = response.connect(**connect_kwargs)
 
-    # Build ConversationRelay kwargs
-    relay_kwargs: dict[str, str] = {"url": websocket_url}
-    if welcome_greeting:
-        relay_kwargs["welcome_greeting"] = welcome_greeting
-    if conversation_configuration:
-        relay_kwargs["conversation_configuration"] = conversation_configuration
+    # Build ConversationRelay kwargs. The twilio SDK converts snake_case to
+    # camelCase automatically, and serializes bool/str as TwiML attribute values.
+    relay_kwargs: dict[str, Any] = {"url": options.websocket_url}
+    optional_attrs = (
+        "welcome_greeting",
+        "conversation_configuration",
+        "voice",
+        "language",
+        "transcription_provider",
+        "tts_provider",
+        "interruptible",
+        "dtmf_detection",
+        "debug",
+    )
+    for attr in optional_attrs:
+        value = getattr(options, attr)
+        if value is not None:
+            relay_kwargs[attr] = value
 
-    # Create ConversationRelay
     relay = connect.conversation_relay(**relay_kwargs)
 
-    # Add custom parameters
-    if custom_parameters:
-        # Handle both Pydantic model and dict
-        params_dict: dict[str, Any] = (
-            custom_parameters.model_dump(by_alias=True, exclude_none=True)
-            if isinstance(custom_parameters, BaseModel)
-            else custom_parameters
-        )
+    # Emit <Language> children, if any
+    if options.languages:
+        for lang in options.languages:
+            lang_kwargs: dict[str, Any] = {"code": lang.code}
+            for attr in ("voice", "tts_provider", "transcription_provider"):
+                value = getattr(lang, attr)
+                if value is not None:
+                    lang_kwargs[attr] = value
+            relay.language(**lang_kwargs)
 
-        # Add each parameter as a child element
+    # Add custom parameters as <Parameter> children
+    if options.custom_parameters:
+        params_dict: dict[str, Any] = (
+            options.custom_parameters.model_dump(by_alias=True, exclude_none=True)
+            if isinstance(options.custom_parameters, BaseModel)
+            else options.custom_parameters
+        )
         for name, value in params_dict.items():
             if value is not None:
                 relay.parameter(name=name, value=str(value))

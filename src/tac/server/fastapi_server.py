@@ -16,8 +16,8 @@ from tac.channels.base import BaseChannel
 from tac.channels.websocket_protocol import WebSocketDisconnectError
 from tac.core.logging import get_logger
 from tac.core.tac import TAC
+from tac.models.voice import TwiMLOptions, TwiMLRequestContext
 from tac.server.config import TACServerConfig
-from tac.tools.handoff import studio_voice_handoff_url
 
 if TYPE_CHECKING:
     from tac.channels.messaging import MessagingChannel
@@ -82,6 +82,11 @@ class TACFastAPIServer:
         - Or mutate ``server.app`` after construction: add middleware,
           exception handlers, routers, or custom routes — before calling
           ``start()``.
+        - To customize TwiML attributes (voice, language, transcription provider,
+          interruption behavior, ``<Language>`` children, etc.) set a
+          ``resolve_twiml_options`` on ``VoiceChannelConfig``. The resolver
+          receives a framework-neutral ``TwiMLRequestContext`` and returns a
+          ``TwiMLOptions``; any field it explicitly sets overrides TAC defaults.
 
     Example:
         from fastapi import FastAPI
@@ -188,27 +193,39 @@ class TACFastAPIServer:
                 )
 
             @app.post(config.twiml_path, dependencies=[Depends(http_sig)])
-            async def post_twiml() -> Response:
+            async def post_twiml(request: Request) -> Response:
                 """Generate TwiML for incoming voice calls."""
                 websocket_url = f"wss://{config.public_domain}{config.websocket_path}"
-                if self.tac.config.studio_handoff_flow_sid:
-                    action_url = studio_voice_handoff_url(
-                        self.tac.config.account_sid,
-                        self.tac.config.studio_handoff_flow_sid,
-                    )
-                elif not self.tac.is_orchestrator_enabled():
-                    action_url = (
-                        f"https://{config.public_domain}{config.conversation_relay_callback_path}"
-                    )
-                else:
-                    action_url = None
+                # In relay-only mode the server owns the call-ended callback so
+                # sessions get cleaned up. In orchestrated mode CO manages
+                # lifecycle, so no default action_url is needed. The channel
+                # will override this with the Studio handoff URL if
+                # studio_handoff_flow_sid is set.
+                default_action_url = (
+                    f"https://{config.public_domain}{config.conversation_relay_callback_path}"
+                    if not self.tac.is_orchestrator_enabled()
+                    else None
+                )
+
+                # Server-owned defaults: websocket URL and the welcome greeting from
+                # TACServerConfig. The channel applies TAC defaults under these, and
+                # any VoiceChannelConfig.resolve_twiml_options output over them.
+                options = TwiMLOptions(
+                    websocket_url=websocket_url,
+                    welcome_greeting=config.welcome_greeting,
+                )
+
+                try:
+                    form = await request.form()
+                    form_dict = {k: str(v) for k, v in form.items()}
+                except Exception:
+                    form_dict = {}
+                request_context = TwiMLRequestContext.from_form(form_dict)
 
                 twiml = await vc.handle_incoming_call(
-                    options={
-                        "websocket_url": websocket_url,
-                        "action_url": action_url,
-                        "welcome_greeting": config.welcome_greeting,
-                    },
+                    options,
+                    default_action_url=default_action_url,
+                    request_context=request_context,
                 )
                 return Response(content=twiml, media_type="application/xml")
 

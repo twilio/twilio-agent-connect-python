@@ -22,8 +22,10 @@ from tac.models.voice import (
     PromptMessage,
     SetupMessage,
     TwiMLOptions,
+    TwiMLRequestContext,
 )
 from tac.session import SessionState
+from tac.tools.handoff import studio_voice_handoff_url
 from tac.utils.redaction import mask_phone
 
 from . import twiml
@@ -74,6 +76,7 @@ class VoiceChannel(BaseChannel):
 
         super().__init__(tac, memory_mode=config.memory_mode)
         self.session_manager = config.session_manager
+        self._resolve_twiml_options = config.resolve_twiml_options
         self._websocket_manager = WebSocketManager()
         self._twilio_client: Client | None = None
 
@@ -98,51 +101,98 @@ class VoiceChannel(BaseChannel):
     async def handle_incoming_call(
         self,
         options: TwiMLOptions | dict[str, Any],
+        default_action_url: str | None = None,
+        request_context: TwiMLRequestContext | None = None,
     ) -> str:
         """
         Generate TwiML response for incoming voice calls.
 
         ConversationRelay automatically handles conversation creation and participant
-        management via the conversation_configuration parameter.
+        management via the ``conversation_configuration`` parameter.
+
+        Merge precedence (highest to lowest):
+
+        1. Output of ``VoiceChannelConfig.resolve_twiml_options`` if configured and
+           ``request_context`` is given. Fields the resolver explicitly sets win.
+        2. ``options`` supplied by the caller (typically the server's per-request
+           defaults — websocket URL, server ``welcome_greeting``).
+        3. TAC defaults: ``welcome_greeting``, ``conversation_configuration`` from
+           ``TACConfig``, and ``action_url`` resolved via Studio handoff flow if
+           ``studio_handoff_flow_sid`` is set, otherwise ``default_action_url``.
+
+        Lists (``languages``) and nested models (``custom_parameters``) replace
+        wholesale when set at a higher-priority layer.
 
         Args:
-            options: TwiML generation options (TwiMLOptions or dict) containing:
-                - websocket_url (required): WebSocket URL for ConversationRelay
-                - custom_parameters (optional): Additional custom parameters
-                - welcome_greeting (optional): Initial greeting message
-                - action_url (optional): URL for call completion webhook
+            options: TwiML generation options (TwiMLOptions or dict).
+            default_action_url: Fallback ``action_url`` used when no layer sets one
+                and ``studio_handoff_flow_sid`` isn't configured.
+            request_context: Parsed Twilio webhook fields. Passed to the resolver
+                if one is configured on the channel.
 
         Returns:
             TwiML XML string for call connection
-
-        Example:
-            >>> twiml = await voice_channel.handle_incoming_call(
-            ...     options={
-            ...         "websocket_url": "wss://example.com/ws",
-            ...         "custom_parameters": {"session_id": "sess_123"},
-            ...         "welcome_greeting": "Hello!",
-            ...         "action_url": "https://example.com/callback",
-            ...     },
-            ... )
         """
         # Handle dict input (convert to TwiMLOptions)
         if isinstance(options, dict):
             options = TwiMLOptions(**options)
 
-        # Set default welcome greeting if not provided
-        if options.welcome_greeting is None:
-            options.welcome_greeting = "Hello! How can I assist you today?"
+        # Invoke the resolver if configured and we have a request context.
+        resolver_output: TwiMLOptions | None = None
+        if self._resolve_twiml_options is not None and request_context is not None:
+            resolver_output = await self._resolve_twiml_options(request_context)
 
-        # ConversationRelay automatically creates conversation and participants
-        return twiml.generate_twiml(
-            TwiMLOptions(
-                websocket_url=options.websocket_url,
-                custom_parameters=options.custom_parameters,
-                welcome_greeting=options.welcome_greeting,
-                action_url=options.action_url,
-                conversation_configuration=self.tac.config.conversation_configuration_id,
-            )
+        # Start from TAC defaults.
+        merged = TwiMLOptions(
+            welcome_greeting="Hello! How can I assist you today?",
+            conversation_configuration=self.tac.config.conversation_configuration_id,
+            action_url=self._resolve_action_url(options, resolver_output, default_action_url),
         )
+
+        # Overlay caller-supplied options (typically server per-request defaults).
+        self._overlay_fields(merged, options)
+
+        # Overlay resolver output (highest priority).
+        if resolver_output is not None:
+            self._overlay_fields(merged, resolver_output)
+
+        return twiml.generate_twiml(merged)
+
+    @staticmethod
+    def _overlay_fields(target: TwiMLOptions, source: TwiMLOptions) -> None:
+        """Apply fields explicitly set on ``source`` onto ``target``.
+
+        ``action_url`` is handled separately by ``_resolve_action_url``.
+        """
+        for field in source.model_fields_set:
+            if field == "action_url":
+                continue
+            setattr(target, field, getattr(source, field))
+
+    def _resolve_action_url(
+        self,
+        options: TwiMLOptions,
+        resolver_output: TwiMLOptions | None,
+        default_action_url: str | None,
+    ) -> str | None:
+        """Resolve the TwiML ``<Connect action=...>`` URL.
+
+        Precedence: resolver → caller options → Studio handoff (if configured) → default.
+        """
+        if (
+            resolver_output is not None
+            and "action_url" in resolver_output.model_fields_set
+            and resolver_output.action_url is not None
+        ):
+            return resolver_output.action_url
+        if "action_url" in options.model_fields_set and options.action_url is not None:
+            return options.action_url
+        if self.tac.config.studio_handoff_flow_sid:
+            return studio_voice_handoff_url(
+                self.tac.config.account_sid,
+                self.tac.config.studio_handoff_flow_sid,
+            )
+        return default_action_url
 
     async def handle_conversation_relay_callback(
         self,

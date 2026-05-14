@@ -579,7 +579,7 @@ class TestTwiMLConnectAction:
         )
 
         assert resp.status_code == 200
-        # No action URL when no handoff flow configured
+        # No action URL when no handoff flow configured (orchestrated mode)
         assert "<Connect>" in resp.text
         assert "action=" not in resp.text
 
@@ -791,3 +791,54 @@ class TestSignatureValidation:
         with pytest.raises(WebSocketDisconnect):
             with client.websocket_connect("/ws", headers={"X-Twilio-Signature": "invalid"}):
                 pass
+
+
+class TestTwiMLResolverEndToEnd:
+    """Smoke test: server parses Twilio form and channel resolver shapes TwiML."""
+
+    def test_resolver_on_voice_channel_receives_parsed_context_and_overrides_twiml(
+        self,
+    ) -> None:
+        from fastapi.testclient import TestClient
+
+        from tac.channels.voice import VoiceChannel, VoiceChannelConfig
+        from tac.models.voice import TwiMLOptions, TwiMLRequestContext
+        from tac.server import TACFastAPIServer
+
+        captured: dict[str, TwiMLRequestContext] = {}
+
+        async def resolver(ctx: TwiMLRequestContext) -> TwiMLOptions:
+            captured["ctx"] = ctx
+            return TwiMLOptions(voice="en-US-Journey-D", language="en-US")
+
+        tac = TAC(get_test_config())
+        vc = VoiceChannel(tac, config=VoiceChannelConfig(resolve_twiml_options=resolver))
+        server = TACFastAPIServer(
+            tac=tac,
+            config=TACServerConfig(public_domain="test.ngrok.io"),
+            voice_channel=vc,
+        )
+        client = TestClient(server.app)
+        form_data = {
+            "From": "+14155551234",
+            "To": "+15551234567",
+            "CallerCountry": "US",
+            "ApiVersion": "2010-04-01",
+        }
+        signature = compute_signature("http://testserver/twiml", form_data)
+        resp = client.post(
+            "/twiml",
+            data=form_data,
+            headers={"X-Twilio-Signature": signature},
+        )
+        assert resp.status_code == 200
+        # Resolver saw the parsed context with known fields + extras.
+        ctx = captured["ctx"]
+        assert ctx.from_number == "+14155551234"
+        assert ctx.caller_country == "US"
+        assert ctx.extra == {"ApiVersion": "2010-04-01"}
+        # Resolver output flowed through to TwiML; server defaults still present.
+        body = resp.text
+        assert 'voice="en-US-Journey-D"' in body
+        assert 'language="en-US"' in body
+        assert 'url="wss://test.ngrok.io/ws"' in body
