@@ -220,11 +220,8 @@ class TACFastAPIServer:
                     ),
                 )
 
-                try:
-                    form = await request.form()
-                    form_dict = {k: str(v) for k, v in form.items()}
-                except Exception:
-                    form_dict = {}
+                form = await request.form()
+                form_dict = {k: v for k, v in form.items() if isinstance(v, str)}
                 request_context = TwiMLRequestContext.from_form(form_dict)
 
                 twiml = await vc.handle_incoming_call(
