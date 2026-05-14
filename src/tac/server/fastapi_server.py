@@ -16,7 +16,7 @@ from tac.channels.base import BaseChannel
 from tac.channels.websocket_protocol import WebSocketDisconnectError
 from tac.core.logging import get_logger
 from tac.core.tac import TAC
-from tac.models.voice import TwiMLRequest, VoiceServerURLs
+from tac.models.voice import TwiMLRequest, VoiceEndpoints
 from tac.server.config import TACServerConfig
 
 if TYPE_CHECKING:
@@ -207,7 +207,7 @@ class TACFastAPIServer:
             @app.post(config.twiml_path, dependencies=[Depends(http_sig)])
             async def post_twiml(request: Request) -> Response:
                 """Generate TwiML for incoming voice calls."""
-                server_urls = VoiceServerURLs(
+                endpoints = VoiceEndpoints(
                     websocket_url=f"wss://{config.public_domain}{config.websocket_path}",
                     action_url=(
                         f"https://{config.public_domain}{config.conversation_relay_callback_path}"
@@ -219,7 +219,7 @@ class TACFastAPIServer:
                 twiml_request = TwiMLRequest.from_form(form_dict)
 
                 twiml = await vc.handle_incoming_call(
-                    server_urls,
+                    endpoints,
                     twiml_request=twiml_request,
                 )
                 return Response(content=twiml, media_type="application/xml")

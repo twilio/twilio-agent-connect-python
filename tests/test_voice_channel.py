@@ -18,7 +18,7 @@ from tac.models.voice import (
     PromptMessage,
     SetupMessage,
     TwiMLOptions,
-    VoiceServerURLs,
+    VoiceEndpoints,
 )
 
 
@@ -561,7 +561,7 @@ class TestVoiceChannel:
         )
 
         twiml = await channel.handle_incoming_call(
-            VoiceServerURLs(
+            VoiceEndpoints(
                 websocket_url="wss://example.ngrok.io/ws",
                 action_url="https://example.ngrok.io/flex_handoff",
             ),
@@ -584,7 +584,7 @@ class TestVoiceChannel:
         channel = VoiceChannel(tac)
 
         twiml = await channel.handle_incoming_call(
-            VoiceServerURLs(
+            VoiceEndpoints(
                 websocket_url="wss://test.ngrok.io/ws",
                 action_url="https://example.ngrok.io/flex_handoff",
             ),
@@ -1269,7 +1269,7 @@ class TestVoiceChannel:
         )
 
         twiml = await channel.handle_incoming_call(
-            VoiceServerURLs(
+            VoiceEndpoints(
                 websocket_url="wss://example.ngrok.io/ws",
                 action_url="https://example.ngrok.io/callback",
             ),
@@ -1287,7 +1287,7 @@ class TestVoiceChannel:
         channel = VoiceChannel(tac)
 
         twiml = await channel.handle_incoming_call(
-            VoiceServerURLs(websocket_url="wss://example.ngrok.io/ws"),
+            VoiceEndpoints(websocket_url="wss://example.ngrok.io/ws"),
         )
 
         assert 'conversationConfiguration="conv_configuration_test123"' in twiml
@@ -1371,7 +1371,7 @@ class TestHandleIncomingCallMerge:
         tac = TAC(get_test_config())
         channel = VoiceChannel(tac)
         twiml = await channel.handle_incoming_call(
-            VoiceServerURLs(websocket_url="wss://example.com/ws"),
+            VoiceEndpoints(websocket_url="wss://example.com/ws"),
         )
         assert 'welcomeGreeting="Hello! How can I assist you today?"' in twiml
         assert 'conversationConfiguration="conv_configuration_test123"' in twiml
@@ -1388,7 +1388,7 @@ class TestHandleIncomingCallMerge:
             ),
         )
         twiml = await channel.handle_incoming_call(
-            VoiceServerURLs(websocket_url="wss://example.com/ws"),
+            VoiceEndpoints(websocket_url="wss://example.com/ws"),
         )
         assert 'conversationConfiguration="conv_configuration_custom"' in twiml
         assert "conv_configuration_test123" not in twiml
@@ -1400,7 +1400,7 @@ class TestHandleIncomingCallMerge:
         tac = TAC({**get_test_config(), "studio_handoff_flow_sid": flow_sid})
         channel = VoiceChannel(tac)
         twiml = await channel.handle_incoming_call(
-            VoiceServerURLs(websocket_url="wss://example.com/ws"),
+            VoiceEndpoints(websocket_url="wss://example.com/ws"),
         )
         expected = (
             f'action="https://webhooks.twilio.com/v1/Accounts/ACtest123'
@@ -1411,14 +1411,14 @@ class TestHandleIncomingCallMerge:
     @pytest.mark.asyncio
     async def test_studio_handoff_beats_server_action_url(self) -> None:
         """Studio handoff is a user-expressed intent (explicit config) and
-        wins over server_urls.action_url (the SDK's generated cleanup
+        wins over endpoints.action_url (the SDK's generated cleanup
         default). Setting both is a user choice — if they want cleanup,
         they don't set studio_handoff_flow_sid."""
         flow_sid = "FW" + "a" * 32
         tac = TAC({**get_test_config(), "studio_handoff_flow_sid": flow_sid})
         channel = VoiceChannel(tac)
         twiml = await channel.handle_incoming_call(
-            VoiceServerURLs(
+            VoiceEndpoints(
                 websocket_url="wss://example.com/ws",
                 action_url="https://cleanup.example.com/end",
             ),
@@ -1435,7 +1435,7 @@ class TestHandleIncomingCallMerge:
         tac = TAC(get_test_config())
         channel = VoiceChannel(tac)
         twiml = await channel.handle_incoming_call(
-            VoiceServerURLs(
+            VoiceEndpoints(
                 websocket_url="wss://example.com/ws",
                 action_url="https://fallback.example.com/end",
             ),
@@ -1447,7 +1447,7 @@ class TestHandleIncomingCallMerge:
         tac = TAC(get_test_config())
         channel = VoiceChannel(tac)
         twiml = await channel.handle_incoming_call(
-            VoiceServerURLs(websocket_url="wss://example.com/ws"),
+            VoiceEndpoints(websocket_url="wss://example.com/ws"),
         )
         assert "action=" not in twiml
 
@@ -1465,7 +1465,7 @@ class TestHandleIncomingCallMerge:
             ),
         )
         twiml = await channel.handle_incoming_call(
-            VoiceServerURLs(
+            VoiceEndpoints(
                 websocket_url="wss://example.com/ws",
                 action_url="https://cleanup.example.com/end",
             ),
@@ -1488,7 +1488,7 @@ class TestStaticTwiMLOptions:
             ),
         )
         twiml = await channel.handle_incoming_call(
-            VoiceServerURLs(websocket_url="wss://example.com/ws"),
+            VoiceEndpoints(websocket_url="wss://example.com/ws"),
         )
         assert 'voice="en-US-Journey-D"' in twiml
         assert 'language="en-US"' in twiml
@@ -1500,7 +1500,7 @@ class TestStaticTwiMLOptions:
         tac = TAC(get_test_config())
         channel = VoiceChannel(tac, config=VoiceChannelConfig(welcome_greeting="Bonjour!"))
         twiml = await channel.handle_incoming_call(
-            VoiceServerURLs(websocket_url="wss://example.com/ws"),
+            VoiceEndpoints(websocket_url="wss://example.com/ws"),
         )
         assert 'welcomeGreeting="Bonjour!"' in twiml
 
@@ -1523,7 +1523,7 @@ class TestCustomizeTwiMLOptions:
         tac = TAC(get_test_config())
         channel = VoiceChannel(tac, config=VoiceChannelConfig(customize_twiml_options=customizer))
         twiml = await channel.handle_incoming_call(
-            VoiceServerURLs(websocket_url="wss://example.com/ws"),
+            VoiceEndpoints(websocket_url="wss://example.com/ws"),
         )
         assert called is False
         assert "voice=" not in twiml
@@ -1543,7 +1543,7 @@ class TestCustomizeTwiMLOptions:
         channel = VoiceChannel(tac, config=VoiceChannelConfig(customize_twiml_options=customizer))
         ctx = TwiMLRequest(from_number="+14155551234", caller_country="US")
         twiml = await channel.handle_incoming_call(
-            VoiceServerURLs(websocket_url="wss://example.com/ws"),
+            VoiceEndpoints(websocket_url="wss://example.com/ws"),
             twiml_request=ctx,
         )
         assert seen["ctx"] is ctx
@@ -1567,7 +1567,7 @@ class TestCustomizeTwiMLOptions:
             ),
         )
         twiml = await channel.handle_incoming_call(
-            VoiceServerURLs(websocket_url="wss://example.com/ws"),
+            VoiceEndpoints(websocket_url="wss://example.com/ws"),
             twiml_request=TwiMLRequest(),
         )
         assert 'voice="es-MX-Neural2-A"' in twiml
@@ -1589,7 +1589,7 @@ class TestCustomizeTwiMLOptions:
             ),
         )
         twiml = await channel.handle_incoming_call(
-            VoiceServerURLs(websocket_url="wss://example.com/ws"),
+            VoiceEndpoints(websocket_url="wss://example.com/ws"),
             twiml_request=TwiMLRequest(),
         )
         # Customizer didn't set welcome_greeting; channel default survives.
@@ -1609,7 +1609,7 @@ class TestCustomizeTwiMLOptions:
         tac = TAC({**get_test_config(), "studio_handoff_flow_sid": flow_sid})
         channel = VoiceChannel(tac, config=VoiceChannelConfig(customize_twiml_options=customizer))
         twiml = await channel.handle_incoming_call(
-            VoiceServerURLs(websocket_url="wss://example.com/ws"),
+            VoiceEndpoints(websocket_url="wss://example.com/ws"),
             twiml_request=TwiMLRequest(),
         )
         assert 'action="https://customizer.example.com/end"' in twiml

@@ -23,7 +23,7 @@ from tac.models.voice import (
     SetupMessage,
     TwiMLOptions,
     TwiMLRequest,
-    VoiceServerURLs,
+    VoiceEndpoints,
 )
 from tac.session import SessionState
 from tac.tools.handoff import studio_voice_handoff_url
@@ -104,7 +104,7 @@ class VoiceChannel(BaseChannel):
 
     async def handle_incoming_call(
         self,
-        server_urls: VoiceServerURLs,
+        endpoints: VoiceEndpoints,
         twiml_request: TwiMLRequest | None = None,
     ) -> str:
         """
@@ -121,14 +121,14 @@ class VoiceChannel(BaseChannel):
         3. TAC defaults: ``welcome_greeting`` from ``VoiceChannelConfig``,
            ``conversation_configuration`` from ``TACConfig``, and ``action_url``
            resolved via Studio handoff (when ``studio_handoff_flow_sid`` is
-           configured), else ``server_urls.action_url`` (the SDK-generated
+           configured), else ``endpoints.action_url`` (the SDK-generated
            session-cleanup default).
 
         Lists (``languages``) and nested models (``custom_parameters``) replace
         wholesale when set at a higher-priority layer.
 
         Args:
-            server_urls: Absolute URLs Twilio calls back to. The server (or a
+            endpoints: Absolute URLs Twilio calls back to. The server (or a
                 custom adapter) builds these from its public domain. The
                 ``action_url`` is used as the default
                 ``<Connect action=...>`` in relay-only mode so session
@@ -148,7 +148,7 @@ class VoiceChannel(BaseChannel):
         merged = TwiMLOptions(
             welcome_greeting=self._welcome_greeting,
             conversation_configuration=self.tac.config.conversation_configuration_id,
-            action_url=self._resolve_action_url(customized, server_urls),
+            action_url=self._resolve_action_url(customized, endpoints),
         )
 
         # Overlay channel-static twiml_options.
@@ -159,7 +159,7 @@ class VoiceChannel(BaseChannel):
         if customized is not None:
             self._overlay_fields(merged, customized)
 
-        return twiml.generate_twiml(server_urls.websocket_url, merged)
+        return twiml.generate_twiml(endpoints.websocket_url, merged)
 
     @staticmethod
     def _overlay_fields(target: TwiMLOptions, source: TwiMLOptions) -> None:
@@ -175,7 +175,7 @@ class VoiceChannel(BaseChannel):
     def _resolve_action_url(
         self,
         customized: TwiMLOptions | None,
-        server_urls: VoiceServerURLs,
+        endpoints: VoiceEndpoints,
     ) -> str | None:
         """Resolve the TwiML ``<Connect action=...>`` URL.
 
@@ -183,7 +183,7 @@ class VoiceChannel(BaseChannel):
           1. customizer
           2. channel-static ``twiml_options``
           3. Studio handoff (when ``studio_handoff_flow_sid`` is configured)
-          4. ``server_urls.action_url`` (SDK-generated session-cleanup default)
+          4. ``endpoints.action_url`` (SDK-generated session-cleanup default)
 
         User-expressed intent (Studio handoff is configured explicitly on
         ``TACConfig``) beats the SDK's generated cleanup default. If a user
@@ -208,8 +208,8 @@ class VoiceChannel(BaseChannel):
                 self.tac.config.account_sid,
                 self.tac.config.studio_handoff_flow_sid,
             )
-        if server_urls.action_url is not None:
-            return server_urls.action_url
+        if endpoints.action_url is not None:
+            return endpoints.action_url
         return None
 
     async def handle_conversation_relay_callback(

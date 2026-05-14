@@ -147,7 +147,7 @@ class LanguageConfig(BaseModel):
     model_config = {"populate_by_name": True}
 
 
-class VoiceServerURLs(BaseModel):
+class VoiceEndpoints(BaseModel):
     """Absolute URLs Twilio calls back to for a given voice deployment.
 
     These are server-owned — they depend on where the app is hosted

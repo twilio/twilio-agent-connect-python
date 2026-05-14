@@ -88,13 +88,13 @@ class TestRelayOnlyMode:
     async def test_handle_incoming_call_twiml_omits_conversation_configuration(self) -> None:
         """TwiML does not include conversationConfiguration in relay-only mode."""
         from tac.channels.voice import VoiceChannelConfig
-        from tac.models.voice import VoiceServerURLs
+        from tac.models.voice import VoiceEndpoints
 
         tac = TAC(relay_only_config())
         channel = VoiceChannel(tac, config=VoiceChannelConfig(welcome_greeting="Hello"))
 
         twiml = await channel.handle_incoming_call(
-            VoiceServerURLs(websocket_url="wss://example.com/ws"),
+            VoiceEndpoints(websocket_url="wss://example.com/ws"),
         )
 
         assert "conversationConfiguration" not in twiml

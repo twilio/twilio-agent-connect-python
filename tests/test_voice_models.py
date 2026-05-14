@@ -11,7 +11,7 @@ from tac.models.voice import (
     SetupMessage,
     TwiMLOptions,
     TwiMLRequest,
-    VoiceServerURLs,
+    VoiceEndpoints,
 )
 
 
@@ -290,19 +290,19 @@ class TestTwiMLOptionsFieldsSet:
         assert lang.transcription_provider is None
 
 
-class TestVoiceServerURLs:
-    """VoiceServerURLs is the server → channel handoff for absolute URLs."""
+class TestVoiceEndpoints:
+    """VoiceEndpoints is the server → channel handoff for absolute URLs."""
 
     def test_websocket_url_required(self) -> None:
         with pytest.raises(ValidationError):
-            VoiceServerURLs()  # type: ignore[call-arg]
+            VoiceEndpoints()  # type: ignore[call-arg]
 
     def test_action_url_optional(self) -> None:
-        urls = VoiceServerURLs(websocket_url="wss://example.com/ws")
+        urls = VoiceEndpoints(websocket_url="wss://example.com/ws")
         assert urls.action_url is None
 
     def test_both_urls(self) -> None:
-        urls = VoiceServerURLs(
+        urls = VoiceEndpoints(
             websocket_url="wss://example.com/ws",
             action_url="https://example.com/end",
         )
