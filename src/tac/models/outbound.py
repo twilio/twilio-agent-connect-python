@@ -55,11 +55,17 @@ class InitiateVoiceConversationOptions(BaseModel):
     The caller identity is always TAC's configured ``config.phone_number``.
     Multi-number deployments should use one TAC instance per line.
 
-    TwiML for the outbound call is built by layering:
-      1. This call's ``twiml_options`` (highest priority)
+    TwiML for the outbound call is built by merging per-field, highest
+    precedence first:
+      1. This call's ``twiml_options`` (per-call overrides)
       2. ``VoiceChannelConfig.twiml_options`` (channel-wide defaults)
       3. TAC defaults (welcome greeting, conversation_configuration,
          action_url resolved via Studio handoff if configured)
+
+    Fields you don't set at a layer fall through to lower layers — so
+    ``twiml_options=TwiMLOptions(voice="es-MX-Neural2-A")`` on this call
+    overrides only ``voice``; ``language``, ``interruptible``, etc. from the
+    channel config still apply.
 
     Set ``voice``, ``language``, ``interruptible``, etc. on the channel's
     ``VoiceChannelConfig.twiml_options`` to apply them to every call (both

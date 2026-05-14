@@ -454,11 +454,15 @@ class VoiceChannel(BaseChannel):
         conversation during passive hydration. The session is initialized lazily
         on the first prompt when the conversation is discovered by callSid.
 
-        TwiML merge precedence (highest to lowest):
+        TwiML fields are merged per-field, highest precedence first:
           1. ``options.twiml_options`` — per-call overrides
           2. ``VoiceChannelConfig.twiml_options`` — channel-wide defaults
           3. TAC defaults: welcome greeting, ``conversation_configuration`` from
              ``TACConfig``, and ``action_url`` from Studio handoff (if configured).
+
+        Fields not set at a layer fall through to lower layers. Lists
+        (``languages``) and nested models (``custom_parameters``) replace
+        wholesale when set at a higher-priority layer.
 
         ``options.websocket_url`` must be the publicly accessible WebSocket
         endpoint (e.g., ``wss://your-domain.ngrok.app/ws``). Unlike inbound calls
