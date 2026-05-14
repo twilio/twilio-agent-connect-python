@@ -16,7 +16,7 @@ from tac.channels.base import BaseChannel
 from tac.channels.websocket_protocol import WebSocketDisconnectError
 from tac.core.logging import get_logger
 from tac.core.tac import TAC
-from tac.models.voice import TwiMLRequestContext, VoiceServerURLs
+from tac.models.voice import TwiMLRequest, VoiceServerURLs
 from tac.server.config import TACServerConfig
 
 if TYPE_CHECKING:
@@ -85,7 +85,7 @@ class TACFastAPIServer:
         - To customize TwiML attributes (voice, language, transcription provider,
           interruption behavior, ``<Language>`` children, etc.) set a
           ``customize_twiml_options`` on ``VoiceChannelConfig``. The customizer
-          receives a framework-neutral ``TwiMLRequestContext`` and returns a
+          receives a framework-neutral ``TwiMLRequest`` and returns a
           ``TwiMLOptions``; any field it explicitly sets overrides TAC defaults.
           For same-on-every-call settings, set ``twiml_options`` on
           ``VoiceChannelConfig`` directly.
@@ -216,11 +216,11 @@ class TACFastAPIServer:
 
                 form = await request.form()
                 form_dict = {k: v for k, v in form.items() if isinstance(v, str)}
-                request_context = TwiMLRequestContext.from_form(form_dict)
+                twiml_request = TwiMLRequest.from_form(form_dict)
 
                 twiml = await vc.handle_incoming_call(
                     server_urls,
-                    request_context=request_context,
+                    twiml_request=twiml_request,
                 )
                 return Response(content=twiml, media_type="application/xml")
 

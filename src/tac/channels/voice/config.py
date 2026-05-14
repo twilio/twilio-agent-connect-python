@@ -5,10 +5,10 @@ from collections.abc import Awaitable, Callable
 from pydantic import BaseModel, Field
 
 from tac.models.memory import MemoryMode
-from tac.models.voice import TwiMLOptions, TwiMLRequestContext
+from tac.models.voice import TwiMLOptions, TwiMLRequest
 from tac.session import SessionManager, ThreadSafeSessionManager
 
-TwiMLOptionsCustomizer = Callable[[TwiMLRequestContext], Awaitable[TwiMLOptions]]
+TwiMLOptionsCustomizer = Callable[[TwiMLRequest], Awaitable[TwiMLOptions]]
 
 
 class VoiceChannelConfig(BaseModel):
@@ -33,7 +33,7 @@ class VoiceChannelConfig(BaseModel):
             for every call. For per-call customization see ``customize_twiml_options``.
         customize_twiml_options: Optional async callable producing per-call
             ``TwiMLOptions`` overrides. Receives a framework-neutral
-            ``TwiMLRequestContext`` (parsed Twilio webhook fields). Any field the
+            ``TwiMLRequest`` (parsed Twilio webhook fields). Any field the
             function explicitly sets wins over ``twiml_options`` and TAC defaults;
             unset fields fall through.
     """
@@ -64,6 +64,6 @@ class VoiceChannelConfig(BaseModel):
     customize_twiml_options: TwiMLOptionsCustomizer | None = Field(
         default=None,
         description="Optional async callable returning per-call TwiMLOptions overrides. "
-        "Receives a TwiMLRequestContext; only fields explicitly set on the returned "
+        "Receives a TwiMLRequest; only fields explicitly set on the returned "
         "options override lower layers.",
     )

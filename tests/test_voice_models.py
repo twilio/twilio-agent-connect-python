@@ -10,7 +10,7 @@ from tac.models.voice import (
     PromptMessage,
     SetupMessage,
     TwiMLOptions,
-    TwiMLRequestContext,
+    TwiMLRequest,
     VoiceServerURLs,
 )
 
@@ -221,11 +221,11 @@ class TestVoiceMessageAliases:
         assert msg.duration_until_interrupt_ms == 2000
 
 
-class TestTwiMLRequestContext:
-    """TwiMLRequestContext parses Twilio webhook form fields."""
+class TestTwiMLRequest:
+    """TwiMLRequest parses Twilio webhook form fields."""
 
     def test_from_form_known_fields(self) -> None:
-        ctx = TwiMLRequestContext.from_form(
+        ctx = TwiMLRequest.from_form(
             {
                 "From": "+14155551234",
                 "To": "+15551234567",
@@ -246,7 +246,7 @@ class TestTwiMLRequestContext:
         assert ctx.extra == {}
 
     def test_from_form_unknown_fields_bucketed_into_extra(self) -> None:
-        ctx = TwiMLRequestContext.from_form(
+        ctx = TwiMLRequest.from_form(
             {
                 "From": "+14155551234",
                 "ApiVersion": "2010-04-01",
@@ -260,7 +260,7 @@ class TestTwiMLRequestContext:
         }
 
     def test_from_form_empty(self) -> None:
-        ctx = TwiMLRequestContext.from_form({})
+        ctx = TwiMLRequest.from_form({})
         assert ctx.from_number is None
         assert ctx.extra == {}
 

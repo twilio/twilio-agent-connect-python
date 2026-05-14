@@ -22,7 +22,7 @@ from tac.models.voice import (
     PromptMessage,
     SetupMessage,
     TwiMLOptions,
-    TwiMLRequestContext,
+    TwiMLRequest,
     VoiceServerURLs,
 )
 from tac.session import SessionState
@@ -105,7 +105,7 @@ class VoiceChannel(BaseChannel):
     async def handle_incoming_call(
         self,
         server_urls: VoiceServerURLs,
-        request_context: TwiMLRequestContext | None = None,
+        twiml_request: TwiMLRequest | None = None,
     ) -> str:
         """
         Generate TwiML response for incoming voice calls.
@@ -116,7 +116,7 @@ class VoiceChannel(BaseChannel):
         Merge precedence (highest to lowest):
 
         1. Output of ``VoiceChannelConfig.customize_twiml_options`` if configured
-           and ``request_context`` is given. Fields it explicitly sets win.
+           and ``twiml_request`` is given. Fields it explicitly sets win.
         2. ``VoiceChannelConfig.twiml_options`` — static per-channel defaults.
         3. TAC defaults: ``welcome_greeting`` from ``VoiceChannelConfig``,
            ``conversation_configuration`` from ``TACConfig``, and ``action_url``
@@ -133,7 +133,7 @@ class VoiceChannel(BaseChannel):
                 ``action_url`` is used as the default
                 ``<Connect action=...>`` in relay-only mode so session
                 cleanup fires when calls end.
-            request_context: Parsed Twilio webhook fields. Passed to the
+            twiml_request: Parsed Twilio webhook fields. Passed to the
                 customizer if one is configured on the channel.
 
         Returns:
@@ -141,8 +141,8 @@ class VoiceChannel(BaseChannel):
         """
         # Invoke the customizer if configured and we have a request context.
         customized: TwiMLOptions | None = None
-        if self._customize_twiml_options is not None and request_context is not None:
-            customized = await self._customize_twiml_options(request_context)
+        if self._customize_twiml_options is not None and twiml_request is not None:
+            customized = await self._customize_twiml_options(twiml_request)
 
         # Start from TAC defaults.
         merged = TwiMLOptions(

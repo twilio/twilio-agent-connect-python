@@ -220,7 +220,7 @@ class TwiMLOptions(BaseModel):
     model_config = {"populate_by_name": True}
 
 
-class TwiMLRequestContext(BaseModel):
+class TwiMLRequest(BaseModel):
     """Framework-neutral view of the Twilio TwiML webhook form.
 
     Populated by ``TACFastAPIServer`` from the incoming Twilio webhook, then
@@ -244,7 +244,7 @@ class TwiMLRequestContext(BaseModel):
     model_config = {"populate_by_name": True, "extra": "ignore"}
 
     @classmethod
-    def from_form(cls, form: dict[str, str]) -> "TwiMLRequestContext":
+    def from_form(cls, form: dict[str, str]) -> "TwiMLRequest":
         """Build a context from a raw Twilio form dict, bucketing unknown keys into ``extra``."""
         known_aliases = {
             "From",
