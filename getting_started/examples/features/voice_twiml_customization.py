@@ -11,6 +11,11 @@ conversation_configuration, and a default welcome greeting):
 
 The customizer wins over static options, which win over TAC defaults.
 
+Channel ``twiml_options`` applies to both inbound and outbound calls
+(``initiate_outbound_conversation``). The customizer only runs for inbound
+calls — outbound calls receive per-call TwiML via
+``InitiateVoiceConversationOptions.twiml_options`` at each call site instead.
+
 This example shows the static path (voice + language the same for every
 call). The customizer version for per-call localization is below in a
 commented block — uncomment if you need it.
