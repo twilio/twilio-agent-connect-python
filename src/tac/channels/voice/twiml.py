@@ -12,14 +12,33 @@ logger = get_logger(__name__)
 
 _OPTIONAL_RELAY_ATTRS = (
     "welcome_greeting",
+    "welcome_greeting_interruptible",
     "conversation_configuration",
-    "voice",
+    # language / TTS / STT
     "language",
-    "transcription_provider",
+    "tts_language",
+    "transcription_language",
+    "voice",
     "tts_provider",
+    "transcription_provider",
+    "speech_model",
+    "elevenlabs_text_normalization",
+    # turn detection / interruption
+    "eot_threshold",
+    "partial_prompts",
+    "deepgram_smart_format",
+    "speech_timeout",
     "interruptible",
+    "interrupt_sensitivity",
+    "report_input_during_agent_speech",
+    "ignore_backchannel",
+    "preemptible",
     "dtmf_detection",
+    # hints / events / debug / intelligence
+    "hints",
+    "events",
     "debug",
+    "intelligence_service",
 )
 
 
@@ -92,7 +111,7 @@ def generate_twiml(
     if options.languages:
         for lang in options.languages:
             lang_kwargs: dict[str, Any] = {"code": lang.code}
-            for attr in ("voice", "tts_provider", "transcription_provider"):
+            for attr in ("voice", "tts_provider", "transcription_provider", "speech_model"):
                 value = getattr(lang, attr)
                 if value is not None:
                     lang_kwargs[attr] = value

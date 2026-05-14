@@ -4,6 +4,10 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+# Twilio uses the same four-value enum for several attributes that control
+# what caller input (DTMF, speech, both, neither) triggers a given behavior.
+InterruptMode = Literal["none", "dtmf", "speech", "any"]
+
 
 class CustomParameters(BaseModel):
     """
@@ -137,11 +141,20 @@ class LanguageConfig(BaseModel):
     https://www.twilio.com/docs/voice/twiml/connect/conversationrelay#language-element
     """
 
-    code: str = Field(..., description="Language code, e.g. 'es-MX'")
+    code: str = Field(
+        ...,
+        description="Language code, e.g. 'es-MX'. Can be 'multi' for automatic language "
+        "detection (requires ElevenLabs TTS and Deepgram STT).",
+    )
     voice: str | None = Field(None, description="TTS voice name for this language")
     tts_provider: str | None = Field(None, description="TTS provider, e.g. 'google'")
     transcription_provider: str | None = Field(
         None, description="Transcription provider, e.g. 'deepgram'"
+    )
+    speech_model: str | None = Field(
+        None,
+        description="Speech model for STT. Choices vary by transcription_provider; "
+        "see the provider's documentation.",
     )
 
     model_config = {"populate_by_name": True}
@@ -164,10 +177,9 @@ class VoiceEndpoints(BaseModel):
     )
     action_url: str | None = Field(
         default=None,
-        description="Public HTTPS URL for the TwiML <Connect action=...>. "
-        "The server supplies this in relay-only mode so session cleanup fires "
-        "when the call ends; leave None in orchestrated mode so Studio handoff "
-        "(when configured) isn't shadowed.",
+        description="Public HTTPS URL for the TwiML <Connect action=...> used as "
+        "the SDK-generated session-cleanup default. Channel-level overrides "
+        "(customizer, static twiml_options, Studio handoff) take precedence.",
     )
 
     model_config = {"populate_by_name": True}
@@ -191,6 +203,11 @@ class TwiMLOptions(BaseModel):
         None,
         description="Initial greeting message for caller",
     )
+    welcome_greeting_interruptible: InterruptMode | None = Field(
+        None,
+        description="What caller input can interrupt the welcome greeting. "
+        "Defaults to 'any' on Twilio.",
+    )
     action_url: str | None = Field(
         None,
         description="URL for Twilio to request when call ends",
@@ -200,22 +217,123 @@ class TwiMLOptions(BaseModel):
         description="Conversation Service SID for ConversationRelay to automatically "
         "manage conversation creation and participants.",
     )
-    voice: str | None = Field(None, description="Default TTS voice name")
-    language: str | None = Field(None, description="Default language code, e.g. 'en-US'")
+
+    # Language, TTS, STT
+    language: str | None = Field(
+        None,
+        description="Language for both STT and TTS, e.g. 'en-US'. Equivalent to setting "
+        "both tts_language and transcription_language.",
+    )
+    tts_language: str | None = Field(
+        None,
+        description="TTS language code; overrides `language` for TTS.",
+    )
+    transcription_language: str | None = Field(
+        None,
+        description="STT language code; overrides `language` for transcription. "
+        "Can be 'multi' for automatic language detection (Deepgram only).",
+    )
+    voice: str | None = Field(None, description="TTS voice name (choices vary by tts_provider)")
+    tts_provider: str | None = Field(
+        None,
+        description="TTS provider: 'Google', 'Amazon', or 'ElevenLabs'. Defaults to 'ElevenLabs'.",
+    )
     transcription_provider: str | None = Field(
-        None, description="Default transcription provider, e.g. 'deepgram'"
+        None,
+        description="STT provider: 'Google' or 'Deepgram'. Defaults to 'Deepgram' (or 'Google' "
+        "for accounts that used ConversationRelay before 2025-09-12).",
     )
-    tts_provider: str | None = Field(None, description="Default TTS provider, e.g. 'elevenlabs'")
-    interruptible: str | bool | None = Field(
-        None, description="Interruption behavior (e.g. 'speech', 'dtmf', 'any', True/False)"
+    speech_model: str | None = Field(
+        None,
+        description="Speech model for STT. Choices vary by transcription_provider.",
     )
-    dtmf_detection: bool | None = Field(None, description="Enable DTMF detection")
+    elevenlabs_text_normalization: Literal["on", "auto", "off"] | None = Field(
+        None,
+        description="Text normalization for ElevenLabs TTS. Defaults to 'off'. "
+        "'auto' behaves like 'off' for ConversationRelay calls.",
+    )
+
+    # Turn detection / interruption
+    eot_threshold: float | None = Field(
+        None,
+        ge=0.5,
+        le=0.9,
+        description="Confidence required to finish a turn (0.5 - 0.9). "
+        "Only applies with Deepgram + flux speech model.",
+    )
+    partial_prompts: bool | None = Field(
+        None,
+        description="Send unfinalized prompts and eager end-of-turn events "
+        "(last=False). Only applies with Deepgram + flux speech model.",
+    )
+    deepgram_smart_format: bool | None = Field(
+        None,
+        description="Use Deepgram Smart Format for transcription output. "
+        "Defaults to true when transcription_provider='Deepgram'.",
+    )
+    speech_timeout: int | None = Field(
+        None,
+        ge=600,
+        le=5000,
+        description="Silence (ms) after speech before finalizing the prompt. "
+        "Integer in [600, 5000]. Defaults to 'auto' on Twilio.",
+    )
+    interruptible: InterruptMode | bool | None = Field(
+        None,
+        description="What caller input interrupts TTS playback. Boolean accepted "
+        "for backward compat: True='any', False='none'. Defaults to 'any'.",
+    )
+    interrupt_sensitivity: Literal["high", "medium", "low"] | None = Field(
+        None,
+        description="How easily caller speech triggers an interrupt. Defaults to 'high'.",
+    )
+    report_input_during_agent_speech: InterruptMode | None = Field(
+        None,
+        description="What caller input gets reported while the agent is speaking "
+        "(independent of whether playback is interrupted). Defaults to 'none' since May 2025.",
+    )
+    ignore_backchannel: bool | None = Field(
+        None,
+        description="Filter short conversational feedback ('yeah', 'uh-huh', …) "
+        "so it doesn't interrupt the agent. Defaults to false.",
+    )
+    preemptible: bool | None = Field(
+        None,
+        description="Allow text tokens from the next talk cycle to interrupt the current one. "
+        "Defaults to false.",
+    )
+    dtmf_detection: bool | None = Field(
+        None,
+        description="Emit DTMF keypress events over the WebSocket.",
+    )
+
+    # Recognition hints / events / debug / intelligence
+    hints: str | None = Field(
+        None,
+        description="Comma-separated words/phrases likely to appear in speech. "
+        "Capitalize proper nouns.",
+    )
+    events: str | None = Field(
+        None,
+        description="Space-separated event subscriptions, e.g. 'speaker-events tokens-played'.",
+    )
     debug: str | None = Field(
-        None, description="Debug flags, e.g. 'speaker-events' or comma-separated list"
+        None,
+        description="Debug subscription, e.g. 'debugging'. Note: 'speaker-events' and "
+        "'tokens-played' have moved to the `events` attribute — only use them here "
+        "for backward compatibility.",
     )
+    intelligence_service: str | None = Field(
+        None,
+        description="Conversation Intelligence (classic) Service SID or unique name for "
+        "persisting transcripts and running Language Operators.",
+    )
+
+    # Nested <Language> children
     languages: list[LanguageConfig] | None = Field(
         None, description="Additional <Language> children for multi-language support"
     )
+
     extra: dict[str, str | bool | int] | None = Field(
         None,
         description="Escape hatch for ConversationRelay attributes not yet typed on "

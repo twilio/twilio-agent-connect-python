@@ -1340,6 +1340,7 @@ class TestGenerateTwiMLConversationRelayAttrs:
                         voice="es-MX-Neural2-A",
                         tts_provider="google",
                         transcription_provider="google",
+                        speech_model="long",
                     ),
                     LanguageConfig(code="fr-FR"),
                 ],
@@ -1348,7 +1349,105 @@ class TestGenerateTwiMLConversationRelayAttrs:
         assert '<Language code="es-MX"' in twiml
         assert 'voice="es-MX-Neural2-A"' in twiml
         assert 'ttsProvider="google"' in twiml
+        assert 'speechModel="long"' in twiml
         assert '<Language code="fr-FR" />' in twiml
+
+    def test_welcome_greeting_interruptible(self) -> None:
+        twiml = generate_twiml(
+            "wss://example.com/ws",
+            TwiMLOptions(
+                welcome_greeting="Hi",
+                welcome_greeting_interruptible="dtmf",
+            ),
+        )
+        assert 'welcomeGreetingInterruptible="dtmf"' in twiml
+
+    def test_language_override_attrs(self) -> None:
+        twiml = generate_twiml(
+            "wss://example.com/ws",
+            TwiMLOptions(
+                tts_language="en-US",
+                transcription_language="fr-FR",
+            ),
+        )
+        assert 'ttsLanguage="en-US"' in twiml
+        assert 'transcriptionLanguage="fr-FR"' in twiml
+
+    def test_speech_model_and_elevenlabs_normalization(self) -> None:
+        twiml = generate_twiml(
+            "wss://example.com/ws",
+            TwiMLOptions(
+                speech_model="nova-3-general",
+                elevenlabs_text_normalization="on",
+            ),
+        )
+        assert 'speechModel="nova-3-general"' in twiml
+        assert 'elevenlabsTextNormalization="on"' in twiml
+
+    def test_turn_detection_attrs(self) -> None:
+        twiml = generate_twiml(
+            "wss://example.com/ws",
+            TwiMLOptions(
+                eot_threshold=0.75,
+                partial_prompts=True,
+                deepgram_smart_format=False,
+                speech_timeout=1500,
+            ),
+        )
+        assert 'eotThreshold="0.75"' in twiml
+        assert 'partialPrompts="true"' in twiml
+        assert 'deepgramSmartFormat="false"' in twiml
+        assert 'speechTimeout="1500"' in twiml
+
+    def test_interrupt_sensitivity_and_report_input(self) -> None:
+        twiml = generate_twiml(
+            "wss://example.com/ws",
+            TwiMLOptions(
+                interrupt_sensitivity="medium",
+                report_input_during_agent_speech="speech",
+            ),
+        )
+        assert 'interruptSensitivity="medium"' in twiml
+        assert 'reportInputDuringAgentSpeech="speech"' in twiml
+
+    def test_ignore_backchannel_and_preemptible(self) -> None:
+        twiml = generate_twiml(
+            "wss://example.com/ws",
+            TwiMLOptions(ignore_backchannel=True, preemptible=True),
+        )
+        assert 'ignoreBackchannel="true"' in twiml
+        assert 'preemptible="true"' in twiml
+
+    def test_hints_events_intelligence_service(self) -> None:
+        twiml = generate_twiml(
+            "wss://example.com/ws",
+            TwiMLOptions(
+                hints="TwiML,ConversationRelay",
+                events="speaker-events tokens-played",
+                intelligence_service="GAaabbcc",
+            ),
+        )
+        assert 'hints="TwiML,ConversationRelay"' in twiml
+        assert 'events="speaker-events tokens-played"' in twiml
+        assert 'intelligenceService="GAaabbcc"' in twiml
+
+    def test_eot_threshold_validation(self) -> None:
+        import pytest
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            TwiMLOptions(eot_threshold=0.4)
+        with pytest.raises(ValidationError):
+            TwiMLOptions(eot_threshold=0.95)
+
+    def test_speech_timeout_validation(self) -> None:
+        import pytest
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            TwiMLOptions(speech_timeout=500)
+        with pytest.raises(ValidationError):
+            TwiMLOptions(speech_timeout=6000)
 
     def test_omitted_fields_absent_from_output(self) -> None:
         twiml = generate_twiml("wss://example.com/ws")
@@ -1360,6 +1459,22 @@ class TestGenerateTwiMLConversationRelayAttrs:
             "interruptible=",
             "dtmfDetection=",
             "debug=",
+            "welcomeGreetingInterruptible=",
+            "ttsLanguage=",
+            "transcriptionLanguage=",
+            "speechModel=",
+            "elevenlabsTextNormalization=",
+            "eotThreshold=",
+            "partialPrompts=",
+            "deepgramSmartFormat=",
+            "speechTimeout=",
+            "interruptSensitivity=",
+            "reportInputDuringAgentSpeech=",
+            "ignoreBackchannel=",
+            "preemptible=",
+            "hints=",
+            "events=",
+            "intelligenceService=",
             "<Language",
         ):
             assert attr not in twiml
