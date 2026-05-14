@@ -297,14 +297,14 @@ class TestVoiceServerURLs:
         with pytest.raises(ValidationError):
             VoiceServerURLs()  # type: ignore[call-arg]
 
-    def test_conversation_relay_callback_url_optional(self) -> None:
+    def test_action_url_optional(self) -> None:
         urls = VoiceServerURLs(websocket_url="wss://example.com/ws")
-        assert urls.conversation_relay_callback_url is None
+        assert urls.action_url is None
 
     def test_both_urls(self) -> None:
         urls = VoiceServerURLs(
             websocket_url="wss://example.com/ws",
-            conversation_relay_callback_url="https://example.com/end",
+            action_url="https://example.com/end",
         )
         assert urls.websocket_url == "wss://example.com/ws"
-        assert urls.conversation_relay_callback_url == "https://example.com/end"
+        assert urls.action_url == "https://example.com/end"

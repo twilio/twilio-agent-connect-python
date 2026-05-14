@@ -162,11 +162,12 @@ class VoiceServerURLs(BaseModel):
         description="Public WebSocket URL for ConversationRelay, e.g. "
         "'wss://example.ngrok.app/ws'.",
     )
-    conversation_relay_callback_url: str | None = Field(
+    action_url: str | None = Field(
         default=None,
-        description="Public HTTPS URL for the ConversationRelay action callback. "
-        "Required in relay-only mode so session cleanup fires when the call ends; "
-        "ignored in orchestrated mode (Conversation Orchestrator handles lifecycle).",
+        description="Public HTTPS URL for the TwiML <Connect action=...>. "
+        "The server supplies this in relay-only mode so session cleanup fires "
+        "when the call ends; leave None in orchestrated mode so Studio handoff "
+        "(when configured) isn't shadowed.",
     )
 
     model_config = {"populate_by_name": True}
