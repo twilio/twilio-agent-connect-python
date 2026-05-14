@@ -454,6 +454,12 @@ class VoiceChannel(BaseChannel):
         conversation during passive hydration. The session is initialized lazily
         on the first prompt when the conversation is discovered by callSid.
 
+        TwiML merge precedence (highest to lowest):
+          1. ``options.twiml_options`` — per-call overrides
+          2. ``VoiceChannelConfig.twiml_options`` — channel-wide defaults
+          3. TAC defaults: welcome greeting, ``conversation_configuration`` from
+             ``TACConfig``, and ``action_url`` from Studio handoff (if configured).
+
         ``options.websocket_url`` must be the publicly accessible WebSocket
         endpoint (e.g., ``wss://your-domain.ngrok.app/ws``). Unlike inbound calls
         where TACServer sets this automatically, outbound calls require it
@@ -467,16 +473,21 @@ class VoiceChannel(BaseChannel):
             from_number=mask_phone(from_number),
         )
 
+        # Same layering as handle_incoming_call, minus the customizer
+        # (customizers receive a TwiMLRequest from an inbound webhook; there
+        # is no equivalent for outbound).
+        merged = TwiMLOptions(
+            welcome_greeting=(self._deprecated_server_welcome_greeting or DEFAULT_WELCOME_GREETING),
+            conversation_configuration=self.tac.config.conversation_configuration_id,
+            action_url=self._resolve_outbound_action_url(options.twiml_options),
+        )
+        if self._static_twiml_options is not None:
+            self._overlay_fields(merged, self._static_twiml_options)
+        if options.twiml_options is not None:
+            self._overlay_fields(merged, options.twiml_options)
+
         try:
-            twiml_xml = twiml.generate_twiml(
-                options.websocket_url,
-                TwiMLOptions(
-                    welcome_greeting=options.welcome_greeting,
-                    action_url=options.action_url,
-                    conversation_configuration=self.tac.config.conversation_configuration_id,
-                    custom_parameters=options.custom_parameters,
-                ),
-            )
+            twiml_xml = twiml.generate_twiml(options.websocket_url, merged)
 
             client = self._get_twilio_client()
             call = await asyncio.to_thread(
@@ -499,6 +510,32 @@ class VoiceChannel(BaseChannel):
                 exc_info=True,
             )
             raise
+
+    def _resolve_outbound_action_url(self, per_call: TwiMLOptions | None) -> str | None:
+        """Resolve action_url for outbound calls.
+
+        Precedence: per-call twiml_options → channel-static twiml_options →
+        Studio handoff. There's no server-generated cleanup URL for outbound
+        because the call is initiated programmatically.
+        """
+        if (
+            per_call is not None
+            and "action_url" in per_call.model_fields_set
+            and per_call.action_url is not None
+        ):
+            return per_call.action_url
+        if (
+            self._static_twiml_options is not None
+            and "action_url" in self._static_twiml_options.model_fields_set
+            and self._static_twiml_options.action_url is not None
+        ):
+            return self._static_twiml_options.action_url
+        if self.tac.config.studio_handoff_flow_sid:
+            return studio_voice_handoff_url(
+                self.tac.config.account_sid,
+                self.tac.config.studio_handoff_flow_sid,
+            )
+        return None
 
     async def _handle_prompt_async(
         self,

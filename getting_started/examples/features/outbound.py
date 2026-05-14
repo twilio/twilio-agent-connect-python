@@ -41,6 +41,7 @@ from tac.models.outbound import (
 )
 from tac.models.session import ConversationSession
 from tac.models.tac import TACMemoryResponse
+from tac.models.voice import TwiMLOptions
 from tac.server import TACFastAPIServer
 from tac.server.config import TACServerConfig
 
@@ -172,8 +173,10 @@ async def initiate_outbound(args: argparse.Namespace) -> None:
                 InitiateVoiceConversationOptions(
                     to=args.to,
                     websocket_url=f"wss://{public_domain}/ws",
-                    welcome_greeting=args.welcome_greeting,
-                    action_url=f"https://{public_domain}/conversation-relay-callback",
+                    twiml_options=TwiMLOptions(
+                        welcome_greeting=args.welcome_greeting,
+                        action_url=f"https://{public_domain}/conversation-relay-callback",
+                    ),
                 )
             )
             print(f"Call placed to {args.to} (SID: {voice_result.call_sid})")
