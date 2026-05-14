@@ -1,5 +1,8 @@
 """Tests for Voice WebSocket message models."""
 
+import pytest
+from pydantic import ValidationError
+
 from tac.models.voice import (
     CustomParameters,
     InterruptMessage,
@@ -8,6 +11,7 @@ from tac.models.voice import (
     SetupMessage,
     TwiMLOptions,
     TwiMLRequestContext,
+    VoiceServerURLs,
 )
 
 
@@ -265,13 +269,12 @@ class TestTwiMLOptionsFieldsSet:
     """Merge semantics rely on Pydantic's model_fields_set."""
 
     def test_unset_scalar_fields_are_none(self) -> None:
-        options = TwiMLOptions(websocket_url="wss://x")
+        options = TwiMLOptions()
         assert options.voice is None
         assert "voice" not in options.model_fields_set
 
     def test_explicitly_set_fields_tracked(self) -> None:
         options = TwiMLOptions(
-            websocket_url="wss://x",
             voice="en-US-Journey-D",
             dtmf_detection=False,
         )
@@ -285,3 +288,23 @@ class TestTwiMLOptionsFieldsSet:
         assert lang.voice is None
         assert lang.tts_provider is None
         assert lang.transcription_provider is None
+
+
+class TestVoiceServerURLs:
+    """VoiceServerURLs is the server → channel handoff for absolute URLs."""
+
+    def test_websocket_url_required(self) -> None:
+        with pytest.raises(ValidationError):
+            VoiceServerURLs()  # type: ignore[call-arg]
+
+    def test_conversation_relay_callback_url_optional(self) -> None:
+        urls = VoiceServerURLs(websocket_url="wss://example.com/ws")
+        assert urls.conversation_relay_callback_url is None
+
+    def test_both_urls(self) -> None:
+        urls = VoiceServerURLs(
+            websocket_url="wss://example.com/ws",
+            conversation_relay_callback_url="https://example.com/end",
+        )
+        assert urls.websocket_url == "wss://example.com/ws"
+        assert urls.conversation_relay_callback_url == "https://example.com/end"

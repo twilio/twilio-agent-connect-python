@@ -147,22 +147,41 @@ class LanguageConfig(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class VoiceServerURLs(BaseModel):
+    """Absolute URLs Twilio calls back to for a given voice deployment.
+
+    These are server-owned — they depend on where the app is hosted
+    (``public_domain`` plus path). The voice channel accepts them as input
+    rather than building them itself, so adapters for other web frameworks
+    (FastAPI, Flask, Django, …) can supply their own and the channel stays
+    framework-agnostic.
+    """
+
+    websocket_url: str = Field(
+        ...,
+        description="Public WebSocket URL for ConversationRelay, e.g. "
+        "'wss://example.ngrok.app/ws'.",
+    )
+    conversation_relay_callback_url: str | None = Field(
+        default=None,
+        description="Public HTTPS URL for the ConversationRelay action callback. "
+        "Required in relay-only mode so session cleanup fires when the call ends; "
+        "ignored in orchestrated mode (Conversation Orchestrator handles lifecycle).",
+    )
+
+    model_config = {"populate_by_name": True}
+
+
 class TwiMLOptions(BaseModel):
     """Options for generating ConversationRelay TwiML.
 
     Fields map to the attributes documented at
     https://www.twilio.com/docs/voice/twiml/connect/conversationrelay .
-    All fields except ``websocket_url`` are optional. ``VoiceChannel.handle_incoming_call``
-    merges these values over TAC defaults using Pydantic's ``model_fields_set`` —
-    only fields explicitly set by the caller override TAC's defaults.
+    All fields are optional. ``VoiceChannel.handle_incoming_call`` merges these
+    values over TAC defaults using Pydantic's ``model_fields_set`` — only
+    fields explicitly set by the caller override TAC's defaults.
     """
 
-    websocket_url: str = Field(
-        default="",
-        description="WebSocket URL for ConversationRelay. Usually set by the server "
-        "from TACServerConfig.public_domain — resolvers and other overlay callers "
-        "can leave it empty and the server/channel will fill it in.",
-    )
     custom_parameters: CustomParameters | dict[str, Any] | None = Field(
         None,
         description="Custom parameters to pass to ConversationRelay",

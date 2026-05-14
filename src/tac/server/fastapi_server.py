@@ -16,7 +16,7 @@ from tac.channels.base import BaseChannel
 from tac.channels.websocket_protocol import WebSocketDisconnectError
 from tac.core.logging import get_logger
 from tac.core.tac import TAC
-from tac.models.voice import TwiMLOptions, TwiMLRequestContext
+from tac.models.voice import TwiMLRequestContext, VoiceServerURLs
 from tac.server.config import TACServerConfig
 
 if TYPE_CHECKING:
@@ -207,21 +207,18 @@ class TACFastAPIServer:
             @app.post(config.twiml_path, dependencies=[Depends(http_sig)])
             async def post_twiml(request: Request) -> Response:
                 """Generate TwiML for incoming voice calls."""
-                websocket_url = f"wss://{config.public_domain}{config.websocket_path}"
-                # In relay-only mode the server owns the call-ended callback so
-                # sessions get cleaned up. In orchestrated mode CO manages
-                # lifecycle, so no default action_url is needed. The channel
-                # will override this with the Studio handoff URL if
-                # studio_handoff_flow_sid is set.
-                default_action_url = (
-                    f"https://{config.public_domain}{config.conversation_relay_callback_path}"
-                    if not self.tac.is_orchestrator_enabled()
-                    else None
+                # Server-owned URLs Twilio will call back to. In relay-only mode
+                # the server owns the call-ended callback so sessions get
+                # cleaned up; in orchestrated mode CO manages lifecycle so the
+                # callback URL is omitted.
+                server_urls = VoiceServerURLs(
+                    websocket_url=f"wss://{config.public_domain}{config.websocket_path}",
+                    conversation_relay_callback_url=(
+                        f"https://{config.public_domain}{config.conversation_relay_callback_path}"
+                        if not self.tac.is_orchestrator_enabled()
+                        else None
+                    ),
                 )
-
-                # Server-owned plumbing: only websocket_url. Greeting and other
-                # TwiML attributes live on VoiceChannelConfig.
-                options = TwiMLOptions(websocket_url=websocket_url)
 
                 try:
                     form = await request.form()
@@ -231,8 +228,7 @@ class TACFastAPIServer:
                 request_context = TwiMLRequestContext.from_form(form_dict)
 
                 twiml = await vc.handle_incoming_call(
-                    options,
-                    default_action_url=default_action_url,
+                    server_urls,
                     request_context=request_context,
                 )
                 return Response(content=twiml, media_type="application/xml")

@@ -9,45 +9,42 @@ from tac.models.voice import TwiMLOptions
 
 
 def generate_twiml(
-    options: TwiMLOptions | dict[str, Any],
+    websocket_url: str,
+    options: TwiMLOptions | dict[str, Any] | None = None,
 ) -> str:
     """
-    Generate TwiML XML for ConversationRelay with custom parameters.
+    Generate TwiML XML for ConversationRelay.
 
-    This is a low-level function for generating TwiML with arbitrary custom
-    parameters. For automatic conversation creation and participant management,
-    use VoiceChannel.handle_incoming_call() instead.
+    This is a low-level function. Most users should call
+    ``VoiceChannel.handle_incoming_call`` instead — it layers in TAC defaults,
+    static ``twiml_options`` from ``VoiceChannelConfig``, and any per-call
+    customizer output.
 
     Args:
-        options: TwiML generation options (TwiMLOptions model or dict with:
-            - websocket_url (required): WebSocket URL for ConversationRelay
-            - custom_parameters (optional): Dict of custom parameters
-            - welcome_greeting (optional): Initial greeting message
-            - action_url (optional): URL for call end webhook
-            - conversation_configuration (optional): Conversation Service SID for
-              automatic conversation creation
+        websocket_url: Public WebSocket URL for ConversationRelay
+            (e.g. ``'wss://example.ngrok.app/ws'``).
+        options: Optional ``TwiMLOptions`` (or dict) with any combination of
+            custom_parameters, welcome_greeting, action_url,
+            conversation_configuration, voice, language, transcription_provider,
+            tts_provider, interruptible, dtmf_detection, debug, or languages.
 
     Returns:
-        TwiML XML string ready to return to Twilio
+        TwiML XML string ready to return to Twilio.
 
     Example:
         >>> twiml = generate_twiml(
-        ...     {
-        ...         "websocket_url": "wss://example.com/voice",
-        ...         "custom_parameters": {
-        ...             "session_id": "sess_abc123",
-        ...             "user_language": "es",
-        ...         },
-        ...         "welcome_greeting": "Hello!",
-        ...         "conversation_configuration": "conv_configuration_xxxx",
-        ...     }
+        ...     "wss://example.com/voice",
+        ...     TwiMLOptions(
+        ...         welcome_greeting="Hello!",
+        ...         conversation_configuration="conv_configuration_xxxx",
+        ...     ),
         ... )
     """
-    # Handle dict input (convert to TwiMLOptions)
-    if isinstance(options, dict):
+    if options is None:
+        options = TwiMLOptions()
+    elif isinstance(options, dict):
         options = TwiMLOptions(**options)
 
-    # Create VoiceResponse
     response = VoiceResponse()
 
     # Create Connect verb with optional action
@@ -58,7 +55,7 @@ def generate_twiml(
 
     # Build ConversationRelay kwargs. The twilio SDK converts snake_case to
     # camelCase automatically, and serializes bool/str as TwiML attribute values.
-    relay_kwargs: dict[str, Any] = {"url": options.websocket_url}
+    relay_kwargs: dict[str, Any] = {"url": websocket_url}
     optional_attrs = (
         "welcome_greeting",
         "conversation_configuration",
