@@ -119,15 +119,12 @@ class TACFastAPIServer:
         self.voice_channel = voice_channel
         self.messaging_channels: list[MessagingChannel] = messaging_channels or []
 
-        # Forward deprecated TACServerConfig.welcome_greeting to the voice channel
-        # if the channel wasn't given its own. Drop this forwarding when the
-        # field is removed from TACServerConfig.
-        if (
-            self.config.welcome_greeting is not None
-            and self.voice_channel is not None
-            and "welcome_greeting" not in self.voice_channel.config.model_fields_set
-        ):
-            self.voice_channel._welcome_greeting = self.config.welcome_greeting
+        # Forward deprecated TACServerConfig.welcome_greeting to the voice
+        # channel as a fallback default. twiml_options.welcome_greeting (if set)
+        # still wins over this. Drop this forwarding when the field is removed
+        # from TACServerConfig.
+        if self.config.welcome_greeting is not None and self.voice_channel is not None:
+            self.voice_channel._deprecated_server_welcome_greeting = self.config.welcome_greeting
 
         # Gather all channels that need webhook processing
         self.webhook_channels: list[BaseChannel] = []

@@ -1,16 +1,14 @@
 """
 Feature: ConversationRelay TwiML customization
 
-TAC exposes three layers of TwiML customization on VoiceChannelConfig,
-each for a different use case:
+TAC exposes two layers of TwiML customization on VoiceChannelConfig:
 
-1. ``welcome_greeting`` — shortcut for the most common override.
-2. ``twiml_options`` — static TwiMLOptions applied to every call.
-3. ``customize_twiml_options`` — async callable for per-call logic, receives
+1. ``twiml_options`` — static TwiMLOptions applied to every call.
+2. ``customize_twiml_options`` — async callable for per-call logic, receives
    a TwiMLRequest (parsed Twilio webhook fields: From, To, CallerCountry, …).
 
-Higher layers override lower ones, and TAC fills anything you didn't set
-(websocket URL, action URL, conversation_configuration).
+The customizer wins over static options, and TAC fills anything you didn't
+set (websocket URL, action URL, conversation_configuration).
 
 This example shows the static path (voice + language the same for every
 call). The customizer version for per-call localization is below in a
@@ -45,14 +43,14 @@ tac.on_message_ready(handle_message_ready)
 # ---- Static TwiML (same settings on every call) ------------------------------
 #
 # Set ``twiml_options`` on VoiceChannelConfig for attributes that don't depend
-# on who's calling. Use ``welcome_greeting`` as a shortcut for just the
-# greeting. TAC fills in websocket_url, action_url, and conversation_configuration.
+# on who's calling. TAC fills in websocket_url, action_url, and
+# conversation_configuration.
 
 voice_channel = VoiceChannel(
     tac,
     config=VoiceChannelConfig(
-        welcome_greeting="Hello! How can I help?",
         twiml_options=TwiMLOptions(
+            welcome_greeting="Hello! How can I help?",
             voice="en-US-Journey-D",
             language="en-US",
             tts_provider="google",
@@ -99,7 +97,7 @@ voice_channel = VoiceChannel(
 # voice_channel = VoiceChannel(
 #     tac,
 #     config=VoiceChannelConfig(
-#         welcome_greeting="Hello! How can I help?",
+#         twiml_options=TwiMLOptions(welcome_greeting="Hello! How can I help?"),
 #         customize_twiml_options=customize_twiml,
 #     ),
 # )

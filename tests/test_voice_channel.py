@@ -557,7 +557,9 @@ class TestVoiceChannel:
         tac = TAC(get_test_config())
         channel = VoiceChannel(
             tac,
-            config=VoiceChannelConfig(welcome_greeting="Welcome!"),
+            config=VoiceChannelConfig(
+                twiml_options=TwiMLOptions(welcome_greeting="Welcome!"),
+            ),
         )
 
         twiml = await channel.handle_incoming_call(
@@ -1538,11 +1540,16 @@ class TestStaticTwiMLOptions:
         assert 'language="en-US"' in twiml
 
     @pytest.mark.asyncio
-    async def test_welcome_greeting_shortcut(self) -> None:
+    async def test_welcome_greeting_via_twiml_options(self) -> None:
         from tac.channels.voice import VoiceChannelConfig
 
         tac = TAC(get_test_config())
-        channel = VoiceChannel(tac, config=VoiceChannelConfig(welcome_greeting="Bonjour!"))
+        channel = VoiceChannel(
+            tac,
+            config=VoiceChannelConfig(
+                twiml_options=TwiMLOptions(welcome_greeting="Bonjour!"),
+            ),
+        )
         twiml = await channel.handle_incoming_call(
             VoiceEndpoints(websocket_url="wss://example.com/ws"),
         )
@@ -1628,7 +1635,7 @@ class TestCustomizeTwiMLOptions:
         channel = VoiceChannel(
             tac,
             config=VoiceChannelConfig(
-                welcome_greeting="Channel default",
+                twiml_options=TwiMLOptions(welcome_greeting="Channel default"),
                 customize_twiml_options=customizer,
             ),
         )

@@ -868,14 +868,20 @@ class TestDeprecatedWelcomeGreetingForwarding:
         resp = client.post("/twiml", headers={"X-Twilio-Signature": signature})
         assert 'welcomeGreeting="Legacy!"' in resp.text
 
-    def test_channel_greeting_wins_over_deprecated_server_field(self) -> None:
+    def test_twiml_options_greeting_wins_over_deprecated_server_field(self) -> None:
         from fastapi.testclient import TestClient
 
         from tac.channels.voice import VoiceChannel, VoiceChannelConfig
+        from tac.models.voice import TwiMLOptions
         from tac.server import TACFastAPIServer
 
         tac = TAC(get_test_config())
-        vc = VoiceChannel(tac, config=VoiceChannelConfig(welcome_greeting="Channel!"))
+        vc = VoiceChannel(
+            tac,
+            config=VoiceChannelConfig(
+                twiml_options=TwiMLOptions(welcome_greeting="Channel!"),
+            ),
+        )
         with pytest.warns(DeprecationWarning):
             server_config = TACServerConfig(
                 public_domain="test.ngrok.io", welcome_greeting="Legacy!"

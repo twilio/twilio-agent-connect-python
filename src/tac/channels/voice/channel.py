@@ -35,6 +35,8 @@ from .config import VoiceChannelConfig
 _POLL_ATTEMPTS = 5
 _POLL_BASE_DELAY = 0.25
 
+DEFAULT_WELCOME_GREETING = "Hello! How can I assist you today?"
+
 
 class VoiceChannel(BaseChannel):
     """
@@ -78,9 +80,13 @@ class VoiceChannel(BaseChannel):
         super().__init__(tac, memory_mode=config.memory_mode)
         self.config = config
         self.session_manager = config.session_manager
-        self._welcome_greeting = config.welcome_greeting
         self._static_twiml_options = config.twiml_options
         self._customize_twiml_options = config.customize_twiml_options
+        # Populated by TACFastAPIServer from the deprecated
+        # TACServerConfig.welcome_greeting. Used only as a fallback when
+        # twiml_options/customizer don't set welcome_greeting. Remove when
+        # the deprecated field is deleted.
+        self._deprecated_server_welcome_greeting: str | None = None
         self._websocket_manager = WebSocketManager()
         self._twilio_client: Client | None = None
 
@@ -118,7 +124,7 @@ class VoiceChannel(BaseChannel):
         1. Output of ``VoiceChannelConfig.customize_twiml_options`` if configured
            and ``twiml_request`` is given. Fields it explicitly sets win.
         2. ``VoiceChannelConfig.twiml_options`` — static per-channel defaults.
-        3. TAC defaults: ``welcome_greeting`` from ``VoiceChannelConfig``,
+        3. TAC defaults: a fixed default ``welcome_greeting``,
            ``conversation_configuration`` from ``TACConfig``, and ``action_url``
            resolved via Studio handoff (when ``studio_handoff_flow_sid`` is
            configured), else ``endpoints.action_url`` (the SDK-generated
@@ -144,9 +150,11 @@ class VoiceChannel(BaseChannel):
         if self._customize_twiml_options is not None and twiml_request is not None:
             customized = await self._customize_twiml_options(twiml_request)
 
-        # Start from TAC defaults.
+        # Start from TAC defaults. welcome_greeting prefers (in order):
+        #   deprecated server value → SDK default.
+        # twiml_options and customizer can still override on top.
         merged = TwiMLOptions(
-            welcome_greeting=self._welcome_greeting,
+            welcome_greeting=(self._deprecated_server_welcome_greeting or DEFAULT_WELCOME_GREETING),
             conversation_configuration=self.tac.config.conversation_configuration_id,
             action_url=self._resolve_action_url(customized, endpoints),
         )

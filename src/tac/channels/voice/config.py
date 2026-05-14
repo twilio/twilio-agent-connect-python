@@ -24,13 +24,11 @@ class VoiceChannelConfig(BaseModel):
             - "once": Retrieve memory once at conversation start with empty query and cache it.
                      Cache is invalidated when conversation becomes INACTIVE.
             - "never": Skip memory retrieval
-        welcome_greeting: Default greeting spoken at the start of every call.
-            Equivalent to setting ``twiml_options=TwiMLOptions(welcome_greeting=...)``
-            but shorter for the common case.
         twiml_options: Static ``TwiMLOptions`` applied to every call (voice,
-            language, transcription provider, ``<Language>`` children, etc.).
-            Use this when the same ConversationRelay configuration is correct
-            for every call. For per-call customization see ``customize_twiml_options``.
+            language, transcription provider, welcome_greeting, ``<Language>``
+            children, etc.). Use this when the same ConversationRelay
+            configuration is correct for every call. For per-call customization
+            see ``customize_twiml_options``.
         customize_twiml_options: Optional async callable producing per-call
             ``TwiMLOptions`` overrides. Receives a framework-neutral
             ``TwiMLRequest`` (parsed Twilio webhook fields). Any field the
@@ -50,11 +48,6 @@ class VoiceChannelConfig(BaseModel):
     memory_mode: MemoryMode = Field(
         default="never",
         description="Memory retrieval mode for this channel",
-    )
-    welcome_greeting: str = Field(
-        default="Hello! How can I assist you today?",
-        description="Default greeting spoken at the start of every call. "
-        "Shortcut for TwiMLOptions(welcome_greeting=...).",
     )
     twiml_options: TwiMLOptions | None = Field(
         default=None,
