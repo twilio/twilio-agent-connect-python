@@ -79,24 +79,8 @@ class VoiceChannel(BaseChannel):
         super().__init__(tac, memory_mode=config.memory_mode)
         self.config = config
         self.session_manager = config.session_manager
-        self._default_twiml_options = config.default_twiml_options
-        self._customize_inbound_twiml = config.customize_inbound_twiml
-        # Populated by TACFastAPIServer from the deprecated
-        # TACServerConfig.welcome_greeting. Used only as a fallback when
-        # twiml_options/customizer don't set welcome_greeting. Remove when
-        # the deprecated field is deleted.
-        self._deprecated_server_welcome_greeting: str | None = None
         self._websocket_manager = WebSocketManager()
         self._twilio_client: Client | None = None
-
-    def _set_deprecated_server_welcome_greeting(self, greeting: str) -> None:
-        """Internal API for TACFastAPIServer to forward the deprecated
-        ``TACServerConfig.welcome_greeting``. Used as a fallback when neither
-        ``default_twiml_options`` nor the customizer sets a greeting.
-
-        Remove this method when ``TACServerConfig.welcome_greeting`` is deleted.
-        """
-        self._deprecated_server_welcome_greeting = greeting
 
     def _require_websocket_url(self, action: str) -> str:
         """Return the channel's configured websocket_url, or raise with a clear
@@ -168,31 +152,27 @@ class VoiceChannel(BaseChannel):
 
         # Invoke the customizer if configured and we have a request context.
         customized: TwiMLOptions | None = None
-        if self._customize_inbound_twiml is not None and twiml_request is not None:
-            customized = await self._customize_inbound_twiml(twiml_request)
+        if self.config.customize_inbound_twiml is not None and twiml_request is not None:
+            customized = await self.config.customize_inbound_twiml(twiml_request)
 
-        # Start from TAC defaults. welcome_greeting prefers (in order):
-        #   deprecated server value → SDK default.
-        # twiml_options and customizer can still override on top.
-        merged = TwiMLOptions(
-            welcome_greeting=(
-                self._deprecated_server_welcome_greeting
-                if self._deprecated_server_welcome_greeting is not None
-                else DEFAULT_WELCOME_GREETING
-            ),
-            conversation_configuration=self.tac.config.conversation_configuration_id,
-            action_url=self._resolve_action_url(customized),
-        )
-
-        # Overlay channel default_twiml_options.
-        if self._default_twiml_options is not None:
-            self._overlay_fields(merged, self._default_twiml_options)
-
-        # Overlay customizer output (highest priority).
-        if customized is not None:
-            self._overlay_fields(merged, customized)
-
+        merged = self._build_twiml_options(customized)
         return twiml.generate_twiml(websocket_url, merged)
+
+    def _build_twiml_options(self, per_call: TwiMLOptions | None) -> TwiMLOptions:
+        """Layer TwiML options: TAC defaults → channel ``default_twiml_options``
+        → ``per_call`` (customizer output for inbound, or
+        ``InitiateVoiceConversationOptions.twiml_options`` for outbound).
+        """
+        merged = TwiMLOptions(
+            welcome_greeting=DEFAULT_WELCOME_GREETING,
+            conversation_configuration=self.tac.config.conversation_configuration_id,
+            action_url=self._resolve_action_url(per_call),
+        )
+        if self.config.default_twiml_options is not None:
+            self._overlay_fields(merged, self.config.default_twiml_options)
+        if per_call is not None:
+            self._overlay_fields(merged, per_call)
+        return merged
 
     @staticmethod
     def _overlay_fields(target: TwiMLOptions, source: TwiMLOptions) -> None:
@@ -242,11 +222,11 @@ class VoiceChannel(BaseChannel):
         ):
             return customized.action_url
         if (
-            self._default_twiml_options is not None
-            and "action_url" in self._default_twiml_options.model_fields_set
-            and self._default_twiml_options.action_url is not None
+            self.config.default_twiml_options is not None
+            and "action_url" in self.config.default_twiml_options.model_fields_set
+            and self.config.default_twiml_options.action_url is not None
         ):
-            return self._default_twiml_options.action_url
+            return self.config.default_twiml_options.action_url
         if self.tac.config.studio_handoff_flow_sid:
             return studio_voice_handoff_url(
                 self.tac.config.account_sid,
@@ -512,19 +492,7 @@ class VoiceChannel(BaseChannel):
         # Same layering as handle_incoming_call, minus the customizer
         # (customizers receive a TwiMLRequest from an inbound webhook; there
         # is no equivalent for outbound).
-        merged = TwiMLOptions(
-            welcome_greeting=(
-                self._deprecated_server_welcome_greeting
-                if self._deprecated_server_welcome_greeting is not None
-                else DEFAULT_WELCOME_GREETING
-            ),
-            conversation_configuration=self.tac.config.conversation_configuration_id,
-            action_url=self._resolve_action_url(options.twiml_options),
-        )
-        if self._default_twiml_options is not None:
-            self._overlay_fields(merged, self._default_twiml_options)
-        if options.twiml_options is not None:
-            self._overlay_fields(merged, options.twiml_options)
+        merged = self._build_twiml_options(options.twiml_options)
 
         try:
             twiml_xml = twiml.generate_twiml(websocket_url, merged)

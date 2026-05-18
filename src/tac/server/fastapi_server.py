@@ -16,7 +16,7 @@ from tac.channels.base import BaseChannel
 from tac.channels.websocket_protocol import WebSocketDisconnectError
 from tac.core.logging import get_logger
 from tac.core.tac import TAC
-from tac.models.voice import TwiMLRequest
+from tac.models.voice import TwiMLOptions, TwiMLRequest
 from tac.server.config import TACServerConfig
 
 if TYPE_CHECKING:
@@ -120,14 +120,7 @@ class TACFastAPIServer:
 
         if self.voice_channel is not None:
             self._configure_voice_channel_urls()
-            # Forward deprecated TACServerConfig.welcome_greeting to the voice
-            # channel as a fallback default. twiml_options.welcome_greeting
-            # (if set) still wins over this. Drop when the field is removed
-            # from TACServerConfig.
-            if self.config.welcome_greeting is not None:
-                self.voice_channel._set_deprecated_server_welcome_greeting(
-                    self.config.welcome_greeting
-                )
+            self._forward_deprecated_welcome_greeting()
 
         # Gather all channels that need webhook processing
         self.webhook_channels: list[BaseChannel] = []
@@ -161,6 +154,24 @@ class TACFastAPIServer:
             vc_config.action_url = (
                 f"https://{self.config.public_domain}{self.config.conversation_relay_callback_path}"
             )
+
+    def _forward_deprecated_welcome_greeting(self) -> None:
+        """Forward the deprecated ``TACServerConfig.welcome_greeting`` into
+        the voice channel's ``default_twiml_options.welcome_greeting`` so it
+        flows through the normal merge pipeline. Only fills in the field if
+        the user didn't already set it. Drop this method when the deprecated
+        field is removed from ``TACServerConfig``.
+        """
+        assert self.voice_channel is not None  # checked by caller
+        if self.config.welcome_greeting is None:
+            return
+        vc_config = self.voice_channel.config
+        if vc_config.default_twiml_options is None:
+            vc_config.default_twiml_options = TwiMLOptions(
+                welcome_greeting=self.config.welcome_greeting
+            )
+        elif "welcome_greeting" not in vc_config.default_twiml_options.model_fields_set:
+            vc_config.default_twiml_options.welcome_greeting = self.config.welcome_greeting
 
     def _register_routes(self, app: FastAPI) -> None:
         """Register TAC routes (conversation webhook, voice, CI) onto the given FastAPI app."""

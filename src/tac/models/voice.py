@@ -350,15 +350,7 @@ class TwiMLRequest(BaseModel):
     @classmethod
     def from_form(cls, form: dict[str, str]) -> "TwiMLRequest":
         """Build a context from a raw Twilio form dict, bucketing unknown keys into ``extra``."""
-        known_aliases = {
-            "From",
-            "To",
-            "CallSid",
-            "CallerCountry",
-            "CallerState",
-            "CallerCity",
-            "Direction",
-        }
+        known_aliases = {f.alias for f in cls.model_fields.values() if f.alias}
         known: dict[str, str] = {}
         extra: dict[str, str] = {}
         for key, value in form.items():
