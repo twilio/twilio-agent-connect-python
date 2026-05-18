@@ -1,24 +1,21 @@
 """
 Feature: ConversationRelay TwiML customization
 
-TAC exposes two user-facing layers of TwiML customization on
-VoiceChannelConfig (under these, TAC fills in the websocket URL, action URL,
-conversation_configuration, and a default welcome greeting):
+Two layers on VoiceChannelConfig (highest precedence first):
 
-1. ``default_twiml_options`` — static TwiMLOptions applied to every call.
-2. ``customize_inbound_twiml`` — async callable for per-call logic, receives
-   a TwiMLRequest (parsed Twilio webhook fields: From, To, CallerCountry, …).
+1. ``customize_inbound_twiml`` — async callable receiving a TwiMLRequest
+   (parsed Twilio webhook fields: From, To, CallerCountry, …). Inbound only.
+   For outbound, pass per-call TwiMLOptions on InitiateVoiceConversationOptions.
+2. ``default_twiml_options`` — static TwiMLOptions applied to every call
+   (inbound and outbound).
 
-The customizer wins over static options, which win over TAC defaults.
+Layers merge per-field: the customizer overrides only the fields it
+explicitly sets; everything else falls through to ``default_twiml_options``
+and then to TAC defaults (websocket URL, action URL, conversation_configuration).
 
-Channel ``default_twiml_options`` applies to both inbound and outbound calls
-(``initiate_outbound_conversation``). The customizer only runs for inbound
-calls — outbound calls receive per-call TwiML via
-``InitiateVoiceConversationOptions.twiml_options`` at each call site instead.
-
-This example shows the static path (voice + language the same for every
-call). The customizer version for per-call localization is below in a
-commented block — uncomment if you need it.
+This example shows both layers together — channel-wide defaults plus a
+country-based customizer that overrides language/voice/greeting for
+specific callers.
 """
 
 from dotenv import load_dotenv
@@ -27,7 +24,7 @@ from tac import TAC, TACConfig
 from tac.channels.voice import VoiceChannel, VoiceChannelConfig
 from tac.models.session import ConversationSession
 from tac.models.tac import TACMemoryResponse
-from tac.models.voice import LanguageConfig, TwiMLOptions
+from tac.models.voice import TwiMLOptions, TwiMLRequest
 from tac.server import TACFastAPIServer
 
 load_dotenv()
@@ -46,67 +43,34 @@ async def handle_message_ready(
 tac.on_message_ready(handle_message_ready)
 
 
-# ---- Static TwiML (same settings on every call) ------------------------------
-#
-# Set ``default_twiml_options`` on VoiceChannelConfig for attributes that don't
-# depend on who's calling. TAC fills in websocket_url, action_url, and
-# conversation_configuration.
+async def customize_twiml(req: TwiMLRequest) -> TwiMLOptions:
+    """Per-call overrides for inbound calls. Only the fields you set here
+    override the channel default; the rest fall through."""
+    if req.caller_country == "MX":
+        return TwiMLOptions(
+            language="es-MX",
+            welcome_greeting="¡Hola! ¿En qué puedo ayudarte?",
+        )
+    if req.caller_country == "FR":
+        return TwiMLOptions(
+            language="fr-FR",
+            welcome_greeting="Bonjour ! Comment puis-je vous aider ?",
+        )
+    return TwiMLOptions()  # fall through to default_twiml_options
+
 
 voice_channel = VoiceChannel(
     tac,
     config=VoiceChannelConfig(
+        # Channel-wide defaults — apply to every call (inbound + outbound).
         default_twiml_options=TwiMLOptions(
-            welcome_greeting="Hello! How can I help?",
-            voice="en-US-Journey-D",
-            language="en-US",
-            tts_provider="google",
-            transcription_provider="deepgram",
+            welcome_greeting="Hello! This is a default greeting.",
             interruptible="speech",
-            # <Language> children let the caller switch languages mid-call.
-            languages=[
-                LanguageConfig(code="en-US", voice="en-US-Journey-D", tts_provider="google"),
-                LanguageConfig(code="es-MX", voice="es-MX-Neural2-A", tts_provider="google"),
-            ],
         ),
+        # Per-call inbound overrides — runs once per inbound call.
+        customize_inbound_twiml=customize_twiml,
     ),
 )
-
-
-# ---- Per-call TwiML (customize_inbound_twiml) --------------------------------
-#
-# Use this when the TwiML depends on who's calling — e.g., localization by
-# caller country, per-tenant voice, A/B tests. The customizer returns
-# TwiMLOptions overrides; anything it doesn't set falls through to
-# ``default_twiml_options`` (above) and then to TAC defaults.
-#
-# Uncomment the block below to replace the static setup with per-call logic.
-#
-# from tac.models.voice import TwiMLRequest
-#
-#
-# async def customize_twiml(req: TwiMLRequest) -> TwiMLOptions:
-#     if req.caller_country == "MX":
-#         return TwiMLOptions(
-#             language="es-MX",
-#             voice="es-MX-Neural2-A",
-#             welcome_greeting="¡Hola! ¿En qué puedo ayudarte?",
-#         )
-#     if req.caller_country == "FR":
-#         return TwiMLOptions(
-#             language="fr-FR",
-#             voice="fr-FR-Neural2-A",
-#             welcome_greeting="Bonjour ! Comment puis-je vous aider ?",
-#         )
-#     return TwiMLOptions()  # fall through to default_twiml_options + TAC defaults
-#
-#
-# voice_channel = VoiceChannel(
-#     tac,
-#     config=VoiceChannelConfig(
-#         default_twiml_options=TwiMLOptions(welcome_greeting="Hello! How can I help?"),
-#         customize_inbound_twiml=customize_twiml,
-#     ),
-# )
 
 
 if __name__ == "__main__":

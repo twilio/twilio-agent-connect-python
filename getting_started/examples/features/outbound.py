@@ -43,7 +43,6 @@ from tac.models.session import ConversationSession
 from tac.models.tac import TACMemoryResponse
 from tac.models.voice import TwiMLOptions
 from tac.server import TACFastAPIServer
-from tac.server.config import TACServerConfig
 
 load_dotenv()
 set_tracing_disabled(True)
@@ -92,7 +91,17 @@ whatsapp_channel = (
     if tac.config.whatsapp_number
     else None
 )
-voice_channel = VoiceChannel(tac, config=VoiceChannelConfig(memory_mode="always"))
+voice_channel = VoiceChannel(
+    tac,
+    config=VoiceChannelConfig(
+        memory_mode="once",
+        # Channel-wide TwiML applied to every call (inbound + outbound).
+        default_twiml_options=TwiMLOptions(
+            voice="en-US-Journey-D",
+            welcome_greeting="Hi! How can I help?",
+        ),
+    ),
+)
 
 
 async def handle_message_ready(
@@ -163,24 +172,10 @@ async def initiate_outbound(args: argparse.Namespace) -> None:
             print("\nWaiting for replies... (Ctrl+C to exit)\n")
 
         elif args.channel == "voice":
-            server_config = TACServerConfig.from_env()
-            public_domain = server_config.public_domain
-            if not public_domain:
-                print("TWILIO_VOICE_PUBLIC_DOMAIN is required for voice calls.")
-                sys.exit(1)
-
-            # Per-call TwiML for outbound calls. Inbound's equivalent is
-            # `customize_inbound_twiml` on VoiceChannelConfig (see
-            # voice_twiml_customization.py). Use VoiceChannelConfig.default_twiml_options
-            # for settings that don't vary per call (voice, language, etc.).
             voice_result = await voice_channel.initiate_outbound_conversation(
                 InitiateVoiceConversationOptions(
                     to=args.to,
-                    websocket_url=f"wss://{public_domain}/ws",
-                    twiml_options=TwiMLOptions(
-                        welcome_greeting=args.welcome_greeting,
-                        action_url=f"https://{public_domain}/conversation-relay-callback",
-                    ),
+                    twiml_options=TwiMLOptions(welcome_greeting=args.welcome_greeting),
                 )
             )
             print(f"Call placed to {args.to} (SID: {voice_result.call_sid})")
