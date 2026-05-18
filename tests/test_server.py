@@ -672,6 +672,51 @@ class TestSignatureValidation:
         resp = client.post("/twiml")
         assert resp.status_code == 403
 
+    def test_conversation_relay_callback_rejects_missing_signature(self) -> None:
+        from fastapi.testclient import TestClient
+
+        from tac.channels.voice import VoiceChannel
+        from tac.server import TACFastAPIServer
+
+        tac = TAC(get_test_config())
+        server = TACFastAPIServer(
+            tac=tac,
+            config=TACServerConfig(public_domain="test.ngrok.io"),
+            voice_channel=VoiceChannel(tac),
+        )
+        client = TestClient(server.app)
+        resp = client.post("/conversation-relay-callback")
+        assert resp.status_code == 403
+
+    def test_conversation_relay_callback_accepts_valid_signature(self) -> None:
+        from fastapi.testclient import TestClient
+
+        from tac.channels.voice import VoiceChannel
+        from tac.server import TACFastAPIServer
+
+        tac = TAC(get_test_config())
+        server = TACFastAPIServer(
+            tac=tac,
+            config=TACServerConfig(public_domain="test.ngrok.io"),
+            voice_channel=VoiceChannel(tac),
+        )
+        client = TestClient(server.app)
+        form_data = {
+            "AccountSid": "ACtest123",
+            "CallSid": "CA123",
+            "CallStatus": "completed",
+            "From": "+15551234567",
+            "To": "+15559876543",
+            "Direction": "inbound",
+        }
+        signature = compute_signature("http://testserver/conversation-relay-callback", form_data)
+        resp = client.post(
+            "/conversation-relay-callback",
+            data=form_data,
+            headers={"X-Twilio-Signature": signature},
+        )
+        assert resp.status_code == 200
+
     def test_twiml_accepts_valid_form_signature(self) -> None:
         from fastapi.testclient import TestClient
 

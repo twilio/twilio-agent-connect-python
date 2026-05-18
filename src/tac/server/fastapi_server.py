@@ -236,7 +236,10 @@ class TACFastAPIServer:
                 adapter = FastAPIWebSocketAdapter(websocket)
                 await vc.handle_websocket(adapter)
 
-            @app.post(config.conversation_relay_callback_path)
+            @app.post(
+                config.conversation_relay_callback_path,
+                dependencies=[Depends(http_sig)],
+            )
             async def conversation_relay_callback(request: Request) -> Response:
                 """Handle ConversationRelay action callback (call ended)."""
                 try:

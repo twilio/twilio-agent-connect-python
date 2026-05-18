@@ -175,7 +175,11 @@ class VoiceChannel(BaseChannel):
         #   deprecated server value → SDK default.
         # twiml_options and customizer can still override on top.
         merged = TwiMLOptions(
-            welcome_greeting=(self._deprecated_server_welcome_greeting or DEFAULT_WELCOME_GREETING),
+            welcome_greeting=(
+                self._deprecated_server_welcome_greeting
+                if self._deprecated_server_welcome_greeting is not None
+                else DEFAULT_WELCOME_GREETING
+            ),
             conversation_configuration=self.tac.config.conversation_configuration_id,
             action_url=self._resolve_action_url(customized),
         )
@@ -194,10 +198,10 @@ class VoiceChannel(BaseChannel):
     def _overlay_fields(target: TwiMLOptions, source: TwiMLOptions) -> None:
         """Apply fields explicitly set on ``source`` onto ``target``.
 
-        Nested models (``custom_parameters``) and lists (``languages``,
-        ``extra``) replace wholesale — there's no per-key merging. If you add
-        a field that should merge (e.g. a dict of headers), special-case it
-        here instead of getting the default overwrite behavior.
+        Nested models (``custom_parameters``), lists (``languages``), and
+        dicts (``extra``) replace wholesale — there's no per-key merging.
+        If you add a field that should merge (e.g. a dict of headers),
+        special-case it here instead of getting the default overwrite behavior.
 
         ``action_url`` is skipped here on purpose — it's resolved once via
         ``_resolve_action_url`` looking at every layer at once, and that
@@ -509,7 +513,11 @@ class VoiceChannel(BaseChannel):
         # (customizers receive a TwiMLRequest from an inbound webhook; there
         # is no equivalent for outbound).
         merged = TwiMLOptions(
-            welcome_greeting=(self._deprecated_server_welcome_greeting or DEFAULT_WELCOME_GREETING),
+            welcome_greeting=(
+                self._deprecated_server_welcome_greeting
+                if self._deprecated_server_welcome_greeting is not None
+                else DEFAULT_WELCOME_GREETING
+            ),
             conversation_configuration=self.tac.config.conversation_configuration_id,
             action_url=self._resolve_action_url(options.twiml_options),
         )
