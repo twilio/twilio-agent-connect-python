@@ -151,11 +151,13 @@ class TACFastAPIServer:
                 "public_domain=... on TACServerConfig."
             )
         vc_config = self.voice_channel.config
-        if vc_config.websocket_url is None:
+        # Treat empty strings as unset — matches VoiceChannel._require_websocket_url
+        # which checks truthiness, not just None.
+        if not vc_config.websocket_url:
             vc_config.websocket_url = (
                 f"wss://{self.config.public_domain}{self.config.websocket_path}"
             )
-        if vc_config.action_url is None:
+        if not vc_config.action_url:
             vc_config.action_url = (
                 f"https://{self.config.public_domain}{self.config.conversation_relay_callback_path}"
             )

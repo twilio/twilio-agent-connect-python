@@ -822,6 +822,32 @@ class TestVoiceOutboundErrors:
         assert "Legacy greeting" in twiml_xml
         assert 'name="legacy"' in twiml_xml
 
+    def test_deprecated_flat_fields_marked_as_explicitly_set_after_forwarding(
+        self,
+    ) -> None:
+        """Forwarded deprecated values must end up in model_fields_set on the
+        twiml_options object, otherwise the merge layer in handle_incoming_call
+        / initiate_outbound_conversation would treat them as 'not set' and the
+        fallback default would override them."""
+        import warnings
+
+        from tac.models.voice import TwiMLOptions
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            opts = InitiateVoiceConversationOptions(
+                to="+15559876543",
+                websocket_url="wss://example.com/ws",
+                twiml_options=TwiMLOptions(voice="en-US-Journey-D"),
+                welcome_greeting="Legacy",
+            )
+        assert opts.twiml_options is not None
+        assert opts.twiml_options.welcome_greeting == "Legacy"
+        # Critical: must be in model_fields_set so the merge layer treats it
+        # as an explicit override, not a fallthrough.
+        assert "welcome_greeting" in opts.twiml_options.model_fields_set
+        assert "voice" in opts.twiml_options.model_fields_set
+
     @pytest.mark.asyncio
     async def test_deprecated_flat_fields_lose_to_explicit_twiml_options(self) -> None:
         """If both flat welcome_greeting and twiml_options.welcome_greeting are

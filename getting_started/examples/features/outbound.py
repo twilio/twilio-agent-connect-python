@@ -170,8 +170,8 @@ async def initiate_outbound(args: argparse.Namespace) -> None:
                 sys.exit(1)
 
             # Per-call TwiML for outbound calls. Inbound's equivalent is
-            # `customize_twiml_options` on VoiceChannelConfig (see
-            # voice_twiml_customization.py). Use VoiceChannelConfig.twiml_options
+            # `customize_inbound_twiml` on VoiceChannelConfig (see
+            # voice_twiml_customization.py). Use VoiceChannelConfig.default_twiml_options
             # for settings that don't vary per call (voice, language, etc.).
             voice_result = await voice_channel.initiate_outbound_conversation(
                 InitiateVoiceConversationOptions(
