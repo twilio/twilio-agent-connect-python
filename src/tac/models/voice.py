@@ -313,8 +313,9 @@ class TwiMLOptions(BaseModel):
         None,
         description="Escape hatch for ConversationRelay attributes not yet typed on "
         "this model. Keys are emitted as-is on <ConversationRelay>; Twilio's SDK "
-        "converts snake_case to camelCase. Prefer a typed field when one exists — "
-        "use ``extra`` only for newly-added Twilio attributes not yet in this SDK.",
+        "converts snake_case to camelCase, lowercases bools to 'true'/'false', "
+        "and stringifies ints. Prefer a typed field when one exists — use "
+        "``extra`` only for newly-added Twilio attributes not yet in this SDK.",
     )
 
     model_config = {"populate_by_name": True}

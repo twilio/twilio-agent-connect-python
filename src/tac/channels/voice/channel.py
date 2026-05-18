@@ -199,7 +199,11 @@ class VoiceChannel(BaseChannel):
         a field that should merge (e.g. a dict of headers), special-case it
         here instead of getting the default overwrite behavior.
 
-        ``action_url`` is handled separately by ``_resolve_action_url``.
+        ``action_url`` is skipped here on purpose — it's resolved once via
+        ``_resolve_action_url`` looking at every layer at once, and that
+        resolved value is written into ``target`` before this overlay runs.
+        Letting it through here would let a higher-priority layer that didn't
+        set action_url silently clobber a lower layer that did.
         """
         for field in source.model_fields_set:
             if field == "action_url":
@@ -221,6 +225,11 @@ class VoiceChannel(BaseChannel):
         sets both Studio handoff and runs in relay-only mode, Studio wins
         for that call — the session-cleanup URL is skipped, same as if they
         had set any other action_url via customizer or static options.
+
+        Note: explicit ``action_url=None`` on a layer does not suppress
+        ``<Connect action=...>`` — it falls through to the next layer.
+        Suppressing requires unsetting the action_url everywhere (no Studio
+        handoff, no channel default, etc).
         """
         if (
             customized is not None

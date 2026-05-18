@@ -10,6 +10,9 @@ from tac.models.voice import TwiMLOptions
 
 logger = get_logger(__name__)
 
+# Fields on TwiMLOptions that map to <ConversationRelay> attributes and are
+# emitted via the snake_case → camelCase conversion done by twilio's SDK.
+# Must stay in sync with TwiMLOptions field declarations; see _verify_attrs_in_sync.
 _OPTIONAL_RELAY_ATTRS = (
     "welcome_greeting",
     "welcome_greeting_interruptible",
@@ -40,6 +43,41 @@ _OPTIONAL_RELAY_ATTRS = (
     "debug",
     "intelligence_service",
 )
+
+# Fields on TwiMLOptions that this module handles specially (not via the
+# generic _OPTIONAL_RELAY_ATTRS loop) — the action_url, the <Language>
+# children list, the <Parameter> children dict, and the extra escape hatch.
+_HANDLED_OUTSIDE_LOOP = {
+    "action_url",
+    "languages",
+    "custom_parameters",
+    "extra",
+}
+
+
+def _verify_attrs_in_sync() -> None:
+    """Fail fast at import time if TwiMLOptions grows a field that isn't
+    accounted for here — either it's a new ConversationRelay attribute that
+    needs to go in _OPTIONAL_RELAY_ATTRS, or it's special-cased and should
+    be added to _HANDLED_OUTSIDE_LOOP.
+    """
+    declared = set(TwiMLOptions.model_fields)
+    accounted = set(_OPTIONAL_RELAY_ATTRS) | _HANDLED_OUTSIDE_LOOP
+    missing = declared - accounted
+    extra = accounted - declared
+    if missing:
+        raise RuntimeError(
+            f"TwiMLOptions field(s) {sorted(missing)} not handled by twiml.py — "
+            "add to _OPTIONAL_RELAY_ATTRS or _HANDLED_OUTSIDE_LOOP."
+        )
+    if extra:
+        raise RuntimeError(
+            f"twiml.py references TwiMLOptions field(s) {sorted(extra)} that "
+            "no longer exist on the model."
+        )
+
+
+_verify_attrs_in_sync()
 
 
 def generate_twiml(
@@ -91,8 +129,14 @@ def generate_twiml(
     relay_kwargs: dict[str, Any] = {"url": websocket_url}
     for attr in _OPTIONAL_RELAY_ATTRS:
         value = getattr(options, attr)
-        if value is not None:
-            relay_kwargs[attr] = value
+        if value is None:
+            continue
+        # Twilio accepts True/False on `interruptible` for backward-compat
+        # but the documented enum is none|dtmf|speech|any. Normalize so we
+        # emit canonical values regardless of Twilio SDK's bool serialization.
+        if attr == "interruptible" and isinstance(value, bool):
+            value = "any" if value else "none"
+        relay_kwargs[attr] = value
 
     if options.extra:
         typed_keys = set(_OPTIONAL_RELAY_ATTRS)

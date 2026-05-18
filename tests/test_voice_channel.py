@@ -1317,6 +1317,14 @@ class TestGenerateTwiMLConversationRelayAttrs:
         assert 'dtmfDetection="true"' in twiml
         assert 'debug="speaker-events"' in twiml
 
+    def test_interruptible_bool_normalized_to_enum(self) -> None:
+        """Twilio accepts True/False on interruptible for backward-compat,
+        but the documented enum values are 'any'/'none'. Normalize."""
+        twiml_true = generate_twiml("wss://example.com/ws", TwiMLOptions(interruptible=True))
+        twiml_false = generate_twiml("wss://example.com/ws", TwiMLOptions(interruptible=False))
+        assert 'interruptible="any"' in twiml_true
+        assert 'interruptible="none"' in twiml_false
+
     def test_language_children_emitted(self) -> None:
         from tac.models.voice import LanguageConfig
 
@@ -1610,6 +1618,32 @@ class TestHandleIncomingCallMerge:
         channel.config.action_url = "https://cleanup.example.com/end"
         twiml = await channel.handle_incoming_call()
         assert 'action="https://static.example.com/end"' in twiml
+
+    @pytest.mark.asyncio
+    async def test_action_url_three_layer_resolution(self) -> None:
+        """Customizer setting only `voice` (no action_url) must not clobber a
+        default_twiml_options.action_url. Verifies the _overlay_fields skip
+        invariant — every layer's action_url is funneled through
+        _resolve_action_url, never via the field overlay."""
+        from tac.channels.voice import VoiceChannelConfig
+        from tac.models.voice import TwiMLRequest
+
+        async def customizer(req: TwiMLRequest) -> TwiMLOptions:
+            return TwiMLOptions(voice="en-US-Journey-D")  # no action_url
+
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(
+            tac,
+            config=VoiceChannelConfig(
+                default_twiml_options=TwiMLOptions(action_url="https://static.example.com/end"),
+                customize_inbound_twiml=customizer,
+            ),
+        )
+        channel.config.websocket_url = "wss://example.com/ws"
+        channel.config.action_url = "https://server.example.com/end"
+        twiml = await channel.handle_incoming_call(twiml_request=TwiMLRequest())
+        assert 'action="https://static.example.com/end"' in twiml
+        assert 'voice="en-US-Journey-D"' in twiml
 
 
 class TestStaticTwiMLOptions:
