@@ -338,7 +338,10 @@ class TwiMLRequest(BaseModel):
     direction: str | None = Field(None, alias="Direction")
     extra: dict[str, str] = Field(
         default_factory=dict,
-        description="Any other fields from the Twilio webhook not captured above",
+        description="Any other fields from the Twilio webhook not captured above. "
+        "Values are always strings here (webhook form fields are url-encoded), "
+        "unlike TwiMLOptions.extra which accepts str | bool | int for emitted "
+        "TwiML attributes.",
     )
 
     model_config = {"populate_by_name": True, "extra": "ignore"}

@@ -125,7 +125,7 @@ class TACFastAPIServer:
             # (if set) still wins over this. Drop when the field is removed
             # from TACServerConfig.
             if self.config.welcome_greeting is not None:
-                self.voice_channel._deprecated_server_welcome_greeting = (
+                self.voice_channel._set_deprecated_server_welcome_greeting(
                     self.config.welcome_greeting
                 )
 
@@ -241,7 +241,7 @@ class TACFastAPIServer:
                 """Handle ConversationRelay action callback (call ended)."""
                 try:
                     form_data = await request.form()
-                    payload_dict = {k: str(v) for k, v in form_data.items()}
+                    payload_dict = {k: v for k, v in form_data.items() if isinstance(v, str)}
                     await vc.handle_conversation_relay_callback(payload_dict)
                 except Exception:
                     logger.error("Failed to process ConversationRelay callback", exc_info=True)

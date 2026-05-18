@@ -58,7 +58,7 @@ class InitiateVoiceConversationOptions(BaseModel):
     TwiML for the outbound call is built by merging per-field, highest
     precedence first:
       1. This call's ``twiml_options`` (per-call overrides)
-      2. ``VoiceChannelConfig.twiml_options`` (channel-wide defaults)
+      2. ``VoiceChannelConfig.default_twiml_options`` (channel-wide defaults)
       3. TAC defaults (welcome greeting, conversation_configuration,
          action_url resolved via Studio handoff if configured)
 
@@ -68,9 +68,9 @@ class InitiateVoiceConversationOptions(BaseModel):
     channel config still apply.
 
     Set ``voice``, ``language``, ``interruptible``, etc. on the channel's
-    ``VoiceChannelConfig.twiml_options`` to apply them to every call (both
-    inbound and outbound). Use this model's ``twiml_options`` for per-call
-    overrides (e.g. campaign-specific ``custom_parameters``).
+    ``VoiceChannelConfig.default_twiml_options`` to apply them to every call
+    (both inbound and outbound). Use this model's ``twiml_options`` for
+    per-call overrides (e.g. campaign-specific ``custom_parameters``).
     """
 
     to: str = Field(..., min_length=1)
@@ -84,7 +84,7 @@ class InitiateVoiceConversationOptions(BaseModel):
     twiml_options: TwiMLOptions | None = Field(
         default=None,
         description="Per-call TwiMLOptions overrides. Merged over "
-        "VoiceChannelConfig.twiml_options and TAC defaults.",
+        "VoiceChannelConfig.default_twiml_options and TAC defaults.",
     )
 
     # Deprecated flat fields. Forwarded into twiml_options in the validator
@@ -92,17 +92,17 @@ class InitiateVoiceConversationOptions(BaseModel):
     welcome_greeting: str | None = Field(
         default=None,
         description="DEPRECATED: set welcome_greeting on twiml_options or "
-        "VoiceChannelConfig.twiml_options instead.",
+        "VoiceChannelConfig.default_twiml_options instead.",
     )
     action_url: str | None = Field(
         default=None,
         description="DEPRECATED: set action_url on twiml_options or "
-        "VoiceChannelConfig.twiml_options instead.",
+        "VoiceChannelConfig.default_twiml_options instead.",
     )
     custom_parameters: dict[str, str | int | bool] | None = Field(
         default=None,
         description="DEPRECATED: set custom_parameters on twiml_options or "
-        "VoiceChannelConfig.twiml_options instead.",
+        "VoiceChannelConfig.default_twiml_options instead.",
     )
 
     model_config = {"populate_by_name": True}
@@ -126,7 +126,8 @@ class InitiateVoiceConversationOptions(BaseModel):
         warnings.warn(
             "InitiateVoiceConversationOptions flat fields "
             f"({', '.join(set_fields)}) are deprecated. Pass them on "
-            "twiml_options or configure them on VoiceChannelConfig.twiml_options.",
+            "twiml_options or configure them on "
+            "VoiceChannelConfig.default_twiml_options.",
             DeprecationWarning,
             stacklevel=2,
         )

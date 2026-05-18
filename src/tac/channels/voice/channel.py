@@ -89,6 +89,15 @@ class VoiceChannel(BaseChannel):
         self._websocket_manager = WebSocketManager()
         self._twilio_client: Client | None = None
 
+    def _set_deprecated_server_welcome_greeting(self, greeting: str) -> None:
+        """Internal API for TACFastAPIServer to forward the deprecated
+        ``TACServerConfig.welcome_greeting``. Used as a fallback when neither
+        ``default_twiml_options`` nor the customizer sets a greeting.
+
+        Remove this method when ``TACServerConfig.welcome_greeting`` is deleted.
+        """
+        self._deprecated_server_welcome_greeting = greeting
+
     def _require_websocket_url(self, action: str) -> str:
         """Return the channel's configured websocket_url, or raise with a clear
         message naming the action that needed it.

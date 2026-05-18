@@ -5,13 +5,13 @@ TAC exposes two user-facing layers of TwiML customization on
 VoiceChannelConfig (under these, TAC fills in the websocket URL, action URL,
 conversation_configuration, and a default welcome greeting):
 
-1. ``twiml_options`` — static TwiMLOptions applied to every call.
-2. ``customize_twiml_options`` — async callable for per-call logic, receives
+1. ``default_twiml_options`` — static TwiMLOptions applied to every call.
+2. ``customize_inbound_twiml`` — async callable for per-call logic, receives
    a TwiMLRequest (parsed Twilio webhook fields: From, To, CallerCountry, …).
 
 The customizer wins over static options, which win over TAC defaults.
 
-Channel ``twiml_options`` applies to both inbound and outbound calls
+Channel ``default_twiml_options`` applies to both inbound and outbound calls
 (``initiate_outbound_conversation``). The customizer only runs for inbound
 calls — outbound calls receive per-call TwiML via
 ``InitiateVoiceConversationOptions.twiml_options`` at each call site instead.
@@ -48,8 +48,8 @@ tac.on_message_ready(handle_message_ready)
 
 # ---- Static TwiML (same settings on every call) ------------------------------
 #
-# Set ``twiml_options`` on VoiceChannelConfig for attributes that don't depend
-# on who's calling. TAC fills in websocket_url, action_url, and
+# Set ``default_twiml_options`` on VoiceChannelConfig for attributes that don't
+# depend on who's calling. TAC fills in websocket_url, action_url, and
 # conversation_configuration.
 
 voice_channel = VoiceChannel(
@@ -72,12 +72,12 @@ voice_channel = VoiceChannel(
 )
 
 
-# ---- Per-call TwiML (customize_twiml_options) --------------------------------
+# ---- Per-call TwiML (customize_inbound_twiml) --------------------------------
 #
 # Use this when the TwiML depends on who's calling — e.g., localization by
 # caller country, per-tenant voice, A/B tests. The customizer returns
 # TwiMLOptions overrides; anything it doesn't set falls through to
-# ``twiml_options`` (above) and then to TAC defaults.
+# ``default_twiml_options`` (above) and then to TAC defaults.
 #
 # Uncomment the block below to replace the static setup with per-call logic.
 #
@@ -97,7 +97,7 @@ voice_channel = VoiceChannel(
 #             voice="fr-FR-Neural2-A",
 #             welcome_greeting="Bonjour ! Comment puis-je vous aider ?",
 #         )
-#     return TwiMLOptions()  # fall through to static twiml_options + TAC defaults
+#     return TwiMLOptions()  # fall through to default_twiml_options + TAC defaults
 #
 #
 # voice_channel = VoiceChannel(
