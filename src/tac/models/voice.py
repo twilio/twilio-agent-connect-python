@@ -160,31 +160,6 @@ class LanguageConfig(BaseModel):
     model_config = {"populate_by_name": True}
 
 
-class VoiceEndpoints(BaseModel):
-    """Absolute URLs Twilio calls back to for a given voice deployment.
-
-    These are server-owned — they depend on where the app is hosted
-    (``public_domain`` plus path). The voice channel accepts them as input
-    rather than building them itself, so adapters for other web frameworks
-    (FastAPI, Flask, Django, …) can supply their own and the channel stays
-    framework-agnostic.
-    """
-
-    websocket_url: str = Field(
-        ...,
-        description="Public WebSocket URL for ConversationRelay, e.g. "
-        "'wss://example.ngrok.app/ws'.",
-    )
-    action_url: str | None = Field(
-        default=None,
-        description="Public HTTPS URL for the TwiML <Connect action=...> used as "
-        "the SDK-generated session-cleanup default. Channel-level overrides "
-        "(customizer, static twiml_options, Studio handoff) take precedence.",
-    )
-
-    model_config = {"populate_by_name": True}
-
-
 class TwiMLOptions(BaseModel):
     """Options for generating ConversationRelay TwiML.
 
@@ -349,7 +324,7 @@ class TwiMLRequest(BaseModel):
     """Framework-neutral view of the Twilio TwiML webhook form.
 
     Populated by ``TACFastAPIServer`` from the incoming Twilio webhook, then
-    passed to an optional ``customize_twiml_options`` so the application can
+    passed to an optional ``customize_inbound_twiml`` so the application can
     produce per-call ``TwiMLOptions`` overrides without depending on FastAPI
     types.
     """

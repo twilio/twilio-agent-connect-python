@@ -719,7 +719,7 @@ class TestVoiceOutboundErrors:
         channel = VoiceChannel(
             tac,
             config=VoiceChannelConfig(
-                twiml_options=TwiMLOptions(voice="en-US-Journey-D", interruptible="speech"),
+                default_twiml_options=TwiMLOptions(voice="en-US-Journey-D", interruptible="speech"),
             ),
         )
 
@@ -750,7 +750,7 @@ class TestVoiceOutboundErrors:
         channel = VoiceChannel(
             tac,
             config=VoiceChannelConfig(
-                twiml_options=TwiMLOptions(voice="en-US-Journey-D"),
+                default_twiml_options=TwiMLOptions(voice="en-US-Journey-D"),
             ),
         )
 

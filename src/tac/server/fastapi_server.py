@@ -16,7 +16,7 @@ from tac.channels.base import BaseChannel
 from tac.channels.websocket_protocol import WebSocketDisconnectError
 from tac.core.logging import get_logger
 from tac.core.tac import TAC
-from tac.models.voice import TwiMLRequest, VoiceEndpoints
+from tac.models.voice import TwiMLRequest
 from tac.server.config import TACServerConfig
 
 if TYPE_CHECKING:
@@ -83,12 +83,11 @@ class TACFastAPIServer:
           exception handlers, routers, or custom routes — before calling
           ``start()``.
         - To customize TwiML attributes (voice, language, transcription provider,
-          interruption behavior, ``<Language>`` children, etc.) set a
-          ``customize_twiml_options`` on ``VoiceChannelConfig``. The customizer
-          receives a framework-neutral ``TwiMLRequest`` and returns a
-          ``TwiMLOptions``; any field it explicitly sets overrides TAC defaults.
-          For same-on-every-call settings, set ``twiml_options`` on
-          ``VoiceChannelConfig`` directly.
+          interruption behavior, ``<Language>`` children, etc.) set
+          ``default_twiml_options`` on ``VoiceChannelConfig`` for same-on-every-call
+          settings. For per-call inbound customization, set
+          ``customize_inbound_twiml`` — an async callable that receives a
+          framework-neutral ``TwiMLRequest`` and returns a ``TwiMLOptions``.
 
     Example:
         from fastapi import FastAPI
@@ -119,12 +118,16 @@ class TACFastAPIServer:
         self.voice_channel = voice_channel
         self.messaging_channels: list[MessagingChannel] = messaging_channels or []
 
-        # Forward deprecated TACServerConfig.welcome_greeting to the voice
-        # channel as a fallback default. twiml_options.welcome_greeting (if set)
-        # still wins over this. Drop this forwarding when the field is removed
-        # from TACServerConfig.
-        if self.config.welcome_greeting is not None and self.voice_channel is not None:
-            self.voice_channel._deprecated_server_welcome_greeting = self.config.welcome_greeting
+        if self.voice_channel is not None:
+            self._configure_voice_channel_urls()
+            # Forward deprecated TACServerConfig.welcome_greeting to the voice
+            # channel as a fallback default. twiml_options.welcome_greeting
+            # (if set) still wins over this. Drop when the field is removed
+            # from TACServerConfig.
+            if self.config.welcome_greeting is not None:
+                self.voice_channel._deprecated_server_welcome_greeting = (
+                    self.config.welcome_greeting
+                )
 
         # Gather all channels that need webhook processing
         self.webhook_channels: list[BaseChannel] = []
@@ -134,6 +137,28 @@ class TACFastAPIServer:
 
         self.app: FastAPI = app if app is not None else FastAPI(title="TAC Server")
         self._register_routes(self.app)
+
+    def _configure_voice_channel_urls(self) -> None:
+        """Populate the voice channel's websocket_url and action_url from
+        server config, if the user didn't already set them on
+        ``VoiceChannelConfig``. Requires ``public_domain`` to be set.
+        """
+        assert self.voice_channel is not None  # checked by caller
+        if not self.config.public_domain:
+            raise ValueError(
+                "TACFastAPIServer requires public_domain when a voice_channel "
+                "is configured. Set TWILIO_VOICE_PUBLIC_DOMAIN or pass "
+                "public_domain=... on TACServerConfig."
+            )
+        vc_config = self.voice_channel.config
+        if vc_config.websocket_url is None:
+            vc_config.websocket_url = (
+                f"wss://{self.config.public_domain}{self.config.websocket_path}"
+            )
+        if vc_config.action_url is None:
+            vc_config.action_url = (
+                f"https://{self.config.public_domain}{self.config.conversation_relay_callback_path}"
+            )
 
     def _register_routes(self, app: FastAPI) -> None:
         """Register TAC routes (conversation webhook, voice, CI) onto the given FastAPI app."""
@@ -195,30 +220,14 @@ class TACFastAPIServer:
         if self.voice_channel is not None:
             vc = self.voice_channel
 
-            if not config.public_domain:
-                logger.warning(
-                    "public_domain is not set — voice URLs will be malformed. "
-                    "Set TWILIO_VOICE_PUBLIC_DOMAIN environment variable."
-                )
-
             @app.post(config.twiml_path, dependencies=[Depends(http_sig)])
             async def post_twiml(request: Request) -> Response:
                 """Generate TwiML for incoming voice calls."""
-                endpoints = VoiceEndpoints(
-                    websocket_url=f"wss://{config.public_domain}{config.websocket_path}",
-                    action_url=(
-                        f"https://{config.public_domain}{config.conversation_relay_callback_path}"
-                    ),
-                )
-
                 form = await request.form()
                 form_dict = {k: v for k, v in form.items() if isinstance(v, str)}
                 twiml_request = TwiMLRequest.from_form(form_dict)
 
-                twiml = await vc.handle_incoming_call(
-                    endpoints,
-                    twiml_request=twiml_request,
-                )
+                twiml = await vc.handle_incoming_call(twiml_request=twiml_request)
                 return Response(content=twiml, media_type="application/xml")
 
             @app.websocket(config.websocket_path)

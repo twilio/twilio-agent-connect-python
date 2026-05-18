@@ -74,11 +74,12 @@ class InitiateVoiceConversationOptions(BaseModel):
     """
 
     to: str = Field(..., min_length=1)
-    websocket_url: str = Field(
-        ...,
-        description="Public WebSocket URL for ConversationRelay, e.g. "
-        "'wss://your-domain.ngrok.app/ws'. Required because outbound calls "
-        "have no inbound HTTP request to derive the host from.",
+    websocket_url: str | None = Field(
+        default=None,
+        description="Public WebSocket URL for ConversationRelay (e.g. "
+        "'wss://your-domain.ngrok.app/ws'). Optional — defaults to "
+        "``VoiceChannelConfig.websocket_url`` when not provided. Pass it here "
+        "only to override the channel's URL for a specific call.",
     )
     twiml_options: TwiMLOptions | None = Field(
         default=None,

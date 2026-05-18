@@ -813,7 +813,7 @@ class TestTwiMLCustomizerEndToEnd:
             return TwiMLOptions(voice="en-US-Journey-D", language="en-US")
 
         tac = TAC(get_test_config())
-        vc = VoiceChannel(tac, config=VoiceChannelConfig(customize_twiml_options=customizer))
+        vc = VoiceChannel(tac, config=VoiceChannelConfig(customize_inbound_twiml=customizer))
         server = TACFastAPIServer(
             tac=tac,
             config=TACServerConfig(public_domain="test.ngrok.io"),
@@ -879,7 +879,7 @@ class TestDeprecatedWelcomeGreetingForwarding:
         vc = VoiceChannel(
             tac,
             config=VoiceChannelConfig(
-                twiml_options=TwiMLOptions(welcome_greeting="Channel!"),
+                default_twiml_options=TwiMLOptions(welcome_greeting="Channel!"),
             ),
         )
         with pytest.warns(DeprecationWarning):

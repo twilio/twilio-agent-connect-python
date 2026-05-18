@@ -8,12 +8,28 @@ from tac.models.memory import MemoryMode
 from tac.models.voice import TwiMLOptions, TwiMLRequest
 from tac.session import SessionManager, ThreadSafeSessionManager
 
-TwiMLOptionsCustomizer = Callable[[TwiMLRequest], Awaitable[TwiMLOptions]]
+InboundTwiMLCustomizer = Callable[[TwiMLRequest], Awaitable[TwiMLOptions]]
 
 
 class VoiceChannelConfig(BaseModel):
     """
     Configuration for Voice channel.
+
+    TwiML configuration layers (highest precedence first):
+
+      Inbound calls (``handle_incoming_call``):
+        1. ``customize_inbound_twiml(twiml_request)`` output  [optional]
+        2. ``default_twiml_options``                          [optional]
+        3. TAC defaults
+
+      Outbound calls (``initiate_outbound_conversation``):
+        1. ``InitiateVoiceConversationOptions.twiml_options`` [optional]
+        2. ``default_twiml_options``                          [optional]
+        3. TAC defaults
+
+    All layers merge per-field via Pydantic's ``model_fields_set`` — only
+    fields a layer explicitly sets override lower layers. Lists (``languages``)
+    and nested models (``custom_parameters``) replace wholesale when set.
 
     Attributes:
         session_manager: SessionManager for tracking and canceling in-flight tasks.
@@ -24,16 +40,29 @@ class VoiceChannelConfig(BaseModel):
             - "once": Retrieve memory once at conversation start with empty query and cache it.
                      Cache is invalidated when conversation becomes INACTIVE.
             - "never": Skip memory retrieval
-        twiml_options: Static ``TwiMLOptions`` applied to every call (voice,
-            language, transcription provider, welcome_greeting, ``<Language>``
-            children, etc.). Use this when the same ConversationRelay
-            configuration is correct for every call. For per-call customization
-            see ``customize_twiml_options``.
-        customize_twiml_options: Optional async callable producing per-call
-            ``TwiMLOptions`` overrides. Receives a framework-neutral
-            ``TwiMLRequest`` (parsed Twilio webhook fields). Any field the
-            function explicitly sets wins over ``twiml_options`` and TAC defaults;
-            unset fields fall through.
+        websocket_url: Public WebSocket URL for ConversationRelay (e.g.
+            ``wss://example.ngrok.app/ws``). Required for outbound calls and
+            any call made via ``handle_incoming_call``. ``TACFastAPIServer``
+            builds and sets this automatically from its ``public_domain`` +
+            ``websocket_path``; custom adapters (Flask, Django, …) must set
+            it themselves.
+        action_url: Public HTTPS URL for the TwiML ``<Connect action=...>``,
+            used as the default session-cleanup callback. ``TACFastAPIServer``
+            builds and sets this from ``public_domain`` +
+            ``conversation_relay_callback_path``. Higher-priority layers
+            (customizer, per-call ``twiml_options.action_url``, Studio
+            handoff) still override.
+        default_twiml_options: Static ``TwiMLOptions`` applied to every call
+            (inbound and outbound) — voice, language, transcription provider,
+            welcome_greeting, ``<Language>`` children, etc. Use this when the
+            same ConversationRelay configuration is correct for every call.
+        customize_inbound_twiml: Optional async callable producing per-call
+            ``TwiMLOptions`` overrides for inbound calls. Receives a
+            framework-neutral ``TwiMLRequest`` (parsed Twilio webhook fields).
+            Outbound calls don't use this — they pass per-call TwiML via
+            ``InitiateVoiceConversationOptions.twiml_options`` directly,
+            because outbound is initiated from user code that already has
+            per-call context in scope.
     """
 
     model_config = {"arbitrary_types_allowed": True, "extra": "forbid"}
@@ -49,14 +78,25 @@ class VoiceChannelConfig(BaseModel):
         default="never",
         description="Memory retrieval mode for this channel",
     )
-    twiml_options: TwiMLOptions | None = Field(
+    websocket_url: str | None = Field(
         default=None,
-        description="Static TwiMLOptions applied to every call. Use for same-on-every-call "
-        "configuration; use customize_twiml_options for per-call logic.",
+        description="Public WebSocket URL for ConversationRelay. Set by "
+        "TACFastAPIServer automatically; custom adapters must provide it.",
     )
-    customize_twiml_options: TwiMLOptionsCustomizer | None = Field(
+    action_url: str | None = Field(
         default=None,
-        description="Optional async callable returning per-call TwiMLOptions overrides. "
-        "Receives a TwiMLRequest; only fields explicitly set on the returned "
-        "options override lower layers.",
+        description="Public HTTPS URL for <Connect action=...> session cleanup. "
+        "Set by TACFastAPIServer automatically; overridable by customizer, "
+        "per-call twiml_options.action_url, or Studio handoff.",
+    )
+    default_twiml_options: TwiMLOptions | None = Field(
+        default=None,
+        description="Static TwiMLOptions applied to every call (inbound and "
+        "outbound). For per-call customization see customize_inbound_twiml "
+        "or InitiateVoiceConversationOptions.twiml_options.",
+    )
+    customize_inbound_twiml: InboundTwiMLCustomizer | None = Field(
+        default=None,
+        description="Optional async callable returning per-call TwiMLOptions "
+        "overrides on inbound calls. Not invoked on outbound calls.",
     )

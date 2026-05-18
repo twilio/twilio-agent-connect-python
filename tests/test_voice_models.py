@@ -1,8 +1,5 @@
 """Tests for Voice WebSocket message models."""
 
-import pytest
-from pydantic import ValidationError
-
 from tac.models.voice import (
     CustomParameters,
     InterruptMessage,
@@ -11,7 +8,6 @@ from tac.models.voice import (
     SetupMessage,
     TwiMLOptions,
     TwiMLRequest,
-    VoiceEndpoints,
 )
 
 
@@ -288,23 +284,3 @@ class TestTwiMLOptionsFieldsSet:
         assert lang.voice is None
         assert lang.tts_provider is None
         assert lang.transcription_provider is None
-
-
-class TestVoiceEndpoints:
-    """VoiceEndpoints is the server → channel handoff for absolute URLs."""
-
-    def test_websocket_url_required(self) -> None:
-        with pytest.raises(ValidationError):
-            VoiceEndpoints()  # type: ignore[call-arg]
-
-    def test_action_url_optional(self) -> None:
-        urls = VoiceEndpoints(websocket_url="wss://example.com/ws")
-        assert urls.action_url is None
-
-    def test_both_urls(self) -> None:
-        urls = VoiceEndpoints(
-            websocket_url="wss://example.com/ws",
-            action_url="https://example.com/end",
-        )
-        assert urls.websocket_url == "wss://example.com/ws"
-        assert urls.action_url == "https://example.com/end"

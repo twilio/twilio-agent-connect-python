@@ -55,7 +55,7 @@ tac.on_message_ready(handle_message_ready)
 voice_channel = VoiceChannel(
     tac,
     config=VoiceChannelConfig(
-        twiml_options=TwiMLOptions(
+        default_twiml_options=TwiMLOptions(
             welcome_greeting="Hello! How can I help?",
             voice="en-US-Journey-D",
             language="en-US",
@@ -103,8 +103,8 @@ voice_channel = VoiceChannel(
 # voice_channel = VoiceChannel(
 #     tac,
 #     config=VoiceChannelConfig(
-#         twiml_options=TwiMLOptions(welcome_greeting="Hello! How can I help?"),
-#         customize_twiml_options=customize_twiml,
+#         default_twiml_options=TwiMLOptions(welcome_greeting="Hello! How can I help?"),
+#         customize_inbound_twiml=customize_twiml,
 #     ),
 # )
 
