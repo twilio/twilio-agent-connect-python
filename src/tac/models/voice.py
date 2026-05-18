@@ -325,7 +325,8 @@ class TwiMLRequest(BaseModel):
     """Framework-neutral view of the Twilio TwiML webhook form.
 
     Populated by ``TACFastAPIServer`` from the incoming Twilio webhook, then
-    passed to an optional ``customize_inbound_twiml`` so the application can
+    passed to a customizer registered via
+    ``VoiceChannel.on_inbound_call_twiml(...)`` so the application can
     produce per-call ``TwiMLOptions`` overrides without depending on FastAPI
     types.
     """

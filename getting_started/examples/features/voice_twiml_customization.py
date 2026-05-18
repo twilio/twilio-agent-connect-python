@@ -1,13 +1,15 @@
 """
 Feature: ConversationRelay TwiML customization
 
-Two layers on VoiceChannelConfig (highest precedence first):
+Two layers (highest precedence first):
 
-1. ``customize_inbound_twiml`` — async callable receiving a TwiMLRequest
-   (parsed Twilio webhook fields: From, To, CallerCountry, …). Inbound only.
-   For outbound, pass per-call TwiMLOptions on InitiateVoiceConversationOptions.
-2. ``default_twiml_options`` — static TwiMLOptions applied to every call
-   (inbound and outbound).
+1. Per-call customizer — register on the channel via
+   ``voice_channel.on_inbound_call_twiml(...)``. Async callable that
+   receives a TwiMLRequest (parsed Twilio webhook fields: From, To,
+   CallerCountry, …). Inbound only. For outbound, pass per-call
+   TwiMLOptions on InitiateVoiceConversationOptions.
+2. ``VoiceChannelConfig.default_twiml_options`` — static TwiMLOptions
+   applied to every call (inbound and outbound).
 
 Layers merge per-field: the customizer overrides only the fields it
 explicitly sets; everything else falls through to ``default_twiml_options``
@@ -67,10 +69,10 @@ voice_channel = VoiceChannel(
             welcome_greeting="Hello! This is a default greeting.",
             interruptible="speech",
         ),
-        # Per-call inbound overrides — runs once per inbound call.
-        customize_inbound_twiml=customize_twiml,
     ),
 )
+# Register the per-call inbound customizer.
+voice_channel.on_inbound_call_twiml(customize_twiml)
 
 
 if __name__ == "__main__":

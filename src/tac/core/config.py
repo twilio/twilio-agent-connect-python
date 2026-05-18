@@ -277,6 +277,14 @@ class TACConfig(BaseModel):
         "from this SID.",
     )
 
+    voice_public_domain: str | None = Field(
+        default=None,
+        description="Public domain where voice routes are reachable (e.g. "
+        "'example.ngrok.app'). Used by VoiceChannel to construct the public "
+        "WebSocket URL and ConversationRelay action URL. Required when using "
+        "the Voice channel.",
+    )
+
     conversation_intelligence_config: ConversationIntelligenceConfig | None = Field(
         default=None,
         description="Optional Conversation Intelligence configuration for filtering webhook "
@@ -330,6 +338,7 @@ class TACConfig(BaseModel):
           Default: INFO
         - TWILIO_REGION: Twilio region for data residency (e.g., 'au1', 'ie1')
         - TWILIO_STUDIO_HANDOFF_FLOW_SID: Studio Flow SID (FWxxx...) for handoff tool
+        - TWILIO_VOICE_PUBLIC_DOMAIN: Public domain for voice routes (required for voice)
 
         Memory Configuration:
         - TWILIO_MEMORY_PROFILE_TRAIT_GROUPS: Trait groups to include
@@ -368,6 +377,7 @@ class TACConfig(BaseModel):
             log_level=os.environ.get("TWILIO_LOG_LEVEL", "INFO"),
             region=os.environ.get("TWILIO_REGION"),
             studio_handoff_flow_sid=os.environ.get("TWILIO_STUDIO_HANDOFF_FLOW_SID"),
+            voice_public_domain=os.environ.get("TWILIO_VOICE_PUBLIC_DOMAIN"),
             memory_config=memory_config,
             conversation_intelligence_config=conversation_intelligence_config,
         )

@@ -1636,9 +1636,9 @@ class TestHandleIncomingCallMerge:
             tac,
             config=VoiceChannelConfig(
                 default_twiml_options=TwiMLOptions(action_url="https://static.example.com/end"),
-                customize_inbound_twiml=customizer,
             ),
         )
+        channel.on_inbound_call_twiml(customizer)
         channel.config.websocket_url = "wss://example.com/ws"
         channel.config.action_url = "https://server.example.com/end"
         twiml = await channel.handle_incoming_call(twiml_request=TwiMLRequest())
@@ -1686,7 +1686,6 @@ class TestCustomizeTwiMLOptions:
 
     @pytest.mark.asyncio
     async def test_customizer_skipped_without_twiml_request(self) -> None:
-        from tac.channels.voice import VoiceChannelConfig
         from tac.models.voice import TwiMLRequest
 
         called = False
@@ -1697,7 +1696,9 @@ class TestCustomizeTwiMLOptions:
             return TwiMLOptions(voice="en-US-Journey-D")
 
         tac = TAC(get_test_config())
-        channel = VoiceChannel(tac, config=VoiceChannelConfig(customize_inbound_twiml=customizer))
+        channel = VoiceChannel(tac)
+
+        channel.on_inbound_call_twiml(customizer)
         channel.config.websocket_url = "wss://example.com/ws"
         twiml = await channel.handle_incoming_call()
         assert called is False
@@ -1705,7 +1706,6 @@ class TestCustomizeTwiMLOptions:
 
     @pytest.mark.asyncio
     async def test_customizer_invoked_with_twiml_request(self) -> None:
-        from tac.channels.voice import VoiceChannelConfig
         from tac.models.voice import TwiMLRequest
 
         seen: dict[str, TwiMLRequest] = {}
@@ -1715,7 +1715,9 @@ class TestCustomizeTwiMLOptions:
             return TwiMLOptions(voice="en-US-Journey-D", interruptible="speech")
 
         tac = TAC(get_test_config())
-        channel = VoiceChannel(tac, config=VoiceChannelConfig(customize_inbound_twiml=customizer))
+        channel = VoiceChannel(tac)
+
+        channel.on_inbound_call_twiml(customizer)
         ctx = TwiMLRequest(from_number="+14155551234", caller_country="US")
         channel.config.websocket_url = "wss://example.com/ws"
         twiml = await channel.handle_incoming_call(
@@ -1738,9 +1740,9 @@ class TestCustomizeTwiMLOptions:
             tac,
             config=VoiceChannelConfig(
                 default_twiml_options=TwiMLOptions(voice="en-US-Journey-D"),
-                customize_inbound_twiml=customizer,
             ),
         )
+        channel.on_inbound_call_twiml(customizer)
         channel.config.websocket_url = "wss://example.com/ws"
         twiml = await channel.handle_incoming_call(
             twiml_request=TwiMLRequest(),
@@ -1760,9 +1762,9 @@ class TestCustomizeTwiMLOptions:
             tac,
             config=VoiceChannelConfig(
                 default_twiml_options=TwiMLOptions(welcome_greeting="Channel default"),
-                customize_inbound_twiml=customizer,
             ),
         )
+        channel.on_inbound_call_twiml(customizer)
         channel.config.websocket_url = "wss://example.com/ws"
         twiml = await channel.handle_incoming_call(
             twiml_request=TwiMLRequest(),
@@ -1773,7 +1775,6 @@ class TestCustomizeTwiMLOptions:
 
     @pytest.mark.asyncio
     async def test_customizer_action_url_wins_over_studio_handoff(self) -> None:
-        from tac.channels.voice import VoiceChannelConfig
         from tac.models.voice import TwiMLRequest
 
         flow_sid = "FW" + "a" * 32
@@ -1782,7 +1783,9 @@ class TestCustomizeTwiMLOptions:
             return TwiMLOptions(action_url="https://customizer.example.com/end")
 
         tac = TAC({**get_test_config(), "studio_handoff_flow_sid": flow_sid})
-        channel = VoiceChannel(tac, config=VoiceChannelConfig(customize_inbound_twiml=customizer))
+        channel = VoiceChannel(tac)
+
+        channel.on_inbound_call_twiml(customizer)
         channel.config.websocket_url = "wss://example.com/ws"
         twiml = await channel.handle_incoming_call(
             twiml_request=TwiMLRequest(),

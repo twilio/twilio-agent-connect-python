@@ -1,7 +1,7 @@
 """Voice channel for handling voice-based conversations."""
 
 from tac.channels.voice.channel import VoiceChannel
-from tac.channels.voice.config import InboundTwiMLCustomizer, VoiceChannelConfig
+from tac.channels.voice.config import InboundCallTwiMLHandler, VoiceChannelConfig
 from tac.channels.voice.twiml import generate_twiml
 from tac.models.voice import (
     InterruptMode,
@@ -11,7 +11,7 @@ from tac.models.voice import (
 )
 
 __all__ = [
-    "InboundTwiMLCustomizer",
+    "InboundCallTwiMLHandler",
     "InterruptMode",
     "LanguageConfig",
     "TwiMLOptions",

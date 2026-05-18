@@ -175,6 +175,7 @@ async def initiate_outbound(args: argparse.Namespace) -> None:
             voice_result = await voice_channel.initiate_outbound_conversation(
                 InitiateVoiceConversationOptions(
                     to=args.to,
+                    # Per-call TwiML overrides for this outbound call. Overrides channel defaults
                     twiml_options=TwiMLOptions(welcome_greeting=args.welcome_greeting),
                 )
             )
