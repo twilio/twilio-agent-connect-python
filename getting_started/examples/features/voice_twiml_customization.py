@@ -68,6 +68,8 @@ voice_channel = VoiceChannel(
         default_twiml_options=TwiMLOptions(
             welcome_greeting="Hello! This is a default greeting.",
             interruptible="speech",
+            # Escape hatch for ConversationRelay attributes TAC hasn't typed yet:
+            # extra={"newRelayAttribute": "value"},
         ),
     ),
 )
