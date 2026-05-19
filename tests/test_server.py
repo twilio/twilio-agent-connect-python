@@ -87,6 +87,56 @@ class TestTACConfigStudioHandoffFlowSid:
         assert tac.config.studio_handoff_flow_sid == flow_sid
 
 
+class TestVoiceUrlConfigValidationAtStartup:
+    """TACFastAPIServer fails fast at construction if a voice channel is
+    attached but no public URL is configured. Catches the misconfiguration
+    before the first inbound call rather than returning a 500."""
+
+    def test_raises_when_voice_channel_without_url_or_domain(self) -> None:
+        from tac.channels.voice import VoiceChannel
+        from tac.server import TACFastAPIServer
+
+        # Config without voice_public_domain
+        cfg = {**get_test_config()}
+        cfg.pop("voice_public_domain", None)
+        tac = TAC(cfg)
+        vc = VoiceChannel(tac)
+
+        with pytest.raises(ValueError, match="voice_public_domain"):
+            TACFastAPIServer(tac=tac, voice_channel=vc)
+
+    def test_passes_when_voice_public_domain_set(self) -> None:
+        from tac.channels.voice import VoiceChannel
+        from tac.server import TACFastAPIServer
+
+        tac = TAC(get_test_config())  # has voice_public_domain
+        vc = VoiceChannel(tac)
+        TACFastAPIServer(tac=tac, voice_channel=vc)  # no raise
+
+    def test_passes_when_websocket_url_override_set(self) -> None:
+        from tac.channels.voice import VoiceChannel, VoiceChannelConfig
+        from tac.server import TACFastAPIServer
+
+        cfg = {**get_test_config()}
+        cfg.pop("voice_public_domain", None)
+        tac = TAC(cfg)
+        vc = VoiceChannel(
+            tac,
+            config=VoiceChannelConfig(websocket_url="wss://override.example.com/ws"),
+        )
+        TACFastAPIServer(tac=tac, voice_channel=vc)  # no raise
+
+    def test_passes_without_voice_channel(self) -> None:
+        """No voice channel attached: validation skipped, server starts fine
+        even without voice_public_domain."""
+        from tac.server import TACFastAPIServer
+
+        cfg = {**get_test_config()}
+        cfg.pop("voice_public_domain", None)
+        tac = TAC(cfg)
+        TACFastAPIServer(tac=tac)  # no raise
+
+
 class TestWebSocketDisconnectError:
     """Test WebSocketDisconnectError."""
 

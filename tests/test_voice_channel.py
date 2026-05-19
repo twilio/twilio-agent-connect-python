@@ -1645,6 +1645,50 @@ class TestHandleIncomingCallMerge:
         assert 'action="https://static.example.com/end"' in twiml
         assert 'voice="en-US-Journey-D"' in twiml
 
+    @pytest.mark.asyncio
+    async def test_customizer_action_url_none_suppresses(self) -> None:
+        """Explicit action_url=None on the customizer suppresses the
+        <Connect action=...> attribute, even if Studio handoff or a channel
+        default would otherwise populate it."""
+        from tac.channels.voice import VoiceChannelConfig
+        from tac.models.voice import TwiMLRequest
+
+        async def customizer(req: TwiMLRequest) -> TwiMLOptions:
+            return TwiMLOptions(action_url=None)
+
+        flow_sid = "FW" + "a" * 32
+        tac = TAC({**get_test_config(), "studio_handoff_flow_sid": flow_sid})
+        channel = VoiceChannel(
+            tac,
+            config=VoiceChannelConfig(
+                default_twiml_options=TwiMLOptions(action_url="https://static.example.com/end"),
+            ),
+        )
+        channel.on_inbound_call_twiml(customizer)
+        channel.config.websocket_url = "wss://example.com/ws"
+        channel.config.action_url = "https://server.example.com/end"
+        twiml = await channel.handle_incoming_call(twiml_request=TwiMLRequest())
+        assert "action=" not in twiml
+
+    @pytest.mark.asyncio
+    async def test_default_options_action_url_none_suppresses(self) -> None:
+        """Explicit action_url=None on default_twiml_options suppresses
+        <Connect action=...> channel-wide, even with Studio handoff configured."""
+        from tac.channels.voice import VoiceChannelConfig
+
+        flow_sid = "FW" + "a" * 32
+        tac = TAC({**get_test_config(), "studio_handoff_flow_sid": flow_sid})
+        channel = VoiceChannel(
+            tac,
+            config=VoiceChannelConfig(
+                default_twiml_options=TwiMLOptions(action_url=None),
+            ),
+        )
+        channel.config.websocket_url = "wss://example.com/ws"
+        channel.config.action_url = "https://server.example.com/end"
+        twiml = await channel.handle_incoming_call()
+        assert "action=" not in twiml
+
 
 class TestStaticTwiMLOptions:
     """VoiceChannelConfig.twiml_options applies to every call without a callback."""
@@ -2200,3 +2244,88 @@ class TestSessionManagerDefaults:
         # Verify task was cancelled
         assert task_cancelled == [True]
         assert session_state.stream_task.done()
+
+
+class TestVoicePublicDomainNormalization:
+    """TACConfig.voice_public_domain strips schemes/whitespace/trailing slashes."""
+
+    def test_strips_https_scheme(self) -> None:
+        tac = TAC({**get_test_config(), "voice_public_domain": "https://example.ngrok.app"})
+        assert tac.config.voice_public_domain == "example.ngrok.app"
+
+    def test_strips_http_scheme(self) -> None:
+        tac = TAC({**get_test_config(), "voice_public_domain": "http://example.ngrok.app"})
+        assert tac.config.voice_public_domain == "example.ngrok.app"
+
+    def test_strips_wss_scheme(self) -> None:
+        tac = TAC({**get_test_config(), "voice_public_domain": "wss://example.ngrok.app"})
+        assert tac.config.voice_public_domain == "example.ngrok.app"
+
+    def test_strips_trailing_slash(self) -> None:
+        tac = TAC({**get_test_config(), "voice_public_domain": "example.ngrok.app/"})
+        assert tac.config.voice_public_domain == "example.ngrok.app"
+
+    def test_strips_scheme_and_trailing_slash(self) -> None:
+        tac = TAC({**get_test_config(), "voice_public_domain": "https://example.ngrok.app/"})
+        assert tac.config.voice_public_domain == "example.ngrok.app"
+
+    def test_strips_whitespace(self) -> None:
+        tac = TAC({**get_test_config(), "voice_public_domain": "  example.ngrok.app  "})
+        assert tac.config.voice_public_domain == "example.ngrok.app"
+
+    def test_empty_string_becomes_none(self) -> None:
+        tac = TAC({**get_test_config(), "voice_public_domain": ""})
+        assert tac.config.voice_public_domain is None
+
+    def test_passes_through_clean_value(self) -> None:
+        tac = TAC({**get_test_config(), "voice_public_domain": "example.ngrok.app"})
+        assert tac.config.voice_public_domain == "example.ngrok.app"
+
+    @pytest.mark.asyncio
+    async def test_normalized_value_produces_valid_twiml(self) -> None:
+        """Regression: a sloppy https://...  / value used to concatenate to
+        wss://https://example.ngrok.app//ws."""
+        tac = TAC({**get_test_config(), "voice_public_domain": "https://example.ngrok.app/"})
+        channel = VoiceChannel(tac)
+        twiml = await channel.handle_incoming_call()
+        assert 'url="wss://example.ngrok.app/ws"' in twiml
+
+
+class TestVoiceChannelConfigUrlValidation:
+    """VoiceChannelConfig validates websocket_url and action_url shapes."""
+
+    def test_websocket_url_rejects_missing_scheme(self) -> None:
+        from tac.channels.voice import VoiceChannelConfig
+
+        with pytest.raises(ValueError, match="ws://"):
+            VoiceChannelConfig(websocket_url="example.ngrok.app/ws")
+
+    def test_websocket_url_rejects_https_scheme(self) -> None:
+        from tac.channels.voice import VoiceChannelConfig
+
+        with pytest.raises(ValueError, match="ws://"):
+            VoiceChannelConfig(websocket_url="https://example.ngrok.app/ws")
+
+    def test_websocket_url_accepts_wss(self) -> None:
+        from tac.channels.voice import VoiceChannelConfig
+
+        cfg = VoiceChannelConfig(websocket_url="wss://example.ngrok.app/ws")
+        assert cfg.websocket_url == "wss://example.ngrok.app/ws"
+
+    def test_action_url_rejects_missing_scheme(self) -> None:
+        from tac.channels.voice import VoiceChannelConfig
+
+        with pytest.raises(ValueError, match="http://"):
+            VoiceChannelConfig(action_url="example.ngrok.app/end")
+
+    def test_action_url_rejects_wss_scheme(self) -> None:
+        from tac.channels.voice import VoiceChannelConfig
+
+        with pytest.raises(ValueError, match="http://"):
+            VoiceChannelConfig(action_url="wss://example.ngrok.app/end")
+
+    def test_action_url_accepts_https(self) -> None:
+        from tac.channels.voice import VoiceChannelConfig
+
+        cfg = VoiceChannelConfig(action_url="https://example.ngrok.app/end")
+        assert cfg.action_url == "https://example.ngrok.app/end"

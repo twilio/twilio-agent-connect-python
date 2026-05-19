@@ -119,6 +119,9 @@ class TACFastAPIServer:
         self.voice_channel = voice_channel
         self.messaging_channels: list[MessagingChannel] = messaging_channels or []
 
+        if self.voice_channel is not None:
+            self._validate_voice_url_config()
+
         # Gather all channels that need webhook processing
         self.webhook_channels: list[BaseChannel] = []
         if self.voice_channel:
@@ -127,6 +130,30 @@ class TACFastAPIServer:
 
         self.app: FastAPI = app if app is not None else FastAPI(title="TAC Server")
         self._register_routes(self.app)
+
+    def _validate_voice_url_config(self) -> None:
+        """Fail fast at server construction if the voice channel can't build a
+        WebSocket URL.
+
+        Without this check, the misconfiguration would only surface on the
+        first inbound call as a 500 — an easy thing to miss in CI or smoke
+        tests that don't hit voice. Failing here means the server doesn't
+        start at all if the voice channel isn't wired up.
+
+        Custom adapters (Flask/Django/etc.) constructing ``VoiceChannel``
+        directly still get the runtime ``ValueError`` on first request — we
+        can't know what URL plumbing they're doing outside this server.
+        """
+        assert self.voice_channel is not None  # checked by caller
+        if self.voice_channel.config.websocket_url:
+            return
+        if self.tac.config.voice_public_domain:
+            return
+        raise ValueError(
+            "Voice channel is configured but no public URL is set. "
+            "Set TACConfig.voice_public_domain (or TWILIO_VOICE_PUBLIC_DOMAIN env "
+            "var), or pass websocket_url on VoiceChannelConfig as an override."
+        )
 
     def _register_routes(self, app: FastAPI) -> None:
         """Register TAC routes (conversation webhook, voice, CI) onto the given FastAPI app."""

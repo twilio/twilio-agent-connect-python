@@ -2,7 +2,7 @@
 
 from collections.abc import Awaitable, Callable
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from tac.models.memory import MemoryMode
 from tac.models.voice import TwiMLOptions, TwiMLRequest
@@ -106,3 +106,30 @@ class VoiceChannelConfig(BaseModel):
         "outbound). Per-call inbound customization is registered via "
         "VoiceChannel.on_inbound_call_twiml(...).",
     )
+
+    @field_validator("websocket_url")
+    @classmethod
+    def _validate_websocket_url(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        v = v.strip()
+        if not v:
+            return None
+        if not v.lower().startswith(("ws://", "wss://")):
+            raise ValueError(
+                f"websocket_url must start with ws:// or wss:// (got {v!r}). "
+                "If you only have a domain, set TACConfig.voice_public_domain instead."
+            )
+        return v
+
+    @field_validator("action_url")
+    @classmethod
+    def _validate_action_url(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        v = v.strip()
+        if not v:
+            return None
+        if not v.lower().startswith(("http://", "https://")):
+            raise ValueError(f"action_url must start with http:// or https:// (got {v!r}).")
+        return v

@@ -256,21 +256,17 @@ class VoiceChannel(BaseChannel):
         for that call — the session-cleanup URL is skipped, same as if they
         had set any other action_url via customizer or static options.
 
-        Note: explicit ``action_url=None`` on a layer does not suppress
-        ``<Connect action=...>`` — it falls through to the next layer.
-        Suppressing requires unsetting the action_url everywhere (no Studio
-        handoff, no channel default, etc).
+        Explicit ``action_url=None`` on a layer suppresses
+        ``<Connect action=...>`` entirely — all lower layers are skipped.
+        Use this to disable the cleanup callback for a specific call (e.g.
+        from a customizer) or channel-wide. ``action_url`` left unset (not
+        in ``model_fields_set``) falls through to the next layer.
         """
-        if (
-            customized is not None
-            and "action_url" in customized.model_fields_set
-            and customized.action_url is not None
-        ):
+        if customized is not None and "action_url" in customized.model_fields_set:
             return customized.action_url
         if (
             self.config.default_twiml_options is not None
             and "action_url" in self.config.default_twiml_options.model_fields_set
-            and self.config.default_twiml_options.action_url is not None
         ):
             return self.config.default_twiml_options.action_url
         if self.tac.config.studio_handoff_flow_sid:

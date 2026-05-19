@@ -282,8 +282,29 @@ class TACConfig(BaseModel):
         description="Public domain where voice routes are reachable (e.g. "
         "'example.ngrok.app'). Used by VoiceChannel to construct the public "
         "WebSocket URL and ConversationRelay action URL. Required when using "
-        "the Voice channel.",
+        "the Voice channel. Schemes (https://, wss://) and trailing slashes "
+        "are stripped automatically.",
     )
+
+    @field_validator("voice_public_domain", mode="before")
+    @classmethod
+    def _normalize_voice_public_domain(cls, v: str | None) -> str | None:
+        """Strip whitespace, schemes, and trailing slashes from voice_public_domain.
+
+        A naive copy-paste from a browser address bar produces values like
+        ``https://example.ngrok.app/`` which would otherwise concatenate into
+        ``wss://https://example.ngrok.app//ws`` — clean them up at parse time.
+        """
+        if v is None:
+            return v
+        v = v.strip()
+        if not v:
+            return None
+        for scheme in ("https://", "http://", "wss://", "ws://"):
+            if v.lower().startswith(scheme):
+                v = v[len(scheme) :]
+                break
+        return v.rstrip("/") or None
 
     conversation_intelligence_config: ConversationIntelligenceConfig | None = Field(
         default=None,
