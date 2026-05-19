@@ -1,9 +1,8 @@
 """Configuration for TAC server implementations."""
 
 import os
-import warnings
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field
 
 
 class TACServerConfig(BaseModel):
@@ -18,37 +17,6 @@ class TACServerConfig(BaseModel):
 
     host: str = Field(default="0.0.0.0", description="Host to bind the server to")
     port: int = Field(default=8000, description="Port to bind the server to")
-
-    public_domain: str = Field(
-        default="",
-        description="DEPRECATED: set TACConfig.voice_public_domain instead. "
-        "When set here, it is forwarded; will be removed in a future release.",
-    )
-    welcome_greeting: str | None = Field(
-        default=None,
-        description="DEPRECATED: set welcome_greeting on VoiceChannelConfig instead. "
-        "When set here, it is forwarded to the voice channel as a default; it will be "
-        "removed in a future release.",
-    )
-
-    @model_validator(mode="after")
-    def _warn_deprecated_fields(self) -> "TACServerConfig":
-        if self.welcome_greeting is not None:
-            warnings.warn(
-                "TACServerConfig.welcome_greeting is deprecated and will be removed "
-                "in a future release. Set welcome_greeting on VoiceChannelConfig instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-        if self.public_domain:
-            warnings.warn(
-                "TACServerConfig.public_domain is deprecated and will be removed in "
-                "a future release. Set TACConfig.voice_public_domain (or "
-                "TWILIO_VOICE_PUBLIC_DOMAIN env var) instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-        return self
 
     conversation_webhook_path: str = Field(
         default="/webhook", description="Path for conversation webhook endpoint (for all channels)"
