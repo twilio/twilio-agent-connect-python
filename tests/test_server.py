@@ -37,8 +37,6 @@ class TestTACServerConfig:
         assert config.port == 8000
         assert config.conversation_webhook_path == "/webhook"
         assert config.twiml_path == "/twiml"
-        assert config.websocket_path == "/ws"
-        assert config.conversation_relay_callback_path == "/conversation-relay-callback"
         assert config.cintel_webhook_path is None
 
     def test_custom_paths(self) -> None:
@@ -47,16 +45,12 @@ class TestTACServerConfig:
             port=3000,
             conversation_webhook_path="/conversations",
             twiml_path="/voice/twiml",
-            websocket_path="/voice/ws",
-            conversation_relay_callback_path="/voice/cleanup",
             cintel_webhook_path="/ci",
         )
         assert config.host == "127.0.0.1"
         assert config.port == 3000
         assert config.conversation_webhook_path == "/conversations"
         assert config.twiml_path == "/voice/twiml"
-        assert config.websocket_path == "/voice/ws"
-        assert config.conversation_relay_callback_path == "/voice/cleanup"
         assert config.cintel_webhook_path == "/ci"
 
     def test_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -92,7 +86,7 @@ class TestVoiceUrlConfigValidationAtStartup:
     attached but no public URL is configured. Catches the misconfiguration
     before the first inbound call rather than returning a 500."""
 
-    def test_raises_when_voice_channel_without_url_or_domain(self) -> None:
+    def test_raises_when_voice_channel_without_public_domain(self) -> None:
         from tac.channels.voice import VoiceChannel
         from tac.server import TACFastAPIServer
 
@@ -111,19 +105,6 @@ class TestVoiceUrlConfigValidationAtStartup:
 
         tac = TAC(get_test_config())  # has voice_public_domain
         vc = VoiceChannel(tac)
-        TACFastAPIServer(tac=tac, voice_channel=vc)  # no raise
-
-    def test_passes_when_websocket_url_override_set(self) -> None:
-        from tac.channels.voice import VoiceChannel, VoiceChannelConfig
-        from tac.server import TACFastAPIServer
-
-        cfg = {**get_test_config()}
-        cfg.pop("voice_public_domain", None)
-        tac = TAC(cfg)
-        vc = VoiceChannel(
-            tac,
-            config=VoiceChannelConfig(websocket_url="wss://override.example.com/ws"),
-        )
         TACFastAPIServer(tac=tac, voice_channel=vc)  # no raise
 
     def test_passes_without_voice_channel(self) -> None:
@@ -407,17 +388,25 @@ class TestTACFastAPIServer:
         assert "/ci-webhook" in route_paths
 
     def test_create_app_custom_paths(self) -> None:
+        """Custom server paths come from TACServerConfig (server-only paths)
+        and TACConfig (voice paths, which are also consumed by the channel
+        for URL construction)."""
         from tac.channels import SMSChannel
         from tac.channels.voice import VoiceChannel
         from tac.server import TACFastAPIServer
 
-        tac = TAC(get_test_config())
+        tac = TAC(
+            {
+                **get_test_config(),
+                "voice_websocket_path": "/voice/ws",
+                "voice_action_path": "/voice/cleanup",
+            }
+        )
         server = TACFastAPIServer(
             tac=tac,
             config=TACServerConfig(
                 conversation_webhook_path="/conversations",
                 twiml_path="/voice/twiml",
-                websocket_path="/voice/ws",
             ),
             voice_channel=VoiceChannel(tac),
             messaging_channels=[SMSChannel(tac)],
@@ -428,6 +417,7 @@ class TestTACFastAPIServer:
         assert "/conversations" in route_paths
         assert "/voice/twiml" in route_paths
         assert "/voice/ws" in route_paths
+        assert "/voice/cleanup" in route_paths
 
     def test_custom_app_is_used(self) -> None:
         """User-supplied FastAPI instance is used directly and metadata preserved."""

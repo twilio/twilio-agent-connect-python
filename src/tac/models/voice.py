@@ -161,7 +161,8 @@ class LanguageConfig(BaseModel):
 
 
 class TwiMLOptions(BaseModel):
-    """Options for generating ConversationRelay TwiML.
+    """Options for the TwiML inside ``<ConversationRelay>`` (plus the
+    ``<Connect action>`` URL).
 
     Fields map to the attributes documented at
     https://www.twilio.com/docs/voice/twiml/connect/conversationrelay .

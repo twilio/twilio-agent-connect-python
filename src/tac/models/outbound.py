@@ -76,14 +76,15 @@ class InitiateVoiceConversationOptions(BaseModel):
     websocket_url: str | None = Field(
         default=None,
         description="Public WebSocket URL for ConversationRelay (e.g. "
-        "'wss://your-domain.ngrok.app/ws'). Optional — defaults to "
-        "``VoiceChannelConfig.websocket_url`` when not provided. Pass it here "
-        "only to override the channel's URL for a specific call.",
+        "'wss://your-domain.ngrok.app/ws'). Optional — defaults to the URL "
+        "derived from ``TACConfig.voice_public_domain`` + "
+        "``voice_websocket_path``. Pass it here only to override the URL "
+        "for a specific call.",
     )
     twiml_options: TwiMLOptions | None = Field(
         default=None,
-        description="Per-call TwiMLOptions overrides. Merged over "
-        "VoiceChannelConfig.default_twiml_options and TAC defaults.",
+        description="Per-call overrides for the TwiML inside <ConversationRelay>. "
+        "Merged over VoiceChannelConfig.default_twiml_options and TAC defaults.",
     )
 
     model_config = {"populate_by_name": True}

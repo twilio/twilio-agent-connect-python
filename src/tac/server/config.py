@@ -8,11 +8,10 @@ from pydantic import BaseModel, Field
 class TACServerConfig(BaseModel):
     """Configuration for TAC server implementations.
 
-    Controls host/port binding and webhook paths registered by the server.
-    Voice-specific settings — the public domain, WebSocket path, and
-    ConversationRelay action path — live on ``TACConfig`` and
-    ``VoiceChannelConfig``, since they're consumed by the voice channel
-    regardless of which web framework is used.
+    Controls host/port binding and the server-only webhook paths. Voice paths
+    (WebSocket and ConversationRelay action) live on ``TACConfig`` because
+    they're consumed by the voice channel regardless of which web framework
+    is used; this server reads them from there to register its routes.
     """
 
     host: str = Field(default="0.0.0.0", description="Host to bind the server to")
@@ -22,17 +21,6 @@ class TACServerConfig(BaseModel):
         default="/webhook", description="Path for conversation webhook endpoint (for all channels)"
     )
     twiml_path: str = Field(default="/twiml", description="Path for TwiML generation endpoint")
-    websocket_path: str = Field(
-        default="/ws",
-        description="Path to register the voice WebSocket route at. "
-        "VoiceChannelConfig.websocket_path builds the public URL — keep them "
-        "in sync, or set VoiceChannelConfig.websocket_url directly.",
-    )
-    conversation_relay_callback_path: str = Field(
-        default="/conversation-relay-callback",
-        description="Path to register the ConversationRelay action callback route at. "
-        "Same pairing rule as websocket_path with VoiceChannelConfig.action_path.",
-    )
     cintel_webhook_path: str | None = Field(
         default=None,
         description="Path for Conversation Intelligence webhook endpoint. "

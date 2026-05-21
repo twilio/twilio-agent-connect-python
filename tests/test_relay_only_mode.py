@@ -28,6 +28,7 @@ def relay_only_config() -> dict:
         "api_key": "SK123",
         "api_secret": "test_api_secret",
         "phone_number": "+15551234567",
+        "voice_public_domain": "example.com",
     }
 
 
@@ -98,7 +99,6 @@ class TestRelayOnlyMode:
             ),
         )
 
-        channel.config.websocket_url = "wss://example.com/ws"
         twiml = await channel.handle_incoming_call()
 
         assert "conversationConfiguration" not in twiml

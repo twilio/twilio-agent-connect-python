@@ -286,6 +286,22 @@ class TACConfig(BaseModel):
         "are stripped automatically.",
     )
 
+    voice_websocket_path: str = Field(
+        default="/ws",
+        description="Path the voice WebSocket is served at. Combined with "
+        "voice_public_domain to build the public WebSocket URL the voice "
+        "channel hands to Twilio in TwiML; TACFastAPIServer also registers "
+        "its WebSocket route at this path. Override only if you mount the "
+        "route at a non-default path.",
+    )
+
+    voice_action_path: str = Field(
+        default="/conversation-relay-callback",
+        description="Path the ConversationRelay action callback is served at. "
+        "Same role as voice_websocket_path but for the <Connect action=...> "
+        "cleanup callback.",
+    )
+
     @field_validator("voice_public_domain", mode="before")
     @classmethod
     def _normalize_voice_public_domain(cls, v: str | None) -> str | None:
@@ -360,6 +376,9 @@ class TACConfig(BaseModel):
         - TWILIO_REGION: Twilio region for data residency (e.g., 'au1', 'ie1')
         - TWILIO_STUDIO_HANDOFF_FLOW_SID: Studio Flow SID (FWxxx...) for handoff tool
         - TWILIO_VOICE_PUBLIC_DOMAIN: Public domain for voice routes (required for voice)
+        - TWILIO_VOICE_WEBSOCKET_PATH: Path for voice WebSocket (default: /ws)
+        - TWILIO_VOICE_ACTION_PATH: Path for ConversationRelay action callback
+          (default: /conversation-relay-callback)
 
         Memory Configuration:
         - TWILIO_MEMORY_PROFILE_TRAIT_GROUPS: Trait groups to include
@@ -385,6 +404,14 @@ class TACConfig(BaseModel):
         # Load optional conversation intelligence configuration
         conversation_intelligence_config = ConversationIntelligenceConfig.from_env()
 
+        # Path overrides: only forward to the constructor when the env var is
+        # set, so the field defaults take effect otherwise.
+        path_overrides: dict[str, str] = {}
+        if "TWILIO_VOICE_WEBSOCKET_PATH" in os.environ:
+            path_overrides["voice_websocket_path"] = os.environ["TWILIO_VOICE_WEBSOCKET_PATH"]
+        if "TWILIO_VOICE_ACTION_PATH" in os.environ:
+            path_overrides["voice_action_path"] = os.environ["TWILIO_VOICE_ACTION_PATH"]
+
         return cls(
             conversation_configuration_id=os.environ.get("TWILIO_CONVERSATION_CONFIGURATION_ID"),
             account_sid=os.environ["TWILIO_ACCOUNT_SID"],
@@ -401,4 +428,5 @@ class TACConfig(BaseModel):
             voice_public_domain=os.environ.get("TWILIO_VOICE_PUBLIC_DOMAIN"),
             memory_config=memory_config,
             conversation_intelligence_config=conversation_intelligence_config,
+            **path_overrides,
         )

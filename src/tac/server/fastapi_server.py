@@ -145,14 +145,11 @@ class TACFastAPIServer:
         can't know what URL plumbing they're doing outside this server.
         """
         assert self.voice_channel is not None  # checked by caller
-        if self.voice_channel.config.websocket_url:
-            return
         if self.tac.config.voice_public_domain:
             return
         raise ValueError(
-            "Voice channel is configured but no public URL is set. "
-            "Set TACConfig.voice_public_domain (or TWILIO_VOICE_PUBLIC_DOMAIN env "
-            "var), or pass websocket_url on VoiceChannelConfig as an override."
+            "Voice channel is configured but TACConfig.voice_public_domain is "
+            "not set. Set it directly or via the TWILIO_VOICE_PUBLIC_DOMAIN env var."
         )
 
     def _register_routes(self, app: FastAPI) -> None:
@@ -225,14 +222,14 @@ class TACFastAPIServer:
                 twiml = await vc.handle_incoming_call(twiml_request=twiml_request)
                 return Response(content=twiml, media_type="application/xml")
 
-            @app.websocket(config.websocket_path)
+            @app.websocket(self.tac.config.voice_websocket_path)
             async def websocket_endpoint(websocket: WebSocket, _: None = Depends(ws_sig)) -> None:
                 """Handle voice WebSocket connections."""
                 adapter = FastAPIWebSocketAdapter(websocket)
                 await vc.handle_websocket(adapter)
 
             @app.post(
-                config.conversation_relay_callback_path,
+                self.tac.config.voice_action_path,
                 dependencies=[Depends(http_sig)],
             )
             async def conversation_relay_callback(request: Request) -> Response:

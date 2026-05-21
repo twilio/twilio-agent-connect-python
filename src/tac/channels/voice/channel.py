@@ -84,8 +84,8 @@ class VoiceChannel(BaseChannel):
         self._twilio_client: Client | None = None
 
     def on_inbound_call_twiml(self, callback: InboundCallTwiMLHandler) -> None:
-        """Register a callback that produces per-call TwiML overrides for
-        inbound calls.
+        """Register a callback that produces per-call overrides for the
+        TwiML inside ``<ConversationRelay>`` on inbound calls.
 
         The callback receives a framework-neutral ``TwiMLRequest`` (parsed
         from the Twilio webhook form) and returns a ``TwiMLOptions``. Fields
@@ -109,34 +109,30 @@ class VoiceChannel(BaseChannel):
         self._on_inbound_call_twiml = callback
 
     def _resolve_websocket_url(self, action: str) -> str:
-        """Resolve the public WebSocket URL.
-
-        Order: explicit ``VoiceChannelConfig.websocket_url`` override →
-        derived from ``TACConfig.voice_public_domain`` + ``websocket_path``.
-        Raises if neither is available.
+        """Resolve the public WebSocket URL from
+        ``TACConfig.voice_public_domain`` + ``TACConfig.voice_websocket_path``.
+        Raises if ``voice_public_domain`` isn't set.
         """
-        if self.config.websocket_url:
-            return self.config.websocket_url
         if self.tac.config.voice_public_domain:
-            return f"wss://{self.tac.config.voice_public_domain}{self.config.websocket_path}"
+            return (
+                f"wss://{self.tac.config.voice_public_domain}{self.tac.config.voice_websocket_path}"
+            )
         raise ValueError(
             f"{action} needs a WebSocket URL. Set TWILIO_VOICE_PUBLIC_DOMAIN "
-            "(or TACConfig.voice_public_domain), or pass websocket_url on "
-            "VoiceChannelConfig as an override."
+            "(or TACConfig.voice_public_domain)."
         )
 
     def _resolve_default_action_url(self) -> str | None:
-        """Resolve the default ``<Connect action=...>`` cleanup URL — same
-        derivation as ``_resolve_websocket_url`` but for the action URL.
+        """Resolve the default ``<Connect action=...>`` cleanup URL.
 
-        Returns None if neither override nor derivation source is set; that's
-        fine because action_url has higher-priority layers (customizer,
-        twiml_options, Studio handoff) above this fallback.
+        Returns None if ``voice_public_domain`` isn't set; that's fine because
+        action_url has higher-priority layers (customizer, twiml_options,
+        Studio handoff) above this fallback.
         """
-        if self.config.action_url:
-            return self.config.action_url
         if self.tac.config.voice_public_domain:
-            return f"https://{self.tac.config.voice_public_domain}{self.config.action_path}"
+            return (
+                f"https://{self.tac.config.voice_public_domain}{self.tac.config.voice_action_path}"
+            )
         return None
 
     @staticmethod
@@ -167,10 +163,9 @@ class VoiceChannel(BaseChannel):
         ConversationRelay automatically handles conversation creation and participant
         management via the ``conversation_configuration`` parameter.
 
-        The WebSocket URL and default session-cleanup action URL come from
-        ``VoiceChannelConfig`` (``websocket_url`` / ``action_url``).
-        ``TACFastAPIServer`` sets them automatically; custom adapters must set
-        them on the config before calling.
+        The WebSocket URL and default session-cleanup action URL are derived
+        from ``TACConfig.voice_public_domain`` + ``TACConfig.voice_websocket_path``
+        / ``voice_action_path``.
 
         TwiML fields are merged per-field, highest precedence first:
           1. Output of the customizer registered via
@@ -178,9 +173,10 @@ class VoiceChannel(BaseChannel):
              and ``twiml_request`` is given.
           2. ``VoiceChannelConfig.default_twiml_options`` — per-channel defaults.
           3. TAC defaults: a fixed default ``welcome_greeting``,
-             ``conversation_configuration`` from ``TACConfig``, and ``action_url``
-             resolved via Studio handoff (when ``studio_handoff_flow_sid`` is
-             configured), else ``VoiceChannelConfig.action_url``.
+             ``conversation_configuration`` from ``TACConfig``, and
+             ``action_url`` resolved via Studio handoff (when
+             ``studio_handoff_flow_sid`` is configured), else derived from
+             ``TACConfig.voice_public_domain`` + ``voice_action_path``.
 
         Fields not set at a layer fall through to lower layers. Lists
         (``languages``) and nested models (``custom_parameters``) replace
@@ -246,9 +242,8 @@ class VoiceChannel(BaseChannel):
           1. customizer
           2. channel ``default_twiml_options``
           3. Studio handoff (when ``studio_handoff_flow_sid`` is configured)
-          4. Channel default — ``VoiceChannelConfig.action_url`` if set,
-             else derived from ``TACConfig.voice_public_domain`` +
-             ``VoiceChannelConfig.action_path``.
+          4. Channel default — derived from ``TACConfig.voice_public_domain``
+             + ``TACConfig.voice_action_path``.
 
         User-expressed intent (Studio handoff is configured explicitly on
         ``TACConfig``) beats the SDK's generated cleanup default. If a user
@@ -508,18 +503,18 @@ class VoiceChannel(BaseChannel):
         TwiML fields are merged per-field, highest precedence first:
           1. ``options.twiml_options`` — per-call overrides
           2. ``VoiceChannelConfig.default_twiml_options`` — channel-wide defaults
-          3. TAC defaults: welcome greeting, ``conversation_configuration`` from
-             ``TACConfig``, and ``action_url`` from Studio handoff (if configured),
-             else ``VoiceChannelConfig.action_url``.
+          3. TAC defaults: welcome greeting, ``conversation_configuration``
+             from ``TACConfig``, and ``action_url`` from Studio handoff (if
+             configured), else derived from ``TACConfig.voice_public_domain``
+             + ``voice_action_path``.
 
         Fields not set at a layer fall through to lower layers. Lists
         (``languages``) and nested models (``custom_parameters``) replace
         wholesale when set at a higher-priority layer.
 
         The WebSocket URL is derived from ``TACConfig.voice_public_domain`` +
-        ``VoiceChannelConfig.websocket_path``, or read from a
-        ``VoiceChannelConfig.websocket_url`` override, unless overridden
-        per-call via ``options.websocket_url``.
+        ``TACConfig.voice_websocket_path``, unless overridden per-call via
+        ``options.websocket_url``.
         """
         websocket_url = options.websocket_url or self._resolve_websocket_url(
             "initiate_outbound_conversation"
