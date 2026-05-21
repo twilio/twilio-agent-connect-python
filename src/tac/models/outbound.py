@@ -87,7 +87,7 @@ class InitiateVoiceConversationOptions(BaseModel):
         "Merged over VoiceChannelConfig.default_twiml_options and TAC defaults.",
     )
 
-    model_config = {"populate_by_name": True}
+    model_config = {"populate_by_name": True, "extra": "forbid"}
 
 
 class InitiateVoiceConversationResult(BaseModel):

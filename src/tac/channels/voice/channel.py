@@ -191,7 +191,6 @@ class VoiceChannel(BaseChannel):
         """
         websocket_url = self._resolve_websocket_url("handle_incoming_call")
 
-        # Invoke the customizer if configured and we have a request context.
         customized: TwiMLOptions | None = None
         if self._on_inbound_call_twiml is not None and twiml_request is not None:
             customized = await self._on_inbound_call_twiml(twiml_request)

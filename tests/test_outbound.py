@@ -443,6 +443,32 @@ class TestVoiceOutbound:
         assert result.call_sid == "CAsid789"
 
 
+class TestInitiateVoiceConversationOptionsForbidsExtra:
+    """Migration safety: removed fields raise ValidationError instead of
+    being silently dropped, so callers upgrading from older TAC versions
+    get a clear signal that their code needs updating."""
+
+    def test_removed_welcome_greeting_raises(self) -> None:
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError, match="welcome_greeting"):
+            InitiateVoiceConversationOptions(to="+15551234567", welcome_greeting="Hi!")  # type: ignore[call-arg]
+
+    def test_removed_action_url_raises(self) -> None:
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError, match="action_url"):
+            InitiateVoiceConversationOptions(
+                to="+15551234567", action_url="https://example.com/end"
+            )  # type: ignore[call-arg]
+
+    def test_removed_custom_parameters_raises(self) -> None:
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError, match="custom_parameters"):
+            InitiateVoiceConversationOptions(to="+15551234567", custom_parameters={"k": "v"})  # type: ignore[call-arg]
+
+
 # =============================================================================
 # isOwnMessage 2-tier
 # =============================================================================

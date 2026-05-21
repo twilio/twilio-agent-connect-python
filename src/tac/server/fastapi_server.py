@@ -82,13 +82,6 @@ class TACFastAPIServer:
         - Or mutate ``server.app`` after construction: add middleware,
           exception handlers, routers, or custom routes — before calling
           ``start()``.
-        - To customize TwiML attributes (voice, language, transcription provider,
-          interruption behavior, ``<Language>`` children, etc.) set
-          ``default_twiml_options`` on ``VoiceChannelConfig`` for same-on-every-call
-          settings. For per-call inbound customization, register a callback
-          via ``voice_channel.on_inbound_call_twiml(...)`` — an async
-          callable that receives a framework-neutral ``TwiMLRequest`` and
-          returns a ``TwiMLOptions``.
 
     Example:
         from fastapi import FastAPI
