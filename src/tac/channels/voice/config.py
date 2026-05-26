@@ -68,5 +68,7 @@ class VoiceChannelConfig(BaseModel):
         default=None,
         description="Static TwiMLOptions for the TwiML inside <ConversationRelay>, "
         "applied to every call (inbound and outbound). Per-call inbound "
-        "customization is registered via VoiceChannel.on_inbound_call_twiml(...).",
+        "customization is registered via VoiceChannel.on_inbound_call_twiml(...). "
+        "Note: ``custom_parameters`` and ``languages`` replace wholesale when a "
+        "higher-priority layer sets them — see VoiceChannel._overlay_fields.",
     )

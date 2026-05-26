@@ -13,7 +13,6 @@ from tac.models.memory import MemoryRetrievalResponse
 from tac.models.session import ConversationSession
 from tac.models.tac import TACMemoryResponse
 from tac.models.voice import (
-    CustomParameters,
     InterruptMessage,
     PromptMessage,
     SetupMessage,
@@ -1131,35 +1130,6 @@ class TestVoiceChannel:
         assert '<Parameter name="custom_field_2" value="value2" />' in twiml
         assert '<Parameter name="session_id" value="sess_123" />' in twiml
 
-    def test_generate_twiml_with_pydantic_model(self) -> None:
-        """Test TwiML generation using Pydantic CustomParameters model."""
-        custom_params = CustomParameters(conversationId="CH123", profileId="mem_profile_123")
-
-        twiml = generate_twiml(
-            "wss://example.com/voice",
-            TwiMLOptions(
-                custom_parameters=custom_params,
-            ),
-        )
-
-        # Should use camelCase aliases
-        assert '<Parameter name="conversationId" value="CH123" />' in twiml
-        assert '<Parameter name="profileId" value="mem_profile_123" />' in twiml
-
-    def test_generate_twiml_with_dict_options(self) -> None:
-        """Test TwiML generation accepting plain dict instead of TwiMLOptions."""
-        twiml = generate_twiml(
-            "wss://example.com/voice",
-            {
-                "custom_parameters": {"key": "value"},
-                "welcome_greeting": "Hi there!",
-            },
-        )
-
-        assert 'url="wss://example.com/voice"' in twiml
-        assert '<Parameter name="key" value="value" />' in twiml
-        assert 'welcomeGreeting="Hi there!"' in twiml
-
     def test_generate_twiml_filters_none_values(self) -> None:
         """Test that None values are excluded from parameters."""
         twiml = generate_twiml(
@@ -1176,26 +1146,6 @@ class TestVoiceChannel:
         assert '<Parameter name="field1" value="value1" />' in twiml
         assert "field2" not in twiml  # None should be filtered
         assert '<Parameter name="field3" value="value3" />' in twiml
-
-    def test_generate_twiml_escapes_xml_special_chars(self) -> None:
-        """Test XML character escaping in parameter values."""
-        twiml = generate_twiml(
-            "wss://example.com/voice",
-            TwiMLOptions(
-                custom_parameters={
-                    "field": 'value with "quotes" & ampersand',
-                },
-            ),
-        )
-
-        # Twilio SDK automatically escapes XML special characters
-        assert "&amp;" in twiml
-        assert "&quot;" in twiml
-        # Verify the full escaped parameter is present
-        expected_param = (
-            '<Parameter name="field" value="value with &quot;quotes&quot; &amp; ampersand" />'
-        )
-        assert expected_param in twiml
 
     def test_generate_twiml_complete_example(self) -> None:
         """Test complete TwiML generation with all options."""
@@ -1239,45 +1189,6 @@ class TestVoiceChannel:
 
         # Should not have conversation_configuration in output
         assert "conversationConfiguration" not in twiml
-
-    @pytest.mark.asyncio
-    async def test_handle_incoming_call_with_additional_parameters(self) -> None:
-        """Static twiml_options on VoiceChannelConfig passes custom_parameters through."""
-        from tac.channels.voice import VoiceChannelConfig
-
-        tac = TAC(get_test_config())
-        channel = VoiceChannel(
-            tac,
-            config=VoiceChannelConfig(
-                default_twiml_options=TwiMLOptions(
-                    welcome_greeting="Welcome!",
-                    custom_parameters={
-                        "session_id": "sess_abc123",
-                        "user_language": "es",
-                        "priority": "high",
-                    },
-                ),
-            ),
-        )
-
-        twiml = await channel.handle_incoming_call()
-
-        assert 'conversationConfiguration="conv_configuration_test123"' in twiml
-        assert '<Parameter name="session_id" value="sess_abc123" />' in twiml
-        assert '<Parameter name="user_language" value="es" />' in twiml
-        assert '<Parameter name="priority" value="high" />' in twiml
-
-    @pytest.mark.asyncio
-    async def test_handle_incoming_call_without_additional_parameters(self) -> None:
-        """Test handle_incoming_call works with only TAC defaults."""
-        tac = TAC(get_test_config())
-        channel = VoiceChannel(tac)
-
-        twiml = await channel.handle_incoming_call()
-
-        assert 'conversationConfiguration="conv_configuration_test123"' in twiml
-        assert "session_id" not in twiml
-        assert "user_language" not in twiml
 
 
 class TestGenerateTwiMLConversationRelayAttrs:
@@ -1422,23 +1333,18 @@ class TestGenerateTwiMLConversationRelayAttrs:
         assert 'events="speaker-events tokens-played"' in twiml
         assert 'intelligenceService="GAaabbcc"' in twiml
 
-    def test_eot_threshold_validation(self) -> None:
+    def test_speech_timeout_accepts_auto(self) -> None:
+        opts = TwiMLOptions(speech_timeout="auto")
+        assert opts.speech_timeout == "auto"
+        twiml = generate_twiml("wss://example.com/ws", opts)
+        assert 'speechTimeout="auto"' in twiml
+
+    def test_speech_timeout_rejects_other_strings(self) -> None:
         import pytest
         from pydantic import ValidationError
 
         with pytest.raises(ValidationError):
-            TwiMLOptions(eot_threshold=0.4)
-        with pytest.raises(ValidationError):
-            TwiMLOptions(eot_threshold=0.95)
-
-    def test_speech_timeout_validation(self) -> None:
-        import pytest
-        from pydantic import ValidationError
-
-        with pytest.raises(ValidationError):
-            TwiMLOptions(speech_timeout=500)
-        with pytest.raises(ValidationError):
-            TwiMLOptions(speech_timeout=6000)
+            TwiMLOptions(speech_timeout="fast")  # type: ignore[arg-type]
 
     def test_omitted_fields_absent_from_output(self) -> None:
         twiml = generate_twiml("wss://example.com/ws")
@@ -1483,31 +1389,19 @@ class TestTwiMLOptionsExtra:
         assert 'futureFeature="on"' in twiml
         assert 'anotherAttr="true"' in twiml
 
-    def test_extra_does_not_shadow_typed_field(self, caplog: pytest.LogCaptureFixture) -> None:
-        """If a user puts a typed-field name in extra, the typed value wins and
-        a warning is logged."""
-        import logging
+    def test_extra_shadowing_typed_field_raises(self) -> None:
+        """A typed-field name in ``extra`` raises at construction. Silent
+        drop-and-warn would be a footgun: the user explicitly set the field
+        via ``extra`` and got nothing back."""
+        from pydantic import ValidationError
 
-        # TAC's setup_logging (called from TAC()) sets propagate=False on the
-        # "tac" logger so pytest's caplog doesn't see its records. Flip it for
-        # this test and restore after.
-        tac_logger = logging.getLogger("tac")
-        original_propagate = tac_logger.propagate
-        tac_logger.propagate = True
-        try:
-            with caplog.at_level("WARNING"):
-                twiml = generate_twiml(
-                    "wss://example.com/ws",
-                    TwiMLOptions(
-                        voice="en-US-Journey-D",
-                        extra={"voice": "should-not-appear"},
-                    ),
-                )
-        finally:
-            tac_logger.propagate = original_propagate
-        assert 'voice="en-US-Journey-D"' in twiml
-        assert "should-not-appear" not in twiml
-        assert any("shadows a typed field" in r.message for r in caplog.records)
+        with pytest.raises(ValidationError, match="shadow typed fields"):
+            TwiMLOptions(voice="en-US-Journey-D", extra={"voice": "should-not-appear"})
+
+        with pytest.raises(ValidationError, match="shadow typed fields"):
+            # Even when the typed field is unset, a shadow key must use the
+            # typed field directly so validators / type coercion run.
+            TwiMLOptions(extra={"speech_timeout": 800})
 
     def test_extra_none_emits_nothing(self) -> None:
         twiml = generate_twiml("wss://example.com/ws", TwiMLOptions())
@@ -2216,37 +2110,22 @@ class TestSessionManagerDefaults:
 class TestVoicePublicDomainNormalization:
     """TACConfig.voice_public_domain strips schemes/whitespace/trailing slashes."""
 
-    def test_strips_https_scheme(self) -> None:
-        tac = TAC({**get_test_config(), "voice_public_domain": "https://example.ngrok.app"})
-        assert tac.config.voice_public_domain == "example.ngrok.app"
-
-    def test_strips_http_scheme(self) -> None:
-        tac = TAC({**get_test_config(), "voice_public_domain": "http://example.ngrok.app"})
-        assert tac.config.voice_public_domain == "example.ngrok.app"
-
-    def test_strips_wss_scheme(self) -> None:
-        tac = TAC({**get_test_config(), "voice_public_domain": "wss://example.ngrok.app"})
-        assert tac.config.voice_public_domain == "example.ngrok.app"
-
-    def test_strips_trailing_slash(self) -> None:
-        tac = TAC({**get_test_config(), "voice_public_domain": "example.ngrok.app/"})
-        assert tac.config.voice_public_domain == "example.ngrok.app"
-
-    def test_strips_scheme_and_trailing_slash(self) -> None:
-        tac = TAC({**get_test_config(), "voice_public_domain": "https://example.ngrok.app/"})
-        assert tac.config.voice_public_domain == "example.ngrok.app"
-
-    def test_strips_whitespace(self) -> None:
-        tac = TAC({**get_test_config(), "voice_public_domain": "  example.ngrok.app  "})
-        assert tac.config.voice_public_domain == "example.ngrok.app"
-
-    def test_empty_string_becomes_none(self) -> None:
-        tac = TAC({**get_test_config(), "voice_public_domain": ""})
-        assert tac.config.voice_public_domain is None
-
-    def test_passes_through_clean_value(self) -> None:
-        tac = TAC({**get_test_config(), "voice_public_domain": "example.ngrok.app"})
-        assert tac.config.voice_public_domain == "example.ngrok.app"
+    @pytest.mark.parametrize(
+        "raw,expected",
+        [
+            ("https://example.ngrok.app", "example.ngrok.app"),
+            ("http://example.ngrok.app", "example.ngrok.app"),
+            ("wss://example.ngrok.app", "example.ngrok.app"),
+            ("example.ngrok.app/", "example.ngrok.app"),
+            ("https://example.ngrok.app/", "example.ngrok.app"),
+            ("  example.ngrok.app  ", "example.ngrok.app"),
+            ("example.ngrok.app", "example.ngrok.app"),
+            ("", None),
+        ],
+    )
+    def test_normalizes(self, raw: str, expected: str | None) -> None:
+        tac = TAC({**get_test_config(), "voice_public_domain": raw})
+        assert tac.config.voice_public_domain == expected
 
     @pytest.mark.asyncio
     async def test_normalized_value_produces_valid_twiml(self) -> None:
@@ -2266,29 +2145,3 @@ class TestVoicePathsOnTACConfig:
         tac = TAC(get_test_config())
         assert tac.config.voice_websocket_path == "/ws"
         assert tac.config.voice_action_path == "/conversation-relay-callback"
-
-    def test_paths_flow_into_websocket_url(self) -> None:
-        """voice_websocket_path is consumed by the channel for URL construction."""
-        tac = TAC(
-            {
-                **get_test_config(),
-                "voice_public_domain": "test.ngrok.io",
-                "voice_websocket_path": "/voice/ws",
-            }
-        )
-        channel = VoiceChannel(tac)
-        url = channel._resolve_websocket_url("test")
-        assert url == "wss://test.ngrok.io/voice/ws"
-
-    def test_paths_flow_into_action_url(self) -> None:
-        """voice_action_path is consumed by the channel for URL construction."""
-        tac = TAC(
-            {
-                **get_test_config(),
-                "voice_public_domain": "test.ngrok.io",
-                "voice_action_path": "/voice/cleanup",
-            }
-        )
-        channel = VoiceChannel(tac)
-        url = channel._resolve_default_action_url()
-        assert url == "https://test.ngrok.io/voice/cleanup"

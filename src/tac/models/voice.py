@@ -2,7 +2,7 @@
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 # Twilio uses the same four-value enum for several attributes that control
 # what caller input (DTMF, speech, both, neither) triggers a given behavior.
@@ -232,10 +232,9 @@ class TwiMLOptions(BaseModel):
     # Turn detection / interruption
     eot_threshold: float | None = Field(
         None,
-        ge=0.5,
-        le=0.9,
-        description="Confidence required to finish a turn (0.5 - 0.9). "
-        "Only applies with Deepgram + flux speech model.",
+        description="Confidence required to finish a turn. "
+        "Only applies with Deepgram + flux speech model. "
+        "Twilio enforces the accepted range — see ConversationRelay docs.",
     )
     partial_prompts: bool | None = Field(
         None,
@@ -247,12 +246,11 @@ class TwiMLOptions(BaseModel):
         description="Use Deepgram Smart Format for transcription output. "
         "Defaults to true when transcription_provider='Deepgram'.",
     )
-    speech_timeout: int | None = Field(
+    speech_timeout: int | Literal["auto"] | None = Field(
         None,
-        ge=600,
-        le=5000,
         description="Silence (ms) after speech before finalizing the prompt. "
-        "Integer in [600, 5000]. Defaults to 'auto' on Twilio.",
+        "Integer milliseconds or the literal 'auto' (the platform default). "
+        "Twilio enforces the accepted range — see ConversationRelay docs.",
     )
     interruptible: InterruptMode | bool | None = Field(
         None,
@@ -320,6 +318,23 @@ class TwiMLOptions(BaseModel):
     )
 
     model_config = {"populate_by_name": True}
+
+    @model_validator(mode="after")
+    def _reject_extra_shadowing_typed_fields(self) -> "TwiMLOptions":
+        """Fail fast when ``extra`` includes a key that has a typed field on
+        this model. Without this, the user's value would be silently dropped
+        by the TwiML serializer in favor of the typed default — a footgun.
+        """
+        if not self.extra:
+            return self
+        typed = set(type(self).model_fields) - {"extra"}
+        shadowed = sorted(k for k in self.extra if k in typed)
+        if shadowed:
+            raise ValueError(
+                f"TwiMLOptions.extra keys {shadowed} shadow typed fields. "
+                "Set the typed field directly instead of using ``extra``."
+            )
+        return self
 
 
 class TwiMLRequest(BaseModel):

@@ -5,10 +5,7 @@ from typing import Any
 from pydantic import BaseModel
 from twilio.twiml.voice_response import VoiceResponse
 
-from tac.core.logging import get_logger
 from tac.models.voice import TwiMLOptions
-
-logger = get_logger(__name__)
 
 # Fields on TwiMLOptions that map to <ConversationRelay> attributes and are
 # emitted via the snake_case → camelCase conversion done by twilio's SDK.
@@ -138,16 +135,10 @@ def generate_twiml(
             value = "any" if value else "none"
         relay_kwargs[attr] = value
 
+    # TwiMLOptions' validator already rejects extra keys that shadow typed
+    # fields, so we can pass everything through here as-is.
     if options.extra:
-        typed_keys = set(_OPTIONAL_RELAY_ATTRS)
-        for key, value in options.extra.items():
-            if key in typed_keys:
-                logger.warning(
-                    "TwiMLOptions.extra shadows a typed field; typed field wins.",
-                    shadowed_key=key,
-                )
-                continue
-            relay_kwargs[key] = value
+        relay_kwargs.update(options.extra)
 
     relay = connect.conversation_relay(**relay_kwargs)
 
