@@ -1,0 +1,626 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Conversation Intelligence Setup</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .spinner { width:14px;height:14px;border:2px solid #3b82f6;border-top-color:transparent;border-radius:50%;animation:spin .8s linear infinite;display:inline-block; }
+        @keyframes spin { to { transform:rotate(360deg); } }
+        .section-heading { font-size:0.875rem; font-weight:700; color:#0f172a; margin-bottom:0.5rem; display:flex; align-items:center; gap:0.5rem; }
+        .field-label { display:block; font-size:0.75rem; font-weight:500; color:#374151; margin-bottom:0.25rem; }
+        .field-input { width:100%; padding:0.375rem 0.625rem; font-size:0.875rem; border:1px solid #d1d5db; border-radius:0.375rem; outline:none; }
+        .field-input:focus { ring: 2px solid #3b82f6; border-color:#3b82f6; box-shadow:0 0 0 2px rgba(59,130,246,0.3); }
+        .step-icon { width:1.75rem; height:1.75rem; border-radius:9999px; background:#f1f5f9; color:#94a3b8; display:flex; align-items:center; justify-content:center; font-size:0.75rem; font-weight:600; flex-shrink:0; }
+        .pwd-eye { position:absolute; right:0.5rem; top:50%; transform:translateY(-50%); color:#94a3b8; }
+        .pwd-eye:hover { color:#475569; }
+    </style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+<div class="bg-slate-900 px-6 py-2">
+    <h1 class="text-sm font-semibold text-white">Conversation Intelligence Setup</h1>
+</div>
+
+<div class="bg-white border-t border-slate-200 flex items-stretch min-h-screen">
+
+    <!-- LEFT: form -->
+    <div class="flex-1 p-6 border-r border-slate-200 min-w-0">
+        <div class="max-w-2xl">
+
+            <!-- Step 1: Credentials -->
+            <div id="s1" class="mb-6">
+                <h3 class="section-heading">Step 1 — Credentials &amp; ngrok Domain</h3>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="field-label" for="api_key">API Key</label>
+                        <input id="api_key" type="text" placeholder=""
+                            class="field-input" oninput="onCredsInput()">
+                        <p class="text-xs text-slate-400 mt-0.5">SKxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx</p>
+                    </div>
+                    <div>
+                        <label class="field-label" for="api_secret">API Secret</label>
+                        <div class="relative">
+                            <input id="api_secret" type="password" placeholder="Your API secret"
+                                class="field-input pr-9" oninput="onCredsInput()">
+                            <button type="button" onclick="togglePwd('api_secret')" class="pwd-eye">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 gap-3 mt-3">
+                    <div>
+                        <label class="field-label" for="account_sid">Account SID</label>
+                        <input id="account_sid" type="text" placeholder=""
+                            class="field-input">
+                        <p class="text-xs text-slate-400 mt-0.5">ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx</p>
+                    </div>
+                    <div>
+                        <label class="field-label" for="twilio_phone">Twilio Phone Number</label>
+                        <input id="twilio_phone" type="tel" placeholder="+18001234567"
+                            class="field-input">
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 gap-3 mt-3">
+                    <div>
+                        <label class="field-label" for="auth_token">Auth Token</label>
+                        <div class="relative">
+                            <input id="auth_token" type="password" placeholder=""
+                                class="field-input pr-9">
+                            <button type="button" onclick="togglePwd('auth_token')" class="pwd-eye">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+                                </svg>
+                            </button>
+                        </div>
+                        <p class="text-xs text-slate-400 mt-0.5">32-character hex string from Twilio Console</p>
+                    </div>
+                    <div>
+                        <label class="field-label" for="openai_api_key">OpenAI API Key</label>
+                        <div class="relative">
+                            <input id="openai_api_key" type="password" placeholder="sk-proj-..."
+                                class="field-input pr-9">
+                            <button type="button" onclick="togglePwd('openai_api_key')" class="pwd-eye">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <div class="mt-3">
+                    <label class="field-label" for="ngrok_domain">ngrok Domain</label>
+                    <div class="flex gap-2 items-center">
+                        <input id="ngrok_domain" type="text" placeholder="abc123.ngrok.app"
+                            class="field-input">
+                        <button type="button" onclick="detectNgrok()"
+                            class="flex-shrink-0 px-2.5 py-1.5 text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium rounded-md whitespace-nowrap">
+                            Auto-detect
+                        </button>
+                    </div>
+                    <p class="text-xs text-slate-400 mt-0.5" id="ngrok-status">No https:// prefix</p>
+                </div>
+            </div>
+
+            <!-- Step 2: Memory Store (locked) -->
+            <div id="s2" class="mb-6 pt-5 border-t-2 border-slate-200 opacity-50 pointer-events-none">
+                <div class="flex items-center justify-between mb-2">
+                    <h3 class="section-heading">Step 2 — Memory Store</h3>
+                    <div class="flex gap-2">
+                        <button onclick="loadMemoryStores()" class="text-xs text-blue-600 hover:text-blue-700 font-medium">Refresh</button>
+                        <button onclick="showMemoryModal()" class="text-xs bg-blue-600 hover:bg-blue-700 text-white font-medium px-2 py-1 rounded">+ Create New</button>
+                    </div>
+                </div>
+                <select id="memory_store_select" onchange="onMemorySelected()"
+                    class="field-input">
+                    <option value="">-- Select or create a Memory Store --</option>
+                </select>
+                <p class="text-xs text-slate-400 mt-0.5">Click Refresh to load existing stores</p>
+            </div>
+
+            <!-- Step 3: Conversation Orchestrator (locked) -->
+            <div id="s3" class="mb-6 pt-5 border-t-2 border-slate-200 opacity-50 pointer-events-none">
+                <h3 class="section-heading">Step 3 — Conversation Orchestrator Configuration</h3>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="field-label" for="co_display_name">Display Name</label>
+                        <input id="co_display_name" type="text" placeholder="owl-internet-support" maxlength="32"
+                            class="field-input">
+                        <p class="text-xs text-slate-400 mt-0.5">URL-safe: letters, numbers, . _ ~ - (max 32)</p>
+                    </div>
+                    <div>
+                        <label class="field-label" for="co_description">Description</label>
+                        <input id="co_description" type="text" placeholder="Owl Internet support" maxlength="128"
+                            class="field-input">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 4: Run Setup (locked) -->
+            <div id="s4" class="mb-6 pt-5 border-t-2 border-slate-200 opacity-50 pointer-events-none">
+                <h3 class="section-heading">Step 4 — Conversation Intelligence</h3>
+                <p class="text-xs text-slate-500 mb-3">
+                    Creates the Conversation Orchestrator configuration and an Intelligence Configuration
+                    with <strong>Script Adherence</strong> (per-utterance) and <strong>Summary</strong> (post-call) rules,
+                    then links them together.
+                </p>
+                <button id="runBtn" onclick="runSetup()"
+                    class="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-md disabled:opacity-50 disabled:cursor-not-allowed">
+                    Run Setup
+                </button>
+            </div>
+
+            <!-- Progress -->
+            <div class="pt-5 border-t-2 border-slate-200">
+                <h3 class="text-xs font-semibold text-slate-600 uppercase tracking-wide mb-3">Progress</h3>
+                <div class="flex items-start justify-between gap-2">
+                    <div class="flex-1" id="p-memory">
+                        <div class="flex items-center">
+                            <div id="icon-memory" class="step-icon">1</div>
+                            <div class="h-0.5 flex-1 bg-slate-200 ml-2"></div>
+                        </div>
+                        <div class="mt-1.5">
+                            <div class="text-xs font-medium text-slate-800">Memory Store</div>
+                            <div id="stat-memory" class="text-xs text-slate-500 mt-0.5">Waiting...</div>
+                        </div>
+                    </div>
+                    <div class="flex-1" id="p-co">
+                        <div class="flex items-center">
+                            <div class="h-0.5 flex-1 bg-slate-200 mr-2"></div>
+                            <div id="icon-co" class="step-icon">2</div>
+                            <div class="h-0.5 flex-1 bg-slate-200 ml-2"></div>
+                        </div>
+                        <div class="mt-1.5 text-center">
+                            <div class="text-xs font-medium text-slate-800">CO Config</div>
+                            <div id="stat-co" class="text-xs text-slate-500 mt-0.5">Waiting...</div>
+                        </div>
+                    </div>
+                    <div class="flex-1" id="p-ci">
+                        <div class="flex items-center">
+                            <div class="h-0.5 flex-1 bg-slate-200 mr-2"></div>
+                            <div id="icon-ci" class="step-icon">3</div>
+                            <div class="h-0.5 flex-1 bg-slate-200 ml-2"></div>
+                        </div>
+                        <div class="mt-1.5 text-center">
+                            <div class="text-xs font-medium text-slate-800">CI Config</div>
+                            <div id="stat-ci" class="text-xs text-slate-500 mt-0.5">Waiting...</div>
+                        </div>
+                    </div>
+                    <div class="flex-1" id="p-link">
+                        <div class="flex items-center">
+                            <div class="h-0.5 flex-1 bg-slate-200 mr-2"></div>
+                            <div id="icon-link" class="step-icon">4</div>
+                        </div>
+                        <div class="mt-1.5 text-right">
+                            <div class="text-xs font-medium text-slate-800">Link</div>
+                            <div id="stat-link" class="text-xs text-slate-500 mt-0.5">Waiting...</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Error log -->
+                <div id="errSection" class="hidden mt-4 bg-red-50 border border-red-200 rounded-lg p-3">
+                    <div class="flex items-start justify-between mb-1">
+                        <h4 class="text-xs font-semibold text-red-800 uppercase tracking-wide">Error</h4>
+                        <button onclick="document.getElementById('errSection').classList.add('hidden')" class="text-xs text-red-600">✕</button>
+                    </div>
+                    <div id="errContent" class="text-xs text-red-800 break-words whitespace-pre-wrap"></div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- RIGHT: memory store list + env var output -->
+    <div class="w-80 flex-shrink-0 bg-slate-50 p-6 flex flex-col gap-6">
+
+        <!-- Memory stores panel -->
+        <div>
+            <div class="flex items-center justify-between mb-2">
+                <h3 class="text-xs font-semibold text-slate-600 uppercase tracking-wide">Existing Memory Stores</h3>
+                <button onclick="loadMemoryStores()" class="text-xs text-blue-600 hover:text-blue-700 font-medium">Refresh</button>
+            </div>
+            <div id="mem-panel" class="text-xs text-slate-400 italic">Enter credentials and click Refresh</div>
+        </div>
+
+        <!-- Result env var -->
+        <div id="result-panel" class="hidden">
+            <h3 class="text-xs font-semibold text-slate-600 uppercase tracking-wide mb-2">Setup Complete</h3>
+
+            <div class="mb-3 p-2 bg-white border border-slate-200 rounded text-xs">
+                <p class="text-slate-500 mb-0.5">Conversation Orchestrator Config</p>
+                <p class="font-mono text-slate-800 break-all" id="out-co-id"></p>
+            </div>
+            <div class="mb-3 p-2 bg-white border border-slate-200 rounded text-xs">
+                <p class="text-slate-500 mb-0.5">Conversation Intelligence Config</p>
+                <p class="font-mono text-slate-800 break-all" id="out-ci-id"></p>
+            </div>
+
+            <h4 class="text-xs font-semibold text-slate-600 uppercase tracking-wide mb-1 mt-4">Add to your .env</h4>
+            <div class="bg-slate-900 rounded-md p-3 font-mono text-xs text-green-400 break-all whitespace-pre-wrap" id="env-out"></div>
+            <button id="copyBtn" onclick="copyEnv()" class="mt-2 text-xs text-blue-600 hover:text-blue-700 font-medium">Copy</button>
+
+            <div class="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-md text-xs text-blue-800">
+                <p class="font-semibold mb-2">Next steps</p>
+                <ol class="list-decimal list-inside space-y-2">
+                    <li>Add the env vars above to <code class="bg-blue-100 px-1 rounded">getting_started/examples/features/cintel_quickstart/.env</code></li>
+                    <li>Start ngrok on port 3340:
+                        <br><code class="bg-blue-100 px-1 rounded">ngrok http 3340</code>
+                    </li>
+                    <li>Start the app:
+                        <br><code class="bg-blue-100 px-1 rounded">uv run getting_started/examples/features/cintel_quickstart/app.py</code>
+                    </li>
+                    <li>Call your Twilio number — the dashboard is at:
+                        <br><code class="bg-blue-100 px-1 rounded">http://localhost:3340/dashboard</code>
+                    </li>
+                </ol>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+<!-- Memory Store Modal -->
+<div id="memModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" style="display:none">
+    <div class="bg-white rounded-lg shadow-xl w-full max-w-md mx-4 p-4">
+        <div class="flex items-center justify-between mb-3">
+            <h3 class="text-sm font-semibold text-slate-800">Create Memory Store</h3>
+            <button onclick="hideMemoryModal()" class="text-slate-400 hover:text-slate-600">✕</button>
+        </div>
+        <div class="mb-3">
+            <label class="field-label" for="modal_mem_name">Display Name</label>
+            <input id="modal_mem_name" type="text" placeholder="owl-internet-memory" maxlength="32" class="field-input">
+        </div>
+        <div class="mb-4">
+            <label class="field-label" for="modal_mem_desc">Description</label>
+            <input id="modal_mem_desc" type="text" placeholder="Memory store for Owl Internet" maxlength="128" class="field-input">
+        </div>
+        <div class="flex justify-end gap-2">
+            <button onclick="hideMemoryModal()" class="px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-100 rounded-md">Cancel</button>
+            <button onclick="createMemoryStore()" id="modal_create_btn"
+                class="px-3 py-1.5 text-xs bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-md">Create</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    // State
+    let memoryStoreId = null;
+    let coConfigId = null;
+    let ciConfigId = null;
+
+
+    // Auto-detect ngrok on load
+    (async () => { await detectNgrok(true); })();
+
+    async function detectNgrok(silent = false) {
+        const statusEl = v('ngrok-status');
+        if (!silent) statusEl.textContent = 'Detecting...';
+        try {
+            const d = await post('/api/detect-ngrok', {});
+            if (d.status === 'success') {
+                v('ngrok_domain').value = d.domain;
+                statusEl.textContent = 'Auto-detected ✓';
+                statusEl.classList.add('text-green-600');
+                statusEl.classList.remove('text-slate-400', 'text-red-500');
+            } else {
+                if (!silent) {
+                    statusEl.textContent = d.message;
+                    statusEl.classList.add('text-red-500');
+                    statusEl.classList.remove('text-slate-400', 'text-green-600');
+                }
+            }
+        } catch(e) {
+            if (!silent) statusEl.textContent = 'Detection failed';
+        }
+    }
+
+    function v(id) { return document.getElementById(id); }
+    function creds() {
+        return { api_key: v('api_key').value.trim(), api_secret: v('api_secret').value.trim() };
+    }
+
+    async function post(url, body) {
+        const r = await fetch(url, {
+            method: 'POST',
+            headers: {'Content-Type':'application/json'},
+            body: JSON.stringify(body)
+        });
+        return r.json();
+    }
+
+    function unlock(id) {
+        v(id).classList.remove('opacity-50','pointer-events-none');
+    }
+
+    function onCredsInput() {
+        const {api_key, api_secret} = creds();
+        if (api_key && api_secret) unlock('s2');
+    }
+
+    function onMemorySelected() {
+        memoryStoreId = v('memory_store_select').value;
+        if (memoryStoreId) {
+            unlock('s3');
+            unlock('s4');
+        }
+    }
+
+    function togglePwd(id) {
+        const el = v(id);
+        el.type = el.type === 'password' ? 'text' : 'password';
+    }
+
+    function setStep(name, state, msg) {
+        const icon = v('icon-' + name);
+        const stat = v('stat-' + name);
+        const states = {
+            run:   ['bg-blue-100','text-blue-600','<div class="spinner"></div>','text-blue-600'],
+            ok:    ['bg-green-100','text-green-700','✓','text-green-600'],
+            err:   ['bg-red-100','text-red-700','✕','text-red-600'],
+        };
+        const [bg, tc, inner, sc] = states[state] || ['bg-slate-100','text-slate-400', icon.textContent, 'text-slate-500'];
+        icon.className = `w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold flex-shrink-0 ${bg} ${tc}`;
+        icon.innerHTML = inner;
+        stat.className = `text-xs mt-0.5 ${sc}`;
+        stat.textContent = msg;
+    }
+
+    function showErr(msg) {
+        v('errSection').classList.remove('hidden');
+        v('errContent').textContent = msg;
+    }
+
+    // Memory Stores
+    async function loadMemoryStores() {
+        const {api_key, api_secret} = creds();
+        if (!api_key || !api_secret) { showErr('Enter API Key and Secret first.'); return; }
+
+        v('mem-panel').innerHTML = '<div class="spinner"></div>';
+        const d = await post('/api/list-memory-stores', {api_key, api_secret});
+        if (d.status !== 'success') { v('mem-panel').textContent = d.message; return; }
+
+        const stores = d.stores || [];
+        // Populate dropdown
+        const sel = v('memory_store_select');
+        sel.innerHTML = '<option value="">-- Select a Memory Store --</option>';
+        stores.filter(s => s.status === 'ACTIVE').forEach(s => {
+            const o = document.createElement('option');
+            o.value = s.id;
+            o.textContent = s.displayName || s.id;
+            sel.appendChild(o);
+        });
+
+        // Populate right panel
+        if (!stores.length) {
+            v('mem-panel').innerHTML = '<p class="italic">No stores found. Click + Create New.</p>';
+        } else {
+            v('mem-panel').innerHTML = stores.map(s => `
+                <div class="mb-2 p-2 bg-white border border-slate-200 rounded text-xs">
+                    <p class="font-medium text-slate-700">${s.displayName || s.id}</p>
+                    <p class="text-slate-400 font-mono truncate">${s.id}</p>
+                    <p class="text-slate-400">${s.status}</p>
+                </div>`).join('');
+        }
+        unlock('s2');
+    }
+
+    function showMemoryModal() { v('memModal').classList.remove('hidden'); }
+    function hideMemoryModal() {
+        v('memModal').classList.add('hidden');
+        v('modal_mem_name').value = '';
+        v('modal_mem_desc').value = '';
+    }
+
+    async function createMemoryStore() {
+        const {api_key, api_secret} = creds();
+        const display_name = v('modal_mem_name').value.trim();
+        const description = v('modal_mem_desc').value.trim();
+        if (!display_name || !description) { showErr('Name and description required.'); return; }
+
+        const btn = v('modal_create_btn');
+        btn.disabled = true; btn.textContent = 'Creating...';
+
+        const d = await post('/api/create-memory-store', {
+            api_key, api_secret, memory_display_name: display_name, memory_description: description
+        });
+
+        btn.disabled = false; btn.textContent = 'Create';
+
+        if (d.status === 'success') {
+            memoryStoreId = d.memory_store_id;
+            hideMemoryModal();
+            await loadMemoryStores();
+            v('memory_store_select').value = memoryStoreId;
+            onMemorySelected();
+        } else if (d.status === 'accepted') {
+            // poll until ACTIVE
+            btn.textContent = 'Polling...';
+            await pollUntilActive(d.status_url, api_key, api_secret);
+            btn.textContent = 'Create';
+            hideMemoryModal();
+            await loadMemoryStores();
+        } else {
+            showErr(d.message);
+        }
+    }
+
+    async function pollUntilActive(statusUrl, api_key, api_secret, attempts=30, delay=2000) {
+        for (let i = 0; i < attempts; i++) {
+            await new Promise(r => setTimeout(r, delay));
+            const d = await post('/api/poll-operation-status', {status_url: statusUrl, api_key, api_secret});
+            if (d.status === 'completed') {
+                memoryStoreId = d.result?.id;
+                return true;
+            }
+            if (d.status === 'error') { showErr(d.message); return false; }
+        }
+        showErr('Timed out waiting for Memory Store.');
+        return false;
+    }
+
+    // Main setup flow
+    async function runSetup() {
+        const {api_key, api_secret} = creds();
+        const twilio_phone = v('twilio_phone').value.trim();
+        const ngrok_domain = v('ngrok_domain').value.trim();
+        const co_display_name = v('co_display_name').value.trim();
+        const co_description = v('co_description').value.trim();
+
+        if (!twilio_phone || !ngrok_domain || !co_display_name) {
+            showErr('Twilio phone, ngrok domain, and CO display name are required.');
+            return;
+        }
+        if (!memoryStoreId) { showErr('Select a Memory Store first.'); return; }
+
+        v('errSection').classList.add('hidden');
+        v('runBtn').disabled = true;
+
+        // Step 1: memory store (already selected, just show it)
+        setStep('memory', 'ok', memoryStoreId.slice(-12));
+
+        // Step 2: CO config
+        setStep('co', 'run', 'Creating...');
+        let d = await post('/api/create-conversation-configuration', {
+            api_key, api_secret, memory_store_id: memoryStoreId,
+            twilio_phone, ngrok_domain,
+            configuration_display_name: co_display_name,
+            configuration_description: co_description,
+        });
+
+        if (d.status === 'accepted') {
+            setStep('co', 'run', 'Polling...');
+            const ok = await pollCOConfig(d.status_url, api_key, api_secret);
+            if (!ok) { v('runBtn').disabled = false; return; }
+        } else if (d.status !== 'success') {
+            setStep('co', 'err', 'Failed');
+            showErr(d.message || JSON.stringify(d));
+            v('runBtn').disabled = false;
+            return;
+        } else {
+            coConfigId = d.conversation_configuration_id;
+        }
+        setStep('co', 'ok', coConfigId.slice(-12));
+
+        // Step 3: CI config + voice webhook
+        setStep('ci', 'run', 'Creating...');
+        d = await post('/api/create-intelligence-configuration', {api_key, api_secret, ngrok_domain});
+        if (d.status !== 'success') {
+            setStep('ci', 'err', 'Failed');
+            showErr(d.message || JSON.stringify(d));
+            v('runBtn').disabled = false;
+            return;
+        }
+        ciConfigId = d.intelligence_configuration_id;
+
+        // Configure voice webhook as part of CI step (same as old wizard)
+        const account_sid = v('account_sid').value.trim();
+        const webhookResp = await post('/api/configure-voice-webhook', {
+            account_sid, api_key, api_secret, twilio_phone, ngrok_domain,
+        });
+        if (webhookResp.status !== 'success') {
+            setStep('ci', 'err', 'Failed');
+            showErr(webhookResp.message || JSON.stringify(webhookResp));
+            v('runBtn').disabled = false;
+            return;
+        }
+        setStep('ci', 'ok', ciConfigId.slice(-12));
+
+        // Step 4: link
+        setStep('link', 'run', 'Linking...');
+        d = await post('/api/link-intelligence-configuration', {
+            api_key, api_secret,
+            conversation_configuration_id: coConfigId,
+            intelligence_configuration_id: ciConfigId,
+        });
+        if (d.status === 'accepted') {
+            setStep('link', 'run', 'Polling...');
+            const ok = await pollUntilDone(d.status_url, api_key, api_secret);
+            if (!ok) { v('runBtn').disabled = false; return; }
+            setStep('link', 'ok', 'Linked');
+        } else if (d.status !== 'success') {
+            setStep('link', 'err', 'Failed');
+            showErr(d.message || JSON.stringify(d));
+            v('runBtn').disabled = false;
+            return;
+        } else {
+            setStep('link', 'ok', d.already_linked ? 'Already linked' : 'Linked');
+        }
+
+        // Show result
+        showResult();
+        v('runBtn').disabled = false;
+    }
+
+    async function pollUntilDone(statusUrl, api_key, api_secret, attempts=30, delay=2000) {
+        for (let i = 0; i < attempts; i++) {
+            await new Promise(r => setTimeout(r, delay));
+            const d = await post('/api/poll-operation-status', {status_url: statusUrl, api_key, api_secret});
+            if (d.status === 'completed') return true;
+            if (d.status === 'error') { showErr(d.message); return false; }
+        }
+        showErr('Timed out waiting for operation.');
+        return false;
+    }
+
+    async function pollCOConfig(statusUrl, api_key, api_secret, attempts=30, delay=2000) {
+        for (let i = 0; i < attempts; i++) {
+            await new Promise(r => setTimeout(r, delay));
+            const d = await post('/api/poll-operation-status', {status_url: statusUrl, api_key, api_secret});
+            if (d.status === 'completed') {
+                coConfigId = d.related?.configurationId || d.result?.id;
+                return true;
+            }
+            if (d.status === 'error') { setStep('co','err','Failed'); showErr(d.message); return false; }
+            setStep('co', 'run', `Polling... (${d.operation_status || ''})`);
+        }
+        setStep('co','err','Timed out');
+        return false;
+    }
+
+    function showResult() {
+        v('out-co-id').textContent = coConfigId;
+        v('out-ci-id').textContent = ciConfigId;
+        const env = [
+            `TWILIO_ACCOUNT_SID=${v('account_sid').value.trim()}`,
+            `TWILIO_AUTH_TOKEN=${v('auth_token').value.trim()}`,
+            `TWILIO_API_KEY=${v('api_key').value.trim()}`,
+            `TWILIO_API_SECRET=${v('api_secret').value.trim()}`,
+            `TWILIO_PHONE_NUMBER=${v('twilio_phone').value.trim()}`,
+            `TWILIO_VOICE_PUBLIC_DOMAIN=${v('ngrok_domain').value.trim()}`,
+            `TWILIO_CONVERSATION_CONFIGURATION_ID=${coConfigId}`,
+            `CONVERSATION_INTELLIGENCE_CONFIGURATION_ID=${ciConfigId}`,
+            `OPENAI_API_KEY=${v('openai_api_key').value.trim()}`,
+        ].join('\n');
+        v('env-out').textContent = env;
+        v('result-panel').classList.remove('hidden');
+    }
+
+    async function copyEnv() {
+        const btn = v('copyBtn');
+        try {
+            await navigator.clipboard.writeText(v('env-out').textContent);
+        } catch(e) {
+            const r = document.createRange();
+            r.selectNodeContents(v('env-out'));
+            window.getSelection().removeAllRanges();
+            window.getSelection().addRange(r);
+        }
+        btn.textContent = 'Copied ✓';
+        btn.classList.add('text-green-600');
+        btn.classList.remove('text-blue-600', 'hover:text-blue-700');
+        setTimeout(() => {
+            btn.textContent = 'Copy';
+            btn.classList.remove('text-green-600');
+            btn.classList.add('text-blue-600', 'hover:text-blue-700');
+        }, 2000);
+    }
+</script>
+</body>
+</html>

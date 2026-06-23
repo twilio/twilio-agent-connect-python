@@ -44,6 +44,7 @@ dev = [
     "pytest-cov>=7.0.0,<8",
     "ruff>=0.15.0,<1",
     "mypy>=1.20.0,<3",
+    "pre-commit>=4.6.0",
 ]
 examples = [
     # OpenAI examples
@@ -101,6 +102,11 @@ select = [
 ]
 
 
+[tool.ruff.lint.per-file-ignores]
+"getting_started/**" = ["E501"]
+"tests/test_cintel_quickstart.py" = ["E501"]
+"tests/test_cintel_setup_server.py" = ["E501"]
+
 [tool.ruff.lint.isort]
 known-first-party = ["tac"]
 combine-as-imports = true
@@ -141,6 +147,19 @@ ignore_missing_imports = true
 module = "mcp.*"
 ignore_errors = true
 follow_imports = "skip"
+
+# Examples and tests are not part of the published SDK — relax strict checks
+[[tool.mypy.overrides]]
+module = [
+    "getting_started.*",
+    "tests.*",
+    "cintel_app",
+    "setup_server",
+]
+disallow_untyped_defs = false
+disallow_untyped_decorators = false
+disallow_incomplete_defs = false
+ignore_errors = true
 
 [tool.pytest.ini_options]
 minversion = "9.0"

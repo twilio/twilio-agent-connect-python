@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CINTEL Script Coach</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg-base:      #0d0d0f;
+      --bg-surface:   #16161a;
+      --bg-elevated:  #1e1e24;
+      --bg-hover:     #26262e;
+      --border:       #2a2a35;
+      --border-light: #333340;
+      --text-primary: #f0f0f4;
+      --text-secondary: #9090a8;
+      --text-muted:   #555568;
+      --blue:         #3b82f6;
+      --blue-dim:     #1e3a5f;
+      --orange:       #f97316;
+      --orange-dim:   #431a07;
+      --green:        #22c55e;
+      --green-dim:    #0d2e1a;
+      --red:          #ef4444;
+      --red-dim:      #2e0d0d;
+      --accent:       #6366f1;
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--bg-base);
+      color: var(--text-primary);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Header ── */
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 28px;
+      background: var(--bg-surface);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+
+    .header-title {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .header-logo {
+      width: 28px;
+      height: 28px;
+      background: var(--accent);
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+    }
+
+    .header-title h1 {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--text-primary);
+      letter-spacing: -0.01em;
+    }
+
+    .header-title span {
+      font-size: 13px;
+      color: var(--text-muted);
+      font-weight: 400;
+    }
+
+    /* ── Call Banner ── */
+    .call-banner {
+      margin: 20px 24px 0;
+      background: linear-gradient(135deg, #1a1f3a 0%, #1e1e24 100%);
+      border: 1px solid var(--blue-dim);
+      border-radius: 12px;
+      padding: 16px 22px;
+      display: flex;
+      align-items: center;
+      gap: 18px;
+    }
+
+    .banner-icon {
+      width: 44px;
+      height: 44px;
+      background: var(--blue-dim);
+      border: 1px solid rgba(59,130,246,0.3);
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+      flex-shrink: 0;
+    }
+
+    .banner-body { flex: 1; }
+
+    .banner-label {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--blue);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 3px;
+    }
+
+    .banner-phone {
+      font-size: 24px;
+      font-weight: 700;
+      color: var(--text-primary);
+      letter-spacing: 0.04em;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .banner-hint {
+      font-size: 12px;
+      color: var(--text-secondary);
+      margin-top: 3px;
+    }
+
+    .banner-status {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      padding: 6px 12px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      font-size: 12px;
+      color: var(--text-secondary);
+      flex-shrink: 0;
+    }
+
+    .status-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--text-muted);
+    }
+
+    .status-dot.active {
+      background: var(--green);
+      box-shadow: 0 0 6px var(--green);
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+
+    /* ── Main layout ── */
+    .main {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      padding: 16px 24px 24px;
+      flex: 1;
+      min-height: 0;
+    }
+
+    /* ── Panel ── */
+    .panel {
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+
+    .panel-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-primary);
+      letter-spacing: -0.01em;
+    }
+
+    .panel-title-icon {
+      width: 22px;
+      height: 22px;
+      border-radius: 5px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+    }
+
+    .panel-title-icon.blue  { background: var(--blue-dim); }
+    .panel-title-icon.green { background: var(--green-dim); }
+
+    /* ── Transcript ── */
+    #transcript {
+      flex: 1;
+      overflow-y: auto;
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      min-height: 480px;
+    }
+
+    #transcript::-webkit-scrollbar { width: 4px; }
+    #transcript::-webkit-scrollbar-track { background: transparent; }
+    #transcript::-webkit-scrollbar-thumb { background: var(--border-light); border-radius: 2px; }
+
+    .transcript-item {
+      padding: 10px 13px;
+      border-radius: 8px;
+      border: 1px solid transparent;
+    }
+
+    .transcript-item.agent {
+      background: var(--blue-dim);
+      border-color: rgba(59,130,246,0.2);
+    }
+
+    .transcript-item.customer {
+      background: var(--orange-dim);
+      border-color: rgba(249,115,22,0.2);
+    }
+
+    .speaker-label {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 5px;
+    }
+
+    .transcript-item.agent   .speaker-label { color: var(--blue); }
+    .transcript-item.customer .speaker-label { color: var(--orange); }
+
+    .transcript-item .text {
+      font-size: 13px;
+      color: var(--text-primary);
+      line-height: 1.55;
+    }
+
+    .transcript-empty {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      color: var(--text-muted);
+      font-size: 13px;
+    }
+
+    .transcript-empty-icon { font-size: 28px; opacity: 0.4; }
+
+    /* ── Script Adherence ── */
+    .script-panel { overflow-y: auto; padding: 14px; }
+
+    /* ── Summary ── */
+    .summary-panel { display: none; padding: 14px; overflow-y: auto; border-top: 1px solid var(--border); }
+    .script-panel::-webkit-scrollbar { width: 4px; }
+    .script-panel::-webkit-scrollbar-track { background: transparent; }
+    .script-panel::-webkit-scrollbar-thumb { background: var(--border-light); border-radius: 2px; }
+
+    .checkpoint {
+      margin-bottom: 10px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--bg-elevated);
+      overflow: hidden;
+      transition: border-color 0.3s, background 0.3s;
+    }
+
+    .checkpoint.completed {
+      border-color: rgba(34,197,94,0.35);
+      background: var(--green-dim);
+    }
+
+    .checkpoint.skipped {
+      border-color: rgba(239,68,68,0.35);
+      background: var(--red-dim);
+    }
+
+    .checkpoint-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 11px 13px;
+    }
+
+    .checkpoint-status {
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      border: 2px solid var(--border-light);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      flex-shrink: 0;
+      transition: all 0.3s;
+      color: var(--text-muted);
+    }
+
+    .checkpoint.completed .checkpoint-status {
+      border-color: var(--green);
+      background: var(--green);
+      color: #fff;
+      font-size: 12px;
+    }
+
+    .checkpoint.skipped .checkpoint-status {
+      border-color: var(--red);
+      background: var(--red);
+      color: #fff;
+      font-size: 12px;
+    }
+
+    .checkpoint-label {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-primary);
+      flex: 1;
+    }
+
+    .checkpoint-hint {
+      font-size: 11px;
+      color: var(--text-secondary);
+      padding: 0 13px 10px 45px;
+      line-height: 1.5;
+    }
+
+    .criteria-list {
+      list-style: none;
+      padding: 0 13px 11px 45px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .criteria-list li {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 11.5px;
+      color: var(--text-muted);
+      transition: color 0.2s;
+    }
+
+    .criteria-list li.succeeded { color: var(--green); }
+    .criteria-list li.failed    { color: var(--red); }
+    .criteria-list li.pending   { color: var(--text-muted); }
+
+    .criteria-icon {
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      border: 1px solid currentColor;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 9px;
+      flex-shrink: 0;
+      opacity: 0.8;
+    }
+
+    .criteria-list li.pending .criteria-icon {
+      border-style: dashed;
+      font-size: 0;
+    }
+
+    /* ── Summary ── */
+    .summary-panel {
+      display: none;
+      flex: 1;
+      overflow-y: auto;
+      padding: 14px;
+    }
+
+    .summary-body {
+      font-size: 13px;
+      color: var(--text-primary);
+      line-height: 1.65;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px;
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="header-title">
+      <div class="header-logo">🎙</div>
+      <h1>Script Coach <span>/ CINTEL Quickstart</span></h1>
+    </div>
+    <div style="display:flex;align-items:center;gap:16px;">
+      <span style="font-size:12px;color:var(--text-muted);">Powered by <span style="color:var(--text-secondary);font-weight:600;">Twilio</span></span>
+      <div class="banner-status">
+        <div class="status-dot" id="status-dot"></div>
+        <span id="status-text">Waiting for call</span>
+      </div>
+    </div>
+  </header>
+
+  <div class="call-banner">
+    <div class="banner-icon">📞</div>
+    <div class="banner-body">
+      <div class="banner-label">Call this number to start</div>
+      <div class="banner-phone" id="phone-number">Loading...</div>
+      <div class="banner-hint">Script adherence and transcript appear in real time</div>
+    </div>
+  </div>
+
+  <div class="main">
+
+    <!-- Transcript -->
+    <div class="panel transcript-panel">
+      <div class="panel-header">
+        <div class="panel-title">
+          <div class="panel-title-icon blue">💬</div>
+          Live Transcript
+        </div>
+      </div>
+      <div id="transcript">
+        <div class="transcript-empty">
+          <div class="transcript-empty-icon">🎙</div>
+          <span>Transcript will appear here during the call</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Script Adherence + Summary -->
+    <div class="panel results-panel">
+      <div class="panel-header">
+        <div class="panel-title">
+          <div class="panel-title-icon green">📋</div>
+          <span id="results-panel-title">Script Adherence</span>
+        </div>
+      </div>
+
+      <div class="script-panel">
+        <div class="checkpoint" data-category="greeting">
+          <div class="checkpoint-header">
+            <div class="checkpoint-status">1</div>
+            <span class="checkpoint-label">Greeting</span>
+          </div>
+          <div class="checkpoint-hint">Say: "Hi, this is [your name] calling from Owl Internet"</div>
+          <ul class="criteria-list">
+            <li class="pending" data-key="introduce_yourself"><span class="criteria-icon"></span>Introduce Yourself</li>
+          </ul>
+        </div>
+
+        <div class="checkpoint" data-category="identity_verification">
+          <div class="checkpoint-header">
+            <div class="checkpoint-status">2</div>
+            <span class="checkpoint-label">Identity Verification</span>
+          </div>
+          <div class="checkpoint-hint">Ask: "Can I get your account number?"</div>
+          <ul class="criteria-list">
+            <li class="pending" data-key="verify_customer"><span class="criteria-icon"></span>Verify Customer</li>
+          </ul>
+        </div>
+
+        <div class="checkpoint" data-category="resolution_steps">
+          <div class="checkpoint-header">
+            <div class="checkpoint-status">3</div>
+            <span class="checkpoint-label">Resolution Steps</span>
+          </div>
+          <div class="checkpoint-hint">Say: "Let me trigger a remote modem reset"</div>
+          <ul class="criteria-list">
+            <li class="pending" data-key="acknowledge_issue"><span class="criteria-icon"></span>Acknowledge Issue</li>
+            <li class="pending" data-key="offer_resolution"><span class="criteria-icon"></span>Offer Resolution</li>
+            <li class="pending" data-key="confirms_resolution"><span class="criteria-icon"></span>Confirms Resolution</li>
+          </ul>
+        </div>
+
+        <div class="checkpoint" data-category="brand_approved_closing">
+          <div class="checkpoint-header">
+            <div class="checkpoint-status">4</div>
+            <span class="checkpoint-label">Closing</span>
+          </div>
+          <div class="checkpoint-hint">Say: "Thank you for choosing Owl Internet. Anything else?"</div>
+          <ul class="criteria-list">
+            <li class="pending" data-key="thank_customer"><span class="criteria-icon"></span>Thank Customer</li>
+            <li class="pending" data-key="offer_more_help"><span class="criteria-icon"></span>Offer More Help</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="summary-panel" id="summary-panel">
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--text-secondary);margin-bottom:10px;">Call Summary</div>
+        <div class="summary-body" id="summary-text"></div>
+      </div>
+    </div>
+
+  </div>
+
+  <script src="/static/script-panel.js"></script>
+  <script src="/static/transcript.js"></script>
+</body>
+</html>
