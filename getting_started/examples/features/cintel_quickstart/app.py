@@ -13,8 +13,8 @@ What you get:
 Prerequisites:
 1. Run the setup wizard: uv run getting_started/examples/features/cintel_quickstart/setup_server.py
 2. Start ngrok on port 3340: ngrok http 3340
-3. Add env vars from wizard to getting_started/examples/.env
-4. Point your Twilio number's Voice webhook to: https://<ngrok>/tac/twiml
+3. Add env vars from wizard to getting_started/examples/features/cintel_quickstart/.env
+4. Point your Twilio number's Voice webhook to: https://<ngrok>/twiml
 
 Usage:
     uv run getting_started/examples/features/cintel_quickstart/app.py
@@ -30,8 +30,8 @@ from typing import Any
 
 import httpx
 from dotenv import load_dotenv
-from fastapi import Request
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi import Depends, Request
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from tac import TAC, TACConfig
@@ -41,6 +41,7 @@ from tac.models.session import ConversationSession
 from tac.models.tac import TACMemoryResponse
 from tac.server import TACFastAPIServer
 from tac.server.config import TACServerConfig
+from tac.server.signature_validation import build_http_signature_dependency
 
 load_dotenv()
 
@@ -95,10 +96,15 @@ from openai import (  # noqa: E402
     AuthenticationError,
     RateLimitError,
 )
-from sse_manager import sse_manager  # noqa: E402
 
 openai_client = AsyncOpenAI(api_key=os.environ["OPENAI_API_KEY"])
 conversation_history: dict[str, list] = {}
+
+# ── In-memory dashboard state (polled by browser) ────────────────────────────
+transcript_turns: list[dict] = []
+checkpoints: dict[str, dict] = {}
+summary_text: str = ""
+call_active: bool = False
 
 
 async def handle_message_ready(
@@ -106,10 +112,15 @@ async def handle_message_ready(
     context: ConversationSession,
     memory_response: TACMemoryResponse | None,
 ) -> None:
+    global call_active
     conv_id = context.conversation_id
     logger.info(f"[{conv_id}] Agent said: {user_message[:50]}...")
 
     if conv_id not in conversation_history:
+        # New conversation — reset dashboard state
+        transcript_turns.clear()
+        checkpoints.clear()
+        call_active = True
         conversation_history[conv_id] = []
 
     conversation_history[conv_id].append({"role": "user", "content": user_message})
@@ -127,17 +138,9 @@ async def handle_message_ready(
         conversation_history[conv_id].append({"role": "assistant", "content": llm_response})
 
         logger.info(f"[{conv_id}] AI customer: {llm_response[:50]}...")
-
+        transcript_turns.append({"speaker": "agent", "text": user_message})
+        transcript_turns.append({"speaker": "customer", "text": llm_response})
         await voice_channel.send_response(conv_id, llm_response)
-
-        sse_manager.broadcast(
-            "transcript-update",
-            {"speaker": "agent", "text": user_message, "interim": False},
-        )
-        sse_manager.broadcast(
-            "transcript-update",
-            {"speaker": "customer", "text": llm_response, "interim": False},
-        )
 
     except AuthenticationError:
         logger.error(f"[{conv_id}] OpenAI authentication failed - check API key")
@@ -162,52 +165,61 @@ async def handle_message_ready(
 
 
 async def handle_conversation_ended(context: ConversationSession) -> None:
+    global call_active
     conv_id = context.conversation_id
     conversation_history.pop(conv_id, None)
-    sse_manager.broadcast("call-ended", {})
+    call_active = False
+    logger.info(f"[{conv_id}] Conversation ended")
 
 
 tac.on_message_ready(handle_message_ready)
 tac.on_conversation_ended(handle_conversation_ended)
 
 
-# ── FastAPI app ───────────────────────────────────────────────────────────────
+# ── FastAPI routes ────────────────────────────────────────────────────────────
 _static_dir = Path(__file__).parent / "static"
 
 
-def _make_app() -> Any:
-    from fastapi import FastAPI
-
-    application = FastAPI(title="TAC CINTEL Quickstart")
+def _register_routes(application: Any, auth_token: str) -> None:
+    """Add dashboard routes directly onto the TAC FastAPI app."""
     application.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
+    http_sig = build_http_signature_dependency(auth_token)
 
     @application.get("/")
     async def root() -> HTMLResponse:
         return HTMLResponse(content=(_static_dir / "index.html").read_text())
 
-    @application.post("/ci-webhook")
+    @application.post("/ci-webhook", dependencies=[Depends(http_sig)])
     async def cintel_webhook(request: Request) -> dict[str, str]:
+        global summary_text, call_active
         payload = await request.json()
-        logger.info("Received CINTEL webhook: %s", json.dumps(payload, indent=2))
+        logger.info(f"Received CINTEL webhook: {json.dumps(payload, indent=2)}")
 
+        # Parse script adherence + summary operator results
         results = parse_cintel_webhook(payload)
 
         if results["script_adherence"]:
             for checkpoint in results["script_adherence"]:
-                sse_manager.broadcast("checkpoint-update", checkpoint)
+                cat = checkpoint.get("category", "")
+                if cat:
+                    checkpoints[cat] = checkpoint
 
         if results["summary"]:
-            logger.info(f"Summary received: {results['summary']['summary_text'][:50]}...")
-            sse_manager.broadcast("summary-update", results["summary"])
+            summary_text = results["summary"].get("summary_text", "")
+            call_active = False
+            logger.info(f"Summary received: {summary_text[:60]}...")
 
         return {"status": "ok"}
 
-    @application.get("/api/events")
-    async def events(request: Request) -> StreamingResponse:
-        return StreamingResponse(
-            sse_manager.event_stream(),
-            media_type="text/event-stream",
-            headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+    @application.get("/api/transcript")
+    async def get_transcript() -> JSONResponse:
+        return JSONResponse(
+            {
+                "turns": transcript_turns,
+                "checkpoints": list(checkpoints.values()),
+                "summary": summary_text or None,
+                "call_active": call_active,
+            }
         )
 
     @application.get("/api/config")
@@ -216,7 +228,6 @@ def _make_app() -> Any:
 
     @application.get("/api/script")
     async def get_script() -> JSONResponse:
-        """Fetch Script Adherence operator script param and return per-category hints."""
         api_key = os.environ.get("TWILIO_API_KEY", "")
         api_secret = os.environ.get("TWILIO_API_SECRET", "")
         credentials = base64.b64encode(f"{api_key}:{api_secret}".encode()).decode()
@@ -238,6 +249,8 @@ def _make_app() -> Any:
         script_text = ""
         for rule in data.get("rules", []):
             for op in rule.get("operators", []):
+                if not op:
+                    continue
                 script = op.get("parameters", {}).get("script", "")
                 if script:
                     script_text = script
@@ -250,10 +263,8 @@ def _make_app() -> Any:
             return JSONResponse({})
 
         hints = _parse_script_hints(script_text)
-        logger.info("Script hints loaded: %s", hints)
+        logger.info(f"Script hints loaded: {hints}")
         return JSONResponse(hints)
-
-    return application
 
 
 def _parse_script_hints(script: str) -> dict[str, str]:
@@ -274,7 +285,7 @@ def _parse_script_hints(script: str) -> dict[str, str]:
 # ── Server ────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     server_config = TACServerConfig.from_env()
-    server_config.cintel_webhook_path = "/ci-webhook"
+    server_config.cintel_webhook_path = None  # we register /ci-webhook ourselves below
     if not os.environ.get("TWILIO_SERVER_PORT"):
         server_config.port = 3340
 
@@ -284,14 +295,13 @@ if __name__ == "__main__":
         config=server_config,
     )
 
-    # Mount dashboard routes onto the TAC app
-    app = _make_app()
-    server.app.mount("/", app)
+    # Register dashboard routes directly on the TAC app (mounting a sub-app at "/" shadows TAC routes)
+    _register_routes(server.app, tac.config.auth_token)
 
     logger.info(
         f"Conversation Intelligence Quickstart running.\n"
         f"  Dashboard : http://localhost:{server_config.port}\n"
-        f"  TwiML URL : https://<ngrok>/tac/twiml  (configure on your Twilio number)\n"
+        f"  TwiML URL : https://<ngrok>/twiml  (configure on your Twilio number)\n"
         f"  CI Webhook: https://<ngrok>/ci-webhook  (configure in your Intelligence Configuration)\n"
         f"  CI Config : {ci_config_id}"
     )

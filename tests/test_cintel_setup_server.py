@@ -512,9 +512,9 @@ class TestConfigureVoiceWebhook:
             data = client.post("/api/configure-voice-webhook", json=self._BASE).json()
 
         assert data["status"] == "success"
-        assert data["voice_url"] == "https://test.ngrok.app/tac/twiml"
+        assert data["voice_url"] == "https://test.ngrok.app/twiml"
 
-    def test_voice_url_uses_tac_twiml_path(self, client):
+    def test_voice_url_uses_twiml_path(self, client):
         mc = AsyncMock()
         mc.__aenter__ = AsyncMock(return_value=mc)
         mc.__aexit__ = AsyncMock(return_value=False)
@@ -530,7 +530,7 @@ class TestConfigureVoiceWebhook:
         with patch("httpx.AsyncClient", return_value=mc):
             client.post("/api/configure-voice-webhook", json=self._BASE)
 
-        assert captured["data"]["VoiceUrl"] == "https://test.ngrok.app/tac/twiml"
+        assert captured["data"]["VoiceUrl"] == "https://test.ngrok.app/twiml"
         assert captured["data"]["VoiceMethod"] == "POST"
 
     def test_api_failure_returns_error(self, client):

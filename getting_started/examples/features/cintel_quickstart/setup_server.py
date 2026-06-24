@@ -723,7 +723,7 @@ async def configure_voice_webhook(request: Request) -> dict:
             "message": "account_sid, api_key, api_secret, twilio_phone, and ngrok_domain are required",
         }
 
-    voice_url = f"https://{ngrok_domain}/tac/twiml"
+    voice_url = f"https://{ngrok_domain}/twiml"
 
     try:
         async with httpx.AsyncClient(timeout=30) as client:

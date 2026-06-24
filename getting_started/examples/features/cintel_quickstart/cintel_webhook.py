@@ -8,9 +8,15 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+SCRIPT_ADHERENCE_OPERATOR_ID = "intelligence_operator_01kf34tcyefpyb1t4m0nbd8rxg"
+SUMMARY_OPERATOR_ID = "intelligence_operator_01kcv35pnkeysaf6z6cqtbpegn"
+
+
 def parse_cintel_webhook(payload: dict) -> dict[str, list[dict] | dict | None]:
     """
     Parse CINTEL webhook payload for Script Adherence and Summary results.
+
+    Matches operators by ID since displayName is not present in the webhook payload.
 
     Returns:
         Dict with "script_adherence" (list[dict] | None) and "summary" (dict | None) keys
@@ -18,23 +24,25 @@ def parse_cintel_webhook(payload: dict) -> dict[str, list[dict] | dict | None]:
     operator_results = payload.get("operatorResults", [])
     result: dict[str, list[dict] | dict | None] = {"script_adherence": None, "summary": None}
 
-    for i, op_result in enumerate(operator_results):
-        display_name = op_result.get("operator", {}).get("displayName", "")
-        logger.debug("[CINTEL] operator_results[%d] displayName: %r", i, display_name)
+    logger.debug(f"[CINTEL] {len(operator_results)} operator result(s)")
 
-        if display_name == "Script-Adherence":
+    for op_result in operator_results:
+        op_id = op_result.get("operator", {}).get("id", "")
+        logger.debug(f"[CINTEL] operator id={op_id!r}")
+
+        if op_id == SCRIPT_ADHERENCE_OPERATOR_ID:
             result["script_adherence"] = parse_script_adherence(op_result)
-        elif display_name == "Summary":
+        elif op_id == SUMMARY_OPERATOR_ID:
             result["summary"] = parse_summary(op_result)
         else:
-            logger.info("[CINTEL] Unrecognised operator %r — skipping", display_name)
+            logger.warning(f"[CINTEL] Unrecognised operator id {op_id!r} — skipping")
 
     return result
 
 
 def parse_script_adherence(op_result: dict) -> list[dict]:
     categories = op_result.get("result", {}).get("categories", [])
-    logger.debug("[CINTEL] Script Adherence: %d category(ies) found", len(categories))
+    logger.debug(f"[CINTEL] Script Adherence: {len(categories)} category(ies) found")
 
     checkpoints = []
     for cat in categories:
@@ -67,7 +75,7 @@ def parse_script_adherence(op_result: dict) -> list[dict]:
 
 def parse_summary(op_result: dict) -> dict:
     result_data = op_result.get("result", {})
-    logger.debug("[CINTEL] Summary raw result: %s", json.dumps(result_data, indent=2))
+    logger.debug(f"[CINTEL] Summary raw result: {json.dumps(result_data, indent=2)}")
     summary_text = result_data.get("text", "")
-    logger.info("[CINTEL] Summary text: %r", summary_text)
+    logger.info(f"[CINTEL] Summary text: {summary_text!r}")
     return {"summary_text": summary_text}

@@ -36,11 +36,14 @@ class SSEManager:
 
     def broadcast(self, event_type: str, data: dict) -> None:
         message = json.dumps({"type": event_type, "data": data})
+        print(f"[SSE] broadcast: {event_type} to {len(self.clients)} clients", flush=True)
         for client_queue in list(self.clients):
             try:
                 client_queue.put_nowait(message)
             except asyncio.QueueFull:
-                pass
+                logger.warning(f"SSE queue full, dropping event: {event_type}")
+            except Exception as e:
+                logger.error(f"SSE broadcast error: {e}")
 
 
 sse_manager = SSEManager()
