@@ -242,6 +242,23 @@ class VoiceChannel(BaseChannel):
         profile_lookup_address = customer_address or self._caller_address(setup_msg)
         profile_id = customer_participant.profile_id if customer_participant else None
 
+        # Resolve the AI agent participant so ai_agent_info is populated on the
+        # session, matching the messaging channels. Match AI_AGENT strictly — a
+        # redirected/escalated call may add a human AGENT participant we must not
+        # treat as the AI agent.
+        agent_participant = next(
+            (p for p in participants if p.type == "AI_AGENT"),
+            None,
+        )
+        agent_address = (
+            next(
+                (a.address for a in agent_participant.addresses if a.channel == "VOICE"),
+                None,
+            )
+            if agent_participant and agent_participant.addresses
+            else None
+        )
+
         self._websocket_manager.add_websocket(conv_id, websocket)
         session = self._start_conversation(conv_id, profile_id)
 
@@ -251,6 +268,12 @@ class VoiceChannel(BaseChannel):
 
         if profile_lookup_address:
             session.author_info = AuthorInfo(address=profile_lookup_address)
+
+        if agent_participant:
+            session.ai_agent_info = AuthorInfo(
+                address=agent_address or "",
+                participant_id=agent_participant.id,
+            )
 
         return conv_id, session_state
 

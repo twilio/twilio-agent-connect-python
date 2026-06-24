@@ -16,6 +16,7 @@ from tac.models.voice import (
     CustomParameters,
     InterruptMessage,
     PromptMessage,
+    SetupMessage,
     TwiMLOptions,
 )
 
@@ -119,6 +120,99 @@ class TestVoiceChannel:
 
         # Verify memory retrieval was called
         tac.conversation_memory_client.retrieve_memory.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_initialize_conversation_populates_ai_agent_info(self) -> None:
+        """_initialize_conversation resolves the AI_AGENT participant and sets
+        ai_agent_info, matching the messaging channels."""
+        from tac.models.conversation import (
+            ConversationResponse,
+            ParticipantAddress,
+            ParticipantResponse,
+        )
+
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+
+        conversation = ConversationResponse(id="conv_abc", accountId="ACtest123", status="ACTIVE")
+        customer = ParticipantResponse(
+            id="part_customer",
+            conversationId="conv_abc",
+            accountId="ACtest123",
+            name="Customer",
+            type="CUSTOMER",
+            profileId="profile_xyz",
+            addresses=[ParticipantAddress(channel="VOICE", address="+15559998888")],
+        )
+        agent = ParticipantResponse(
+            id="part_agent",
+            conversationId="conv_abc",
+            accountId="ACtest123",
+            name="AI Agent",
+            type="AI_AGENT",
+            addresses=[ParticipantAddress(channel="VOICE", address="+15551234567")],
+        )
+
+        co_client = MagicMock()
+        co_client.list_conversations = AsyncMock(return_value=[conversation])
+        co_client.list_participants = AsyncMock(return_value=[customer, agent])
+        tac.conversation_orchestrator_client = co_client
+
+        setup_msg = SetupMessage(type="setup", callSid="CALL123", **{"from": "+15559998888"})
+
+        conv_id, _ = await channel._initialize_conversation("CALL123", setup_msg, MagicMock())
+
+        assert conv_id == "conv_abc"
+        session = channel._conversations["conv_abc"]
+        assert session.ai_agent_info is not None
+        assert session.ai_agent_info.participant_id == "part_agent"
+        assert session.ai_agent_info.address == "+15551234567"
+        # Customer side still resolved as before.
+        assert session.author_info is not None
+        assert session.author_info.address == "+15559998888"
+
+    @pytest.mark.asyncio
+    async def test_initialize_conversation_skips_human_agent_for_ai_agent_info(self) -> None:
+        """A redirected/escalated call's HUMAN_AGENT participant must not be
+        treated as the AI agent; ai_agent_info stays None when no AI_AGENT."""
+        from tac.models.conversation import (
+            ConversationResponse,
+            ParticipantAddress,
+            ParticipantResponse,
+        )
+
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+
+        conversation = ConversationResponse(id="conv_def", accountId="ACtest123", status="ACTIVE")
+        customer = ParticipantResponse(
+            id="part_customer",
+            conversationId="conv_def",
+            accountId="ACtest123",
+            name="Customer",
+            type="CUSTOMER",
+            addresses=[ParticipantAddress(channel="VOICE", address="+15559998888")],
+        )
+        human_agent = ParticipantResponse(
+            id="part_human",
+            conversationId="conv_def",
+            accountId="ACtest123",
+            name="Human Agent",
+            type="HUMAN_AGENT",
+            addresses=[ParticipantAddress(channel="VOICE", address="+15551234567")],
+        )
+
+        co_client = MagicMock()
+        co_client.list_conversations = AsyncMock(return_value=[conversation])
+        co_client.list_participants = AsyncMock(return_value=[customer, human_agent])
+        tac.conversation_orchestrator_client = co_client
+
+        setup_msg = SetupMessage(type="setup", callSid="CALL456", **{"from": "+15559998888"})
+
+        conv_id, _ = await channel._initialize_conversation("CALL456", setup_msg, MagicMock())
+
+        session = channel._conversations[conv_id]
+        assert session.ai_agent_info is None
 
     @pytest.mark.asyncio
     async def test_handle_interrupt_message(self) -> None:
