@@ -123,8 +123,9 @@ class TestVoiceChannel:
 
     @pytest.mark.asyncio
     async def test_initialize_conversation_populates_ai_agent_info(self) -> None:
-        """_initialize_conversation resolves the AI_AGENT participant and sets
-        ai_agent_info, matching the messaging channels."""
+        """_initialize_conversation resolves the agent participant by its address
+        (TAC's phone number) and accepts the AGENT type voice uses, setting
+        ai_agent_info — matching the messaging channels' address-based match."""
         from tac.models.conversation import (
             ConversationResponse,
             ParticipantAddress,
@@ -144,12 +145,14 @@ class TestVoiceChannel:
             profileId="profile_xyz",
             addresses=[ParticipantAddress(channel="VOICE", address="+15559998888")],
         )
+        # Voice's agent participant is typed AGENT (not AI_AGENT) and sits at
+        # TAC's configured phone number.
         agent = ParticipantResponse(
             id="part_agent",
             conversationId="conv_abc",
             accountId="ACtest123",
-            name="AI Agent",
-            type="AI_AGENT",
+            name="Agent",
+            type="AGENT",
             addresses=[ParticipantAddress(channel="VOICE", address="+15551234567")],
         )
 
@@ -173,8 +176,9 @@ class TestVoiceChannel:
 
     @pytest.mark.asyncio
     async def test_initialize_conversation_skips_human_agent_for_ai_agent_info(self) -> None:
-        """A redirected/escalated call's HUMAN_AGENT participant must not be
-        treated as the AI agent; ai_agent_info stays None when no AI_AGENT."""
+        """A redirected/escalated call's HUMAN_AGENT participant at TAC's address
+        must not be treated as the AI agent — its type is not an agent type, so
+        ai_agent_info stays None."""
         from tac.models.conversation import (
             ConversationResponse,
             ParticipantAddress,
@@ -193,6 +197,8 @@ class TestVoiceChannel:
             type="CUSTOMER",
             addresses=[ParticipantAddress(channel="VOICE", address="+15559998888")],
         )
+        # Human agent sits at TAC's address but is a real person — must not be
+        # adopted as the AI agent.
         human_agent = ParticipantResponse(
             id="part_human",
             conversationId="conv_def",

@@ -48,9 +48,9 @@ class ConversationSession(BaseModel):
     ai_agent_info: AuthorInfo | None = Field(
         None,
         description="AI agent information from communication event (optional). "
-        "Populated on messaging channels and on Orchestrator-backed voice calls. "
-        "Remains None in ConversationRelay-only voice mode, where there is no "
-        "Orchestrator participant to resolve.",
+        "Populated on messaging channels and on Conversation Orchestrator-backed "
+        "voice calls. Remains None in ConversationRelay-only voice mode, where "
+        "there is no Conversation Orchestrator participant to resolve.",
     )
     metadata: dict = Field(
         default_factory=dict, description="Generic metadata storage for session-specific data"

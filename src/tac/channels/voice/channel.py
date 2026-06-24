@@ -11,6 +11,7 @@ if TYPE_CHECKING:
 from pydantic import ValidationError
 
 from tac.channels.base import BaseChannel
+from tac.channels.messaging import AGENT_TYPES
 from tac.channels.websocket_manager import WebSocketManager
 from tac.channels.websocket_protocol import WebSocketDisconnectError, WebSocketProtocol
 from tac.core.tac import TAC
@@ -242,12 +243,23 @@ class VoiceChannel(BaseChannel):
         profile_lookup_address = customer_address or self._caller_address(setup_msg)
         profile_id = customer_participant.profile_id if customer_participant else None
 
-        # Resolve the AI agent participant so ai_agent_info is populated on the
-        # session, matching the messaging channels. Match AI_AGENT strictly — a
-        # redirected/escalated call may add a human AGENT participant we must not
-        # treat as the AI agent.
+        # Resolve the agent participant so ai_agent_info is populated on the
+        # session, matching how the messaging channels reconcile it: identify
+        # the agent by the participant that owns TAC's address on this channel,
+        # then accept it only if its type is an agent type (AGENT or AI_AGENT).
+        # A HUMAN_AGENT added by a redirected/escalated call is NOT TAC and must
+        # not be treated as the AI agent. Voice's agent address is the
+        # configured phone number (Conversation Orchestrator carries it as the
+        # agent participant's VOICE address).
+        agent_phone_number = self.tac.config.phone_number
+
+        def _owns_agent_address(p: Any) -> bool:
+            return any(
+                a.channel == "VOICE" and a.address == agent_phone_number for a in p.addresses
+            )
+
         agent_participant = next(
-            (p for p in participants if p.type == "AI_AGENT"),
+            (p for p in participants if p.type in AGENT_TYPES and _owns_agent_address(p)),
             None,
         )
         agent_address = (
