@@ -270,8 +270,11 @@ class VoiceChannel(BaseChannel):
             session.author_info = AuthorInfo(address=profile_lookup_address)
 
         if agent_participant:
+            # Fall back to the configured phone number we matched on — the
+            # participant owns it by definition, so it's a meaningful address
+            # even in the unlikely case it carries no explicit VOICE address.
             session.ai_agent_info = AuthorInfo(
-                address=agent_address or "",
+                address=agent_address or self.tac.config.phone_number,
                 participant_id=agent_participant.id,
             )
 
