@@ -27,9 +27,6 @@ from tac.models.outbound import InitiateConversationResult, InitiateMessagingCon
 from tac.models.session import AuthorInfo
 from tac.utils.redaction import mask_address
 
-# AGENT_TYPES now lives on BaseChannel (channel-agnostic); it is imported above
-# so existing `from tac.channels.messaging import AGENT_TYPES` keeps working.
-
 
 class MessagingChannelConfig(BaseModel):
     """Base configuration for messaging channels (SMS, RCS, WhatsApp, Chat).
