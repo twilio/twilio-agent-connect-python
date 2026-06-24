@@ -483,10 +483,8 @@ async def create_conversation_configuration(request: Request) -> dict:
                 ],
             },
             "VOICE": {
-                "statusTimeouts": {"inactive": 5, "closed": 30},
-                "captureRules": [
-                    {"from": "*", "to": twilio_phone, "metadata": {"callType": "PSTN"}}
-                ],
+                "statusTimeouts": None,
+                "captureRules": [],
             },
         },
         "statusCallbacks": [{"url": webhook_url, "method": "POST"}],
@@ -722,6 +720,12 @@ async def configure_voice_webhook(request: Request) -> dict:
             "status": "error",
             "message": "account_sid, api_key, api_secret, twilio_phone, and ngrok_domain are required",
         }
+
+    if not re.match(r"^AC[0-9a-f]{32}$", account_sid):
+        return {"status": "error", "message": "Invalid account_sid format"}
+
+    if not re.match(r"^[A-Za-z0-9._-]+$", ngrok_domain):
+        return {"status": "error", "message": "Invalid ngrok_domain format"}
 
     voice_url = f"https://{ngrok_domain}/twiml"
 

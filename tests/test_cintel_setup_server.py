@@ -481,7 +481,7 @@ class TestLinkIntelligenceConfiguration:
 
 class TestConfigureVoiceWebhook:
     _BASE = {
-        "account_sid": "ACtest",
+        "account_sid": "AC" + "a" * 32,
         "api_key": "SK",
         "api_secret": "s",
         "twilio_phone": "+15550000000",
@@ -545,3 +545,197 @@ class TestConfigureVoiceWebhook:
 
         assert data["status"] == "error"
         assert "400" in data["message"]
+
+
+# ---------------------------------------------------------------------------
+# POST /api/get-memory-store
+# ---------------------------------------------------------------------------
+
+
+class TestGetMemoryStore:
+    def test_missing_fields_returns_error(self, client):
+        data = client.post(
+            "/api/get-memory-store", json={"api_key": "SK", "api_secret": "s"}
+        ).json()
+        assert data["status"] == "error"
+
+    def test_returns_store_on_success(self, client):
+        mc = _mock_http(
+            get=_resp(200, {"id": "mem_store_aaa", "displayName": "My Store", "status": "ACTIVE"})
+        )
+        with patch("httpx.AsyncClient", return_value=mc):
+            data = client.post(
+                "/api/get-memory-store",
+                json={"memory_store_id": "mem_store_aaa", "api_key": "SK", "api_secret": "s"},
+            ).json()
+        assert data["status"] == "success"
+        assert data["memory_store"]["id"] == "mem_store_aaa"
+
+    def test_returns_error_on_404(self, client):
+        mc = _mock_http(get=_resp(404, text="Not Found"))
+        with patch("httpx.AsyncClient", return_value=mc):
+            data = client.post(
+                "/api/get-memory-store",
+                json={"memory_store_id": "mem_store_aaa", "api_key": "SK", "api_secret": "s"},
+            ).json()
+        assert data["status"] == "error"
+        assert "404" in data["message"]
+
+
+# ---------------------------------------------------------------------------
+# POST /api/delete-memory-store
+# ---------------------------------------------------------------------------
+
+
+class TestDeleteMemoryStore:
+    def test_missing_fields_returns_error(self, client):
+        data = client.post(
+            "/api/delete-memory-store", json={"api_key": "SK", "api_secret": "s"}
+        ).json()
+        assert data["status"] == "error"
+
+    def test_returns_success_on_204(self, client):
+        mc = AsyncMock()
+        mc.__aenter__ = AsyncMock(return_value=mc)
+        mc.__aexit__ = AsyncMock(return_value=False)
+        mc.delete = AsyncMock(return_value=_resp(204))
+        with patch("httpx.AsyncClient", return_value=mc):
+            data = client.post(
+                "/api/delete-memory-store",
+                json={"memory_store_id": "mem_store_aaa", "api_key": "SK", "api_secret": "s"},
+            ).json()
+        assert data["status"] == "success"
+
+    def test_returns_accepted_on_202(self, client):
+        mc = AsyncMock()
+        mc.__aenter__ = AsyncMock(return_value=mc)
+        mc.__aexit__ = AsyncMock(return_value=False)
+        mc.delete = AsyncMock(
+            return_value=_resp(
+                202, {"statusUrl": "https://memory.twilio.com/v1/ControlPlane/Operations/op1"}
+            )
+        )
+        with patch("httpx.AsyncClient", return_value=mc):
+            data = client.post(
+                "/api/delete-memory-store",
+                json={"memory_store_id": "mem_store_aaa", "api_key": "SK", "api_secret": "s"},
+            ).json()
+        assert data["status"] == "accepted"
+
+
+# ---------------------------------------------------------------------------
+# POST /api/delete-conversation-configuration
+# ---------------------------------------------------------------------------
+
+
+class TestDeleteConversationConfiguration:
+    def test_missing_fields_returns_error(self, client):
+        data = client.post(
+            "/api/delete-conversation-configuration", json={"api_key": "SK", "api_secret": "s"}
+        ).json()
+        assert data["status"] == "error"
+
+    def test_returns_success_on_204(self, client):
+        mc = AsyncMock()
+        mc.__aenter__ = AsyncMock(return_value=mc)
+        mc.__aexit__ = AsyncMock(return_value=False)
+        mc.delete = AsyncMock(return_value=_resp(204))
+        with patch("httpx.AsyncClient", return_value=mc):
+            data = client.post(
+                "/api/delete-conversation-configuration",
+                json={
+                    "api_key": "SK",
+                    "api_secret": "s",
+                    "configuration_id": "conv_configuration_abc",
+                },
+            ).json()
+        assert data["status"] == "success"
+
+    def test_returns_error_on_failure(self, client):
+        mc = AsyncMock()
+        mc.__aenter__ = AsyncMock(return_value=mc)
+        mc.__aexit__ = AsyncMock(return_value=False)
+        mc.delete = AsyncMock(return_value=_resp(403, text="Forbidden"))
+        with patch("httpx.AsyncClient", return_value=mc):
+            data = client.post(
+                "/api/delete-conversation-configuration",
+                json={
+                    "api_key": "SK",
+                    "api_secret": "s",
+                    "configuration_id": "conv_configuration_abc",
+                },
+            ).json()
+        assert data["status"] == "error"
+        assert "403" in data["message"]
+
+
+# ---------------------------------------------------------------------------
+# POST /api/detect-ngrok
+# ---------------------------------------------------------------------------
+
+
+class TestDetectNgrok:
+    def test_returns_domain_when_ngrok_running(self, client):
+        mc = _mock_http(
+            get=_resp(
+                200, {"tunnels": [{"proto": "https", "public_url": "https://abc.ngrok-free.app"}]}
+            )
+        )
+        with patch("httpx.AsyncClient", return_value=mc):
+            data = client.post("/api/detect-ngrok").json()
+        assert data["status"] == "success"
+        assert data["domain"] == "abc.ngrok-free.app"
+
+    def test_returns_error_when_ngrok_not_running(self, client):
+        import httpx as _httpx
+
+        mc = AsyncMock()
+        mc.__aenter__ = AsyncMock(return_value=mc)
+        mc.__aexit__ = AsyncMock(return_value=False)
+        mc.get = AsyncMock(side_effect=_httpx.ConnectError("refused"))
+        with patch("httpx.AsyncClient", return_value=mc):
+            data = client.post("/api/detect-ngrok").json()
+        assert data["status"] == "error"
+
+
+# ---------------------------------------------------------------------------
+# POST /api/list-conversation-configurations
+# ---------------------------------------------------------------------------
+
+
+class TestListConversationConfigurations:
+    def test_missing_credentials_returns_error(self, client):
+        data = client.post(
+            "/api/list-conversation-configurations", json={"api_key": "", "api_secret": ""}
+        ).json()
+        assert data["status"] == "error"
+
+    def test_returns_configuration_list(self, client):
+        mc = _mock_http(
+            get=_resp(
+                200,
+                {
+                    "configurations": [
+                        {
+                            "id": "conv_configuration_abc",
+                            "displayName": "owl-support",
+                            "createdAt": "2026-01-01",
+                        }
+                    ]
+                },
+            )
+        )
+        with patch("httpx.AsyncClient", return_value=mc):
+            data = client.post(
+                "/api/list-conversation-configurations", json={"api_key": "SK", "api_secret": "s"}
+            ).json()
+        assert data["status"] == "success"
+        assert data["configurations"][0]["id"] == "conv_configuration_abc"
+
+    def test_returns_error_on_api_failure(self, client):
+        mc = _mock_http(get=_resp(401, text="Unauthorized"))
+        with patch("httpx.AsyncClient", return_value=mc):
+            data = client.post(
+                "/api/list-conversation-configurations", json={"api_key": "SK", "api_secret": "bad"}
+            ).json()
+        assert data["status"] == "error"

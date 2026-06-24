@@ -416,8 +416,9 @@
       <div class="header-logo">🎙</div>
       <h1>Script Coach <span>/ CINTEL Quickstart</span></h1>
     </div>
-    <div style="display:flex;align-items:center;gap:16px;">
+    <div style="display:flex;align-items:center;gap:12px;">
       <span style="font-size:12px;color:var(--text-muted);">Powered by <span style="color:var(--text-secondary);font-weight:600;">Twilio</span></span>
+      <button onclick="resetDashboard()" style="font-size:12px;padding:5px 12px;background:var(--bg-elevated);border:1px solid var(--border-light);color:var(--text-secondary);border-radius:6px;cursor:pointer;">Reset</button>
       <div class="banner-status">
         <div class="status-dot" id="status-dot"></div>
         <span id="status-text">Waiting for call</span>
@@ -518,7 +519,6 @@
 
   </div>
 
-  <script src="/static/script-panel.js"></script>
   <script src="/static/transcript.js"></script>
 </body>
 </html>

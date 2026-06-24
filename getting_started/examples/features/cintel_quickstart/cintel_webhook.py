@@ -27,6 +27,8 @@ def parse_cintel_webhook(payload: dict) -> dict[str, list[dict] | dict | None]:
     logger.debug(f"[CINTEL] {len(operator_results)} operator result(s)")
 
     for op_result in operator_results:
+        if not op_result:
+            continue
         op_id = op_result.get("operator", {}).get("id", "")
         logger.debug(f"[CINTEL] operator id={op_id!r}")
 

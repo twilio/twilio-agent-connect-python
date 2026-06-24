@@ -71,7 +71,9 @@ RESOLUTION PHASE:
 VOICE CHARACTERISTICS:
 - Speak naturally, with occasional "um" and "uh"
 - Show frustration about the problem, not at the agent
-- Sound relieved when they're helpful"""
+- Sound relieved when they're helpful
+
+IMPORTANT: You are the CUSTOMER who received this call. You NEVER say "How can I help you?" or anything that sounds like an agent greeting. If the agent hasn't introduced themselves yet, respond with something like "Hello?" or "Yeah, hi." and wait for them to speak first."""
 
 # ── TAC + channel setup ───────────────────────────────────────────────────────
 ci_config_id = os.environ.get("CONVERSATION_INTELLIGENCE_CONFIGURATION_ID")
@@ -112,7 +114,7 @@ async def handle_message_ready(
     context: ConversationSession,
     memory_response: TACMemoryResponse | None,
 ) -> None:
-    global call_active
+    global call_active, summary_text
     conv_id = context.conversation_id
     logger.info(f"[{conv_id}] Agent said: {user_message[:50]}...")
 
@@ -120,10 +122,12 @@ async def handle_message_ready(
         # New conversation — reset dashboard state
         transcript_turns.clear()
         checkpoints.clear()
+        summary_text = ""
         call_active = True
         conversation_history[conv_id] = []
 
     conversation_history[conv_id].append({"role": "user", "content": user_message})
+    transcript_turns.append({"speaker": "agent", "text": user_message})
 
     try:
         response = await openai_client.chat.completions.create(
@@ -138,30 +142,36 @@ async def handle_message_ready(
         conversation_history[conv_id].append({"role": "assistant", "content": llm_response})
 
         logger.info(f"[{conv_id}] AI customer: {llm_response[:50]}...")
-        transcript_turns.append({"speaker": "agent", "text": user_message})
         transcript_turns.append({"speaker": "customer", "text": llm_response})
         await voice_channel.send_response(conv_id, llm_response)
 
     except AuthenticationError:
+        conversation_history[conv_id].pop()
         logger.error(f"[{conv_id}] OpenAI authentication failed - check API key")
         await voice_channel.send_response(
             conv_id, "I'm having trouble connecting. Please try again later."
         )
 
     except RateLimitError:
+        conversation_history[conv_id].pop()
         logger.warning(f"[{conv_id}] OpenAI rate limit reached, using fallback")
         await voice_channel.send_response(
             conv_id, "Sorry, could you repeat that? I'm having trouble hearing you."
         )
 
     except (APIConnectionError, APIError) as e:
+        conversation_history[conv_id].pop()
         logger.error(f"[{conv_id}] OpenAI API error: {e}")
         await voice_channel.send_response(
             conv_id, "I'm experiencing technical difficulties. Let me try that again."
         )
 
     except Exception as e:
+        conversation_history[conv_id].pop()
         logger.error(f"[{conv_id}] Unexpected error in message handler: {e}")
+        await voice_channel.send_response(
+            conv_id, "I'm experiencing technical difficulties. Please try again."
+        )
 
 
 async def handle_conversation_ended(context: ConversationSession) -> None:
@@ -221,6 +231,15 @@ def _register_routes(application: Any, auth_token: str) -> None:
                 "call_active": call_active,
             }
         )
+
+    @application.post("/api/reset")
+    async def reset_dashboard() -> JSONResponse:
+        global summary_text, call_active
+        transcript_turns.clear()
+        checkpoints.clear()
+        summary_text = ""
+        call_active = False
+        return JSONResponse({"status": "ok"})
 
     @application.get("/api/config")
     async def get_config() -> JSONResponse:

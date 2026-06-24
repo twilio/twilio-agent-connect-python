@@ -1,5 +1,5 @@
 /**
- * Dashboard polling — fetches /api/transcript every 1.5s and updates UI.
+ * Dashboard polling — fetches /api/transcript every 200ms and updates UI.
  */
 
 let lastTurnCount = 0;
@@ -35,10 +35,40 @@ function poll() {
       if (data.summary) updateSummary(data.summary);
     })
     .catch(() => {})
-    .finally(() => setTimeout(poll, 1500));
+    .finally(() => setTimeout(poll, 200));
 }
 
 poll();
+
+function resetDashboard() {
+  fetch('/api/reset', { method: 'POST' })
+    .then(() => {
+      // Clear transcript
+      const container = document.getElementById('transcript');
+      container.innerHTML = '<div class="transcript-empty"><div class="transcript-empty-icon">🎙</div><span>Transcript will appear here during the call</span></div>';
+      lastTurnCount = 0;
+
+      // Reset checkpoints
+      document.querySelectorAll('.checkpoint').forEach((cp, i) => {
+        cp.classList.remove('completed', 'skipped');
+        const status = cp.querySelector('.checkpoint-status');
+        if (status) status.textContent = i + 1;
+        cp.querySelectorAll('.criteria-list li').forEach(li => {
+          li.className = 'pending';
+          const icon = li.querySelector('.criteria-icon');
+          if (icon) icon.textContent = '';
+        });
+      });
+
+      // Hide summary
+      const summary = document.getElementById('summary-panel');
+      if (summary) summary.style.display = 'none';
+
+      // Reset status
+      updateStatus(false, null);
+    })
+    .catch(() => {});
+}
 
 function updateTranscript(turns) {
   const container = document.getElementById('transcript');
@@ -113,6 +143,9 @@ function updateStatus(callActive, summary) {
   } else if (callActive) {
     dot.classList.add('active');
     text.textContent = 'Call in progress';
+  } else {
+    dot.classList.remove('active');
+    text.textContent = 'Waiting for call';
   }
 }
 
