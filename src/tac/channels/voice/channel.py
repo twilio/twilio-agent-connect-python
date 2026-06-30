@@ -156,6 +156,8 @@ class VoiceChannel(BaseChannel):
     async def handle_incoming_call(
         self,
         twiml_request: TwiMLRequest | None = None,
+        *,
+        websocket_url: str | None = None,
     ) -> str:
         """
         Generate TwiML response for incoming voice calls.
@@ -185,11 +187,18 @@ class VoiceChannel(BaseChannel):
         Args:
             twiml_request: Parsed Twilio webhook fields. Passed to the
                 customizer if one is configured on the channel.
+            websocket_url: Public WebSocket URL for ConversationRelay. Optional —
+                defaults to the URL derived from ``TACConfig.voice_public_domain``
+                + ``voice_websocket_path``. Pass it here only to override the URL
+                for a specific call (e.g. an affinity-routed host that appends a
+                per-call token to the upgrade URL). Mirrors
+                ``InitiateVoiceConversationOptions.websocket_url`` on the outbound
+                path.
 
         Returns:
             TwiML XML string for call connection.
         """
-        websocket_url = self._resolve_websocket_url("handle_incoming_call")
+        websocket_url = websocket_url or self._resolve_websocket_url("handle_incoming_call")
 
         customized: TwiMLOptions | None = None
         if self._on_inbound_call_twiml is not None and twiml_request is not None:

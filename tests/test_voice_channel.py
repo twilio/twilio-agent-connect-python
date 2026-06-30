@@ -585,6 +585,45 @@ class TestVoiceChannel:
         assert 'conversationConfiguration="conv_configuration_test123"' in twiml
 
     @pytest.mark.asyncio
+    async def test_handle_incoming_call_websocket_url_override(self) -> None:
+        """Test a per-call websocket_url overrides the derived URL.
+
+        Mirrors the outbound seam (InitiateVoiceConversationOptions.websocket_url).
+        Regression guard for affinity-routed hosts (e.g. Azure Hosted Agents)
+        that append a per-call token to the ConversationRelay upgrade URL.
+        """
+        from tac.channels.voice import VoiceChannelConfig
+
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(
+            tac,
+            config=VoiceChannelConfig(
+                default_twiml_options=TwiMLOptions(welcome_greeting="Welcome!"),
+            ),
+        )
+
+        override = "wss://example.com/ws?agent_session_id=CA123"
+        twiml = await channel.handle_incoming_call(websocket_url=override)
+
+        # The override URL is emitted verbatim...
+        assert f'url="{override}"' in twiml
+        # ...and the derived URL (without the query string) is NOT used.
+        assert 'url="wss://example.com/ws"' not in twiml
+        # The override only changes the URL; other layered fields still apply.
+        assert 'welcomeGreeting="Welcome!"' in twiml
+        assert 'conversationConfiguration="conv_configuration_test123"' in twiml
+
+    @pytest.mark.asyncio
+    async def test_handle_incoming_call_default_websocket_url(self) -> None:
+        """Test handle_incoming_call still derives the URL when none is passed."""
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+
+        twiml = await channel.handle_incoming_call()
+
+        assert 'url="wss://example.com/ws"' in twiml
+
+    @pytest.mark.asyncio
     async def test_prompt_with_empty_voice_prompt(self) -> None:
         """Test handling prompt message with empty voice_prompt."""
         tac = TAC(get_test_config())
