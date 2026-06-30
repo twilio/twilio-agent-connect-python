@@ -9,6 +9,7 @@
 - [ ] Breaking change
 - [ ] Documentation update
 - [ ] Refactoring
+- [ ] Release / version bump
 
 ## Checklist
 
