@@ -193,6 +193,15 @@ class TwiMLOptions(BaseModel):
         description="Conversation Service SID for ConversationRelay to automatically "
         "manage conversation creation and participants.",
     )
+    websocket_url: str | None = Field(
+        None,
+        description="ConversationRelay WebSocket URL (the <ConversationRelay url=...> "
+        "attribute). Leave None (the default) to use the URL the channel derives "
+        "from TACConfig.voice_public_domain + voice_websocket_path. Set it only for a "
+        "per-call URL — e.g. an affinity-routed host that appends a token to the "
+        "upgrade URL — typically from an on_inbound_call_twiml customizer. Like every "
+        "other field, it layers customizer > default_twiml_options > TAC default.",
+    )
 
     # Language, TTS, STT
     language: str | None = Field(

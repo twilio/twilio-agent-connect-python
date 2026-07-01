@@ -156,8 +156,6 @@ class VoiceChannel(BaseChannel):
     async def handle_incoming_call(
         self,
         twiml_request: TwiMLRequest | None = None,
-        *,
-        websocket_url: str | None = None,
     ) -> str:
         """
         Generate TwiML response for incoming voice calls.
@@ -175,36 +173,35 @@ class VoiceChannel(BaseChannel):
              and ``twiml_request`` is given.
           2. ``VoiceChannelConfig.default_twiml_options`` — per-channel defaults.
           3. TAC defaults: a fixed default ``welcome_greeting``,
-             ``conversation_configuration`` from ``TACConfig``, and
+             ``conversation_configuration`` from ``TACConfig``,
              ``action_url`` resolved via Studio handoff (when
              ``studio_handoff_flow_sid`` is configured), else derived from
-             ``TACConfig.voice_public_domain`` + ``voice_action_path``.
+             ``TACConfig.voice_public_domain`` + ``voice_action_path``, and the
+             ``websocket_url`` derived from ``TACConfig.voice_public_domain`` +
+             ``voice_websocket_path``.
 
         Fields not set at a layer fall through to lower layers. Lists
         (``languages``) and nested models (``custom_parameters``) replace
         wholesale when set at a higher-priority layer.
 
+        ``websocket_url`` follows the same layering: a customizer or
+        ``default_twiml_options`` may override it per call (e.g. an
+        affinity-routed host appending a per-call token to the upgrade URL);
+        if unset it falls back to the ``TACConfig``-derived URL.
+
         Args:
             twiml_request: Parsed Twilio webhook fields. Passed to the
                 customizer if one is configured on the channel.
-            websocket_url: Public WebSocket URL for ConversationRelay. Optional —
-                defaults to the URL derived from ``TACConfig.voice_public_domain``
-                + ``voice_websocket_path``. Pass it here only to override the URL
-                for a specific call (e.g. an affinity-routed host that appends a
-                per-call token to the upgrade URL). Mirrors
-                ``InitiateVoiceConversationOptions.websocket_url`` on the outbound
-                path.
 
         Returns:
             TwiML XML string for call connection.
         """
-        websocket_url = websocket_url or self._resolve_websocket_url("handle_incoming_call")
-
         customized: TwiMLOptions | None = None
         if self._on_inbound_call_twiml is not None and twiml_request is not None:
             customized = await self._on_inbound_call_twiml(twiml_request)
 
         merged = self._build_twiml_options(customized)
+        websocket_url = merged.websocket_url or self._resolve_websocket_url("handle_incoming_call")
         return twiml.generate_twiml(websocket_url, merged)
 
     def _build_twiml_options(self, per_call: TwiMLOptions | None) -> TwiMLOptions:
@@ -524,9 +521,6 @@ class VoiceChannel(BaseChannel):
         ``TACConfig.voice_websocket_path``, unless overridden per-call via
         ``options.websocket_url``.
         """
-        websocket_url = options.websocket_url or self._resolve_websocket_url(
-            "initiate_outbound_conversation"
-        )
         from_number = self.tac.config.phone_number
 
         self.logger.info(
@@ -539,6 +533,15 @@ class VoiceChannel(BaseChannel):
         # (customizers receive a TwiMLRequest from an inbound webhook; there
         # is no equivalent for outbound).
         merged = self._build_twiml_options(options.twiml_options)
+
+        # ``options.websocket_url`` is the dedicated per-call outbound override
+        # and wins over any websocket_url that came through the layered
+        # ``twiml_options`` merge; both fall back to the TACConfig-derived URL.
+        websocket_url = (
+            options.websocket_url
+            or merged.websocket_url
+            or self._resolve_websocket_url("initiate_outbound_conversation")
+        )
 
         try:
             twiml_xml = twiml.generate_twiml(websocket_url, merged)

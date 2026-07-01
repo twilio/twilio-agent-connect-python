@@ -42,9 +42,12 @@ _OPTIONAL_RELAY_ATTRS = (
 )
 
 # Fields on TwiMLOptions that this module handles specially (not via the
-# generic _OPTIONAL_RELAY_ATTRS loop) — the action_url, the <Language>
-# children list, the <Parameter> children dict, and the extra escape hatch.
+# generic _OPTIONAL_RELAY_ATTRS loop) — the websocket_url (resolved through the
+# layered merge and passed in as the positional ``websocket_url`` arg), the
+# action_url, the <Language> children list, the <Parameter> children dict, and
+# the extra escape hatch.
 _HANDLED_OUTSIDE_LOOP = {
+    "websocket_url",
     "action_url",
     "languages",
     "custom_parameters",
