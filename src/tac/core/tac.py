@@ -106,23 +106,24 @@ class TAC:
             )
             self.logger.info("Conversation Intelligence processor initialized")
 
+        # on_message_ready is single-slot on purpose: it produces the reply
+        # that TAC routes back to the channel, and there can only be one
+        # responder. on_interrupt / on_conversation_ended are fire-and-forget
+        # listeners, so they accumulate and all fire (see their setters).
         self._message_ready_callback: (
             Callable[[str, ConversationSession, TACMemoryResponse | None], str | None]
             | Callable[[str, ConversationSession, TACMemoryResponse | None], Awaitable[str | None]]
             | None
         ) = None
 
-        self._interrupt_callback: (
+        self._interrupt_callbacks: list[
             Callable[[ConversationSession, Any], None]
             | Callable[[ConversationSession, Any], Awaitable[None]]
-            | None
-        ) = None
+        ] = []
 
-        self._conversation_ended_callback: (
-            Callable[[ConversationSession], None]
-            | Callable[[ConversationSession], Awaitable[None]]
-            | None
-        ) = None
+        self._conversation_ended_callbacks: list[
+            Callable[[ConversationSession], None] | Callable[[ConversationSession], Awaitable[None]]
+        ] = []
 
     def is_orchestrator_enabled(self) -> bool:
         """True if TAC is configured with Conversation Orchestrator (not relay-only mode)."""
@@ -286,6 +287,11 @@ class TAC:
     ) -> None:
         """Register callback invoked on user interrupt.
 
+        Multiple callbacks may be registered: this method *appends* — it does
+        not replace. All registered callbacks are invoked (in registration
+        order) on each interrupt. This lets a wrapping package register its own
+        listener alongside an application's.
+
         Example:
             ```python
             def handle_interrupt(context: ConversationSession, interrupt_data: Any):
@@ -299,7 +305,7 @@ class TAC:
         Args:
             callback: Function to call with (context, interrupt_data). Supports sync and async.
         """
-        self._interrupt_callback = callback
+        self._interrupt_callbacks.append(callback)
 
     def on_conversation_ended(
         self,
@@ -308,6 +314,12 @@ class TAC:
         ),
     ) -> None:
         """Register callback invoked when conversation ends.
+
+        Multiple callbacks may be registered: this method *appends* — it does
+        not replace. All registered callbacks are invoked (in registration
+        order) when a conversation ends. This lets a wrapping package clean up
+        its own state (e.g. a cached agent session) alongside an application's
+        listener.
 
         Example:
             ```python
@@ -322,7 +334,7 @@ class TAC:
         Args:
             callback: Function to call with conversation context. Supports sync and async.
         """
-        self._conversation_ended_callback = callback
+        self._conversation_ended_callbacks.append(callback)
 
     def register_partner_connector(
         self,
@@ -406,8 +418,8 @@ class TAC:
             conversation_context: Session containing conversation information.
             interrupt_data: Interrupt event data from voice channel.
         """
-        if self._interrupt_callback:
-            result = self._interrupt_callback(conversation_context, interrupt_data)
+        for callback in self._interrupt_callbacks:
+            result = callback(conversation_context, interrupt_data)
             if inspect.isawaitable(result):
                 try:
                     asyncio.ensure_future(result)
@@ -429,7 +441,7 @@ class TAC:
         Args:
             conversation_context: Session containing conversation information.
         """
-        if self._conversation_ended_callback:
-            result = self._conversation_ended_callback(conversation_context)
+        for callback in self._conversation_ended_callbacks:
+            result = callback(conversation_context)
             if inspect.isawaitable(result):
                 await result

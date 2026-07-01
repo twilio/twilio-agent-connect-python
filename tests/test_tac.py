@@ -214,3 +214,27 @@ class TestTAC:
 
         result = await tac.trigger_message_ready("test message", session, None)
         assert result is None
+
+    @pytest.mark.asyncio
+    async def test_multiple_conversation_ended_callbacks_all_fire(self):
+        """on_conversation_ended appends: every registered callback fires, in order.
+
+        Mixes a sync and an async callback to confirm both are awaited/run.
+        """
+        from tac.models.session import ConversationSession
+
+        tac = TAC(get_test_config())
+
+        calls = []
+        tac.on_conversation_ended(lambda ctx: calls.append("sync"))
+
+        async def async_cb(ctx):
+            calls.append("async")
+
+        tac.on_conversation_ended(async_cb)
+
+        session = ConversationSession(conversation_id="CH123", channel="sms")
+        await tac.trigger_conversation_ended(session)
+
+        # Both fire, in registration order (fan-out — not replace).
+        assert calls == ["sync", "async"]

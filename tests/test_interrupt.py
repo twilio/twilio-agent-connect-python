@@ -308,3 +308,23 @@ class TestInterruptCallbacks:
 
         assert len(received) == 1
         assert received[0] == "conv_wrapped"
+
+    def test_multiple_interrupt_callbacks_all_fire(self) -> None:
+        """on_interrupt appends: every registered callback fires, in order."""
+        tac = TAC(get_test_config())
+
+        calls: list[str] = []
+        tac.on_interrupt(lambda ctx, data: calls.append("first"))
+        tac.on_interrupt(lambda ctx, data: calls.append("second"))
+
+        context = ConversationSession(conversation_id="conv_multi", channel="voice")
+        interrupt = InterruptMessage(
+            type="interrupt",
+            utteranceUntilInterrupt="Hello",
+            durationUntilInterruptMs=1000,
+        )
+
+        tac.trigger_interrupt(context, interrupt)
+
+        # Both fire, in registration order (fan-out — not replace).
+        assert calls == ["first", "second"]

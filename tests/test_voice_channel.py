@@ -1557,6 +1557,57 @@ class TestHandleIncomingCallMerge:
         twiml = await channel.handle_incoming_call()
         assert "action=" not in twiml
 
+    @pytest.mark.asyncio
+    async def test_multiple_customizers_layer_in_order(self) -> None:
+        """on_inbound_call_twiml appends: multiple customizers all run and
+        layer per-field, later registrations winning. Lets a wrapping package
+        set one field while the app's customizer sets others."""
+        from tac.channels.voice import VoiceChannelConfig
+        from tac.models.voice import TwiMLRequest
+
+        async def app_customizer(req: TwiMLRequest) -> TwiMLOptions:
+            return TwiMLOptions(voice="en-US-Journey-D", welcome_greeting="App greeting")
+
+        async def wrapper_customizer(req: TwiMLRequest) -> TwiMLOptions:
+            # A wrapping package sets only the greeting; voice falls through.
+            return TwiMLOptions(welcome_greeting="Wrapper greeting")
+
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac, config=VoiceChannelConfig())
+        channel.on_inbound_call_twiml(app_customizer)
+        channel.on_inbound_call_twiml(wrapper_customizer)
+
+        twiml = await channel.handle_incoming_call(twiml_request=TwiMLRequest())
+
+        # app's voice (only it set voice) survives...
+        assert 'voice="en-US-Journey-D"' in twiml
+        # ...and the later-registered wrapper wins the field both set.
+        assert 'welcomeGreeting="Wrapper greeting"' in twiml
+        assert "App greeting" not in twiml
+
+    @pytest.mark.asyncio
+    async def test_multiple_customizers_action_url_highest_priority_wins(self) -> None:
+        """action_url resolves across all customizer layers, later-registered
+        winning (exercises the reversed-scan in _resolve_action_url)."""
+        from tac.channels.voice import VoiceChannelConfig
+        from tac.models.voice import TwiMLRequest
+
+        async def first(req: TwiMLRequest) -> TwiMLOptions:
+            return TwiMLOptions(action_url="https://first.example.com/end")
+
+        async def second(req: TwiMLRequest) -> TwiMLOptions:
+            return TwiMLOptions(action_url="https://second.example.com/end")
+
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac, config=VoiceChannelConfig())
+        channel.on_inbound_call_twiml(first)
+        channel.on_inbound_call_twiml(second)
+
+        twiml = await channel.handle_incoming_call(twiml_request=TwiMLRequest())
+
+        assert 'action="https://second.example.com/end"' in twiml
+        assert "first.example.com" not in twiml
+
 
 class TestStaticTwiMLOptions:
     """VoiceChannelConfig.twiml_options applies to every call without a callback."""

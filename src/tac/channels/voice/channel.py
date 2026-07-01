@@ -79,7 +79,7 @@ class VoiceChannel(BaseChannel):
         super().__init__(tac, memory_mode=config.memory_mode)
         self.config = config
         self.session_manager = config.session_manager
-        self._on_inbound_call_twiml: InboundCallTwiMLHandler | None = None
+        self._inbound_call_twiml_customizers: list[InboundCallTwiMLHandler] = []
         self._websocket_manager = WebSocketManager()
         self._twilio_client: Client | None = None
 
@@ -91,6 +91,13 @@ class VoiceChannel(BaseChannel):
         from the Twilio webhook form) and returns a ``TwiMLOptions``. Fields
         the callback explicitly sets override ``default_twiml_options`` and
         TAC defaults; unset fields fall through.
+
+        Multiple customizers may be registered: this method *appends* — it
+        does not replace. They run in registration order, each layered over
+        the previous (later registrations win per-field, same as the
+        ``default_twiml_options`` → customizer precedence). This lets a
+        wrapping package (e.g. a cloud connector) register its own customizer
+        without displacing an application's.
 
         Example:
             ```python
@@ -106,7 +113,7 @@ class VoiceChannel(BaseChannel):
         Outbound calls don't use this — pass per-call TwiML via
         ``InitiateVoiceConversationOptions.twiml_options`` directly.
         """
-        self._on_inbound_call_twiml = callback
+        self._inbound_call_twiml_customizers.append(callback)
 
     def _resolve_websocket_url(self, action: str) -> str:
         """Resolve the public WebSocket URL from
@@ -191,27 +198,32 @@ class VoiceChannel(BaseChannel):
         """
         websocket_url = self._resolve_websocket_url("handle_incoming_call")
 
-        customized: TwiMLOptions | None = None
-        if self._on_inbound_call_twiml is not None and twiml_request is not None:
-            customized = await self._on_inbound_call_twiml(twiml_request)
+        # Run every registered customizer in registration order; each output
+        # is one per-call layer, later ones winning per-field.
+        per_call_layers: list[TwiMLOptions] = []
+        if twiml_request is not None:
+            for customizer in self._inbound_call_twiml_customizers:
+                per_call_layers.append(await customizer(twiml_request))
 
-        merged = self._build_twiml_options(customized)
+        merged = self._build_twiml_options(per_call_layers)
         return twiml.generate_twiml(websocket_url, merged)
 
-    def _build_twiml_options(self, per_call: TwiMLOptions | None) -> TwiMLOptions:
+    def _build_twiml_options(self, per_call_layers: list[TwiMLOptions]) -> TwiMLOptions:
         """Layer TwiML options: TAC defaults → channel ``default_twiml_options``
-        → ``per_call`` (customizer output for inbound, or
-        ``InitiateVoiceConversationOptions.twiml_options`` for outbound).
+        → ``per_call_layers`` in order (customizer outputs for inbound, or a
+        single ``InitiateVoiceConversationOptions.twiml_options`` for outbound).
+
+        Later per-call layers win over earlier ones, per-field.
         """
         merged = TwiMLOptions(
             welcome_greeting=DEFAULT_WELCOME_GREETING,
             conversation_configuration=self.tac.config.conversation_configuration_id,
-            action_url=self._resolve_action_url(per_call),
+            action_url=self._resolve_action_url(per_call_layers),
         )
         if self.config.default_twiml_options is not None:
             self._overlay_fields(merged, self.config.default_twiml_options)
-        if per_call is not None:
-            self._overlay_fields(merged, per_call)
+        for layer in per_call_layers:
+            self._overlay_fields(merged, layer)
         return merged
 
     @staticmethod
@@ -234,11 +246,11 @@ class VoiceChannel(BaseChannel):
                 continue
             setattr(target, field, getattr(source, field))
 
-    def _resolve_action_url(self, customized: TwiMLOptions | None) -> str | None:
+    def _resolve_action_url(self, per_call_layers: list[TwiMLOptions]) -> str | None:
         """Resolve the TwiML ``<Connect action=...>`` URL.
 
         Precedence (highest to lowest):
-          1. customizer
+          1. customizer layers (later registrations win over earlier ones)
           2. channel ``default_twiml_options``
           3. Studio handoff (when ``studio_handoff_flow_sid`` is configured)
           4. Channel default — derived from ``TACConfig.voice_public_domain``
@@ -256,8 +268,11 @@ class VoiceChannel(BaseChannel):
         from a customizer) or channel-wide. ``action_url`` left unset (not
         in ``model_fields_set``) falls through to the next layer.
         """
-        if customized is not None and "action_url" in customized.model_fields_set:
-            return customized.action_url
+        # Highest-priority customizer that explicitly set action_url wins; scan
+        # the per-call layers from last-registered (highest) to first.
+        for layer in reversed(per_call_layers):
+            if "action_url" in layer.model_fields_set:
+                return layer.action_url
         if (
             self.config.default_twiml_options is not None
             and "action_url" in self.config.default_twiml_options.model_fields_set
@@ -526,10 +541,12 @@ class VoiceChannel(BaseChannel):
             from_number=mask_phone(from_number),
         )
 
-        # Same layering as handle_incoming_call, minus the customizer
+        # Same layering as handle_incoming_call, minus the customizers
         # (customizers receive a TwiMLRequest from an inbound webhook; there
-        # is no equivalent for outbound).
-        merged = self._build_twiml_options(options.twiml_options)
+        # is no equivalent for outbound). Outbound has a single per-call layer:
+        # options.twiml_options, if provided.
+        per_call_layers = [options.twiml_options] if options.twiml_options is not None else []
+        merged = self._build_twiml_options(per_call_layers)
 
         try:
             twiml_xml = twiml.generate_twiml(websocket_url, merged)
