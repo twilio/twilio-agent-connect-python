@@ -187,26 +187,16 @@ class VoiceChannel(BaseChannel):
 
         Fields not set at a layer fall through to lower layers. Lists
         (``languages``) and nested models (``custom_parameters``) replace
-        wholesale when set at a higher-priority layer.
-
-        ``websocket_url`` follows the same layering; if unset at every layer it
-        falls back to the ``TACConfig``-derived URL.
-
-        The ``server_twiml_options`` layer lets a custom in-process server (one
-        that holds a ``VoiceChannel`` and generates TwiML itself — e.g. an
-        affinity-routed host that bakes a per-call token into the upgrade URL)
-        inject its transport facts without stealing the application's
-        ``on_inbound_call_twiml`` hook. The application customizer still sits on
-        top, so a developer's explicit choices win. (Servers with no
-        ``VoiceChannel`` in the TwiML-generating process — e.g. an edge proxy —
-        should call the low-level ``generate_twiml`` directly instead.)
+        wholesale when set at a higher-priority layer. ``websocket_url`` falls
+        back to the ``TACConfig``-derived URL if unset at every layer.
 
         Args:
             twiml_request: Parsed Twilio webhook fields. Passed to the
                 customizer if one is configured on the channel.
-            server_twiml_options: Per-call TwiML values supplied by the calling
-                server, layered above ``default_twiml_options`` and below the
-                application customizer.
+            server_twiml_options: Per-call TwiML supplied by a custom in-process
+                server (e.g. an affinity-routed host injecting a per-call
+                ``websocket_url``), layered above ``default_twiml_options`` and
+                below the application customizer.
 
         Returns:
             TwiML XML string for call connection.
@@ -558,10 +548,8 @@ class VoiceChannel(BaseChannel):
             from_number=mask_phone(from_number),
         )
 
-        # Same layering as handle_incoming_call, minus the application
-        # customizer (customizers receive a TwiMLRequest from an inbound webhook;
-        # there is no equivalent for outbound). options.twiml_options is the
-        # per-call override; there is no separate server layer for outbound.
+        # Outbound has no inbound customizer and no server layer; the per-call
+        # override is options.twiml_options.
         merged = self._build_twiml_options(None, options.twiml_options)
 
         # ``options.websocket_url`` is the dedicated per-call outbound override

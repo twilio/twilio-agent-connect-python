@@ -92,10 +92,8 @@ def generate_twiml(
     static ``twiml_options`` from ``VoiceChannelConfig``, and any per-call
     customizer output.
 
-    The WebSocket URL may be supplied either as the positional ``websocket_url``
-    argument or as ``options.websocket_url``. The positional argument wins when
-    both are given. This lets a channel-less caller (e.g. an edge server that
-    builds its own per-call URL) pass everything through ``options`` in one
+    The WebSocket URL may be passed positionally or as ``options.websocket_url``
+    (positional wins when both are given), so a caller can pass everything in one
     object: ``generate_twiml(options=TwiMLOptions(websocket_url=...))``.
 
     Args:
