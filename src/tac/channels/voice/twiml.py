@@ -141,7 +141,7 @@ def generate_twiml(
 
     # Build ConversationRelay kwargs. The twilio SDK converts snake_case to
     # camelCase automatically, and serializes bool/str as TwiML attribute values.
-    relay_kwargs: dict[str, Any] = {"url": websocket_url}
+    relay_kwargs: dict[str, Any] = {"url": resolved_websocket_url}
     for attr in _OPTIONAL_RELAY_ATTRS:
         value = getattr(options, attr)
         if value is None:

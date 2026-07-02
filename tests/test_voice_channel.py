@@ -1168,6 +1168,34 @@ class TestVoiceChannel:
         assert "welcomeGreeting" not in twiml
         assert "action=" not in twiml
 
+    def test_generate_twiml_url_from_options_only(self) -> None:
+        """URL supplied only via options.websocket_url (no positional arg) is
+        emitted on <ConversationRelay> — the channel-less caller path."""
+        twiml = generate_twiml(
+            options=TwiMLOptions(
+                websocket_url="wss://example.com/ws?agent_session_id=CA1",
+                conversation_configuration="cc",
+            )
+        )
+
+        assert 'url="wss://example.com/ws?agent_session_id=CA1"' in twiml
+        assert 'conversationConfiguration="cc"' in twiml
+
+    def test_generate_twiml_positional_url_wins_over_options(self) -> None:
+        """When both are given, the positional websocket_url wins."""
+        twiml = generate_twiml(
+            "wss://positional.example.com/ws",
+            TwiMLOptions(websocket_url="wss://options.example.com/ws"),
+        )
+
+        assert 'url="wss://positional.example.com/ws"' in twiml
+        assert "options.example.com" not in twiml
+
+    def test_generate_twiml_requires_a_url(self) -> None:
+        """No URL via either source raises ValueError."""
+        with pytest.raises(ValueError, match="requires a WebSocket URL"):
+            generate_twiml(options=TwiMLOptions(welcome_greeting="hi"))
+
     def test_generate_twiml_with_welcome_greeting(self) -> None:
         """Test TwiML generation with welcome greeting."""
         twiml = generate_twiml(
