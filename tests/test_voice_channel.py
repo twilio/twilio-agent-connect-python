@@ -1653,6 +1653,76 @@ class TestHandleIncomingCallMerge:
         twiml = await channel.handle_incoming_call()
         assert "action=" not in twiml
 
+    @pytest.mark.asyncio
+    async def test_server_twiml_options_sets_per_call_websocket_url(self) -> None:
+        """A custom in-process server passes per-call transport facts via
+        server_twiml_options — e.g. an affinity URL — without registering a
+        customizer. This is the TACHostedAgentsApp use case."""
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+
+        affinity_url = "wss://example.com/ws?agent_session_id=CA123"
+        twiml = await channel.handle_incoming_call(
+            server_twiml_options=TwiMLOptions(
+                websocket_url=affinity_url,
+                custom_parameters={"agent_session_id": "CA123"},
+            ),
+        )
+
+        assert f'url="{affinity_url}"' in twiml
+        assert 'url="wss://example.com/ws"' not in twiml  # not the derived URL
+        # conversation_configuration still populated from TACConfig (not clobbered).
+        assert 'conversationConfiguration="conv_configuration_test123"' in twiml
+
+    @pytest.mark.asyncio
+    async def test_app_customizer_beats_server_twiml_options(self) -> None:
+        """Precedence: the application's on_inbound_call_twiml customizer sits
+        ABOVE server_twiml_options — a developer's explicit choice wins over the
+        server's per-call values (for fields the dev sets)."""
+        from tac.channels.voice import VoiceChannelConfig
+        from tac.models.voice import TwiMLRequest
+
+        async def app_customizer(req: TwiMLRequest) -> TwiMLOptions:
+            return TwiMLOptions(welcome_greeting="App wins")
+
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac, config=VoiceChannelConfig())
+        channel.on_inbound_call_twiml(app_customizer)
+
+        twiml = await channel.handle_incoming_call(
+            twiml_request=TwiMLRequest(),
+            server_twiml_options=TwiMLOptions(
+                websocket_url="wss://example.com/ws?agent_session_id=CA1",
+                welcome_greeting="Server loses",
+            ),
+        )
+
+        # Dev's greeting wins the contested field...
+        assert 'welcomeGreeting="App wins"' in twiml
+        assert "Server loses" not in twiml
+        # ...but the server's websocket_url (dev didn't set it) still applies.
+        assert 'url="wss://example.com/ws?agent_session_id=CA1"' in twiml
+
+    @pytest.mark.asyncio
+    async def test_server_twiml_options_beats_default_options(self) -> None:
+        """server_twiml_options sits above default_twiml_options."""
+        from tac.channels.voice import VoiceChannelConfig
+
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(
+            tac,
+            config=VoiceChannelConfig(
+                default_twiml_options=TwiMLOptions(welcome_greeting="Channel default"),
+            ),
+        )
+
+        twiml = await channel.handle_incoming_call(
+            server_twiml_options=TwiMLOptions(welcome_greeting="Server override"),
+        )
+
+        assert 'welcomeGreeting="Server override"' in twiml
+        assert "Channel default" not in twiml
+
 
 class TestStaticTwiMLOptions:
     """VoiceChannelConfig.twiml_options applies to every call without a callback."""

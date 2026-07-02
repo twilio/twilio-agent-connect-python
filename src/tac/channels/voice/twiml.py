@@ -81,7 +81,7 @@ _verify_attrs_in_sync()
 
 
 def generate_twiml(
-    websocket_url: str,
+    websocket_url: str | None = None,
     options: TwiMLOptions | dict[str, Any] | None = None,
 ) -> str:
     """
@@ -92,15 +92,25 @@ def generate_twiml(
     static ``twiml_options`` from ``VoiceChannelConfig``, and any per-call
     customizer output.
 
+    The WebSocket URL may be supplied either as the positional ``websocket_url``
+    argument or as ``options.websocket_url``. The positional argument wins when
+    both are given. This lets a channel-less caller (e.g. an edge server that
+    builds its own per-call URL) pass everything through ``options`` in one
+    object: ``generate_twiml(options=TwiMLOptions(websocket_url=...))``.
+
     Args:
         websocket_url: Public WebSocket URL for ConversationRelay
-            (e.g. ``'wss://example.ngrok.app/ws'``).
+            (e.g. ``'wss://example.ngrok.app/ws'``). Optional if
+            ``options.websocket_url`` is set.
         options: Optional ``TwiMLOptions`` (or dict). See ``TwiMLOptions``
             for supported fields. Newly-added ConversationRelay attributes
             not yet typed on the model can be passed via ``extra``.
 
     Returns:
         TwiML XML string ready to return to Twilio.
+
+    Raises:
+        ValueError: If no WebSocket URL is provided via either source.
 
     Example:
         >>> twiml = generate_twiml(
@@ -115,6 +125,13 @@ def generate_twiml(
         options = TwiMLOptions()
     elif isinstance(options, dict):
         options = TwiMLOptions(**options)
+
+    resolved_websocket_url = websocket_url or options.websocket_url
+    if not resolved_websocket_url:
+        raise ValueError(
+            "generate_twiml requires a WebSocket URL — pass it positionally or "
+            "set options.websocket_url."
+        )
 
     response = VoiceResponse()
 
