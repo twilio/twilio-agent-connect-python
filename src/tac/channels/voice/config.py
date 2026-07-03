@@ -21,7 +21,8 @@ class VoiceChannelConfig(BaseModel):
         1. Output of the customizer registered via
            ``VoiceChannel.on_inbound_call_twiml(...)`` [optional]
         2. ``default_twiml_options``                     [optional]
-        3. TAC defaults
+        3. ``handle_incoming_call(host_twiml_options=...)`` [optional]
+        4. TAC defaults
 
       Outbound calls (``initiate_outbound_conversation``):
         1. ``InitiateVoiceConversationOptions.twiml_options`` [optional]

@@ -173,10 +173,10 @@ class VoiceChannel(BaseChannel):
           1. Output of the customizer registered via
              ``VoiceChannel.on_inbound_call_twiml(...)`` if configured
              and ``twiml_request`` is given. (Application-owned.)
-          2. ``host_twiml_options`` — per-call transport facts supplied by the
+          2. ``VoiceChannelConfig.default_twiml_options`` — per-channel defaults.
+          3. ``host_twiml_options`` — per-call transport facts supplied by the
              host (the code owning the route), e.g. a per-call ``websocket_url``
              with an affinity token.
-          3. ``VoiceChannelConfig.default_twiml_options`` — per-channel defaults.
           4. TAC defaults: a fixed default ``welcome_greeting``,
              ``conversation_configuration`` from ``TACConfig``,
              ``action_url`` resolved via Studio handoff (when
@@ -190,13 +190,22 @@ class VoiceChannel(BaseChannel):
         wholesale when set at a higher-priority layer. ``websocket_url`` falls
         back to the ``TACConfig``-derived URL if unset at every layer.
 
+        The two arguments are complementary, not alternatives — a custom host
+        typically passes both on the same call: ``twiml_request`` carries the
+        inbound call's data (so the application's customizer can run), and
+        ``host_twiml_options`` carries the host's own per-call overrides.
+
         Args:
-            twiml_request: Parsed Twilio webhook fields. Passed to the
-                customizer if one is configured on the channel.
-            host_twiml_options: Per-call TwiML supplied by a custom in-process
-                host (e.g. an affinity-routed deployment injecting a per-call
-                ``websocket_url``), layered above ``default_twiml_options`` and
-                below the application customizer.
+            twiml_request: The incoming Twilio voice webhook, parsed into a
+                framework-neutral form (From, To, CallSid, CallerCountry, …).
+                Supplied by Twilio; forwarded to the ``on_inbound_call_twiml``
+                customizer so the application can produce per-call overrides.
+            host_twiml_options: Per-call TwiML overrides supplied by the *host*
+                (the code owning the route — e.g. a custom server), for
+                transport facts the SDK can't derive, such as a per-call
+                ``websocket_url`` with an affinity token. Layered below
+                ``default_twiml_options`` and the application customizer, so a
+                developer's explicit settings still win.
 
         Returns:
             TwiML XML string for call connection.
@@ -221,7 +230,7 @@ class VoiceChannel(BaseChannel):
         per_call: TwiMLOptions | None,
     ) -> TwiMLOptions:
         """Layer TwiML options, lowest precedence first: TAC defaults →
-        ``default_twiml_options`` → ``host`` (calling host's per-call values) →
+        ``host`` (calling host's per-call values) → ``default_twiml_options`` →
         ``per_call`` (application customizer output for inbound, or
         ``InitiateVoiceConversationOptions.twiml_options`` for outbound).
         """
@@ -230,10 +239,10 @@ class VoiceChannel(BaseChannel):
             conversation_configuration=self.tac.config.conversation_configuration_id,
             action_url=self._resolve_action_url(host, per_call),
         )
-        if self.config.default_twiml_options is not None:
-            self._overlay_fields(merged, self.config.default_twiml_options)
         if host is not None:
             self._overlay_fields(merged, host)
+        if self.config.default_twiml_options is not None:
+            self._overlay_fields(merged, self.config.default_twiml_options)
         if per_call is not None:
             self._overlay_fields(merged, per_call)
         return merged
@@ -267,8 +276,8 @@ class VoiceChannel(BaseChannel):
 
         Precedence (highest to lowest):
           1. application customizer
-          2. ``host`` (calling host's per-call options)
-          3. channel ``default_twiml_options``
+          2. channel ``default_twiml_options``
+          3. ``host`` (calling host's per-call options)
           4. Studio handoff (when ``studio_handoff_flow_sid`` is configured)
           5. Channel default — derived from ``TACConfig.voice_public_domain``
              + ``TACConfig.voice_action_path``.
@@ -287,13 +296,13 @@ class VoiceChannel(BaseChannel):
         """
         if customized is not None and "action_url" in customized.model_fields_set:
             return customized.action_url
-        if host is not None and "action_url" in host.model_fields_set:
-            return host.action_url
         if (
             self.config.default_twiml_options is not None
             and "action_url" in self.config.default_twiml_options.model_fields_set
         ):
             return self.config.default_twiml_options.action_url
+        if host is not None and "action_url" in host.model_fields_set:
+            return host.action_url
         if self.tac.config.studio_handoff_flow_sid:
             return studio_voice_handoff_url(
                 self.tac.config.account_sid,

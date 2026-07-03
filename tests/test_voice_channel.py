@@ -1742,8 +1742,8 @@ class TestHandleIncomingCallMerge:
         assert 'url="wss://example.com/ws?agent_session_id=CA1"' in twiml
 
     @pytest.mark.asyncio
-    async def test_host_twiml_options_beats_default_options(self) -> None:
-        """host_twiml_options sits above default_twiml_options."""
+    async def test_default_options_beats_host_twiml_options(self) -> None:
+        """default_twiml_options sits above host_twiml_options."""
         from tac.channels.voice import VoiceChannelConfig
 
         tac = TAC(get_test_config())
@@ -1758,8 +1758,8 @@ class TestHandleIncomingCallMerge:
             host_twiml_options=TwiMLOptions(welcome_greeting="Host override"),
         )
 
-        assert 'welcomeGreeting="Host override"' in twiml
-        assert "Channel default" not in twiml
+        assert 'welcomeGreeting="Channel default"' in twiml
+        assert "Host override" not in twiml
 
 
 class TestStaticTwiMLOptions:

@@ -201,7 +201,7 @@ class TwiMLOptions(BaseModel):
         "per-call URL — e.g. an affinity-routed host that appends a token to the "
         "upgrade URL, typically via handle_incoming_call's host_twiml_options. Like "
         "every other field, it layers: on_inbound_call_twiml customizer > "
-        "host_twiml_options > default_twiml_options > TAC default.",
+        "default_twiml_options > host_twiml_options > TAC default.",
     )
 
     # Language, TTS, STT
