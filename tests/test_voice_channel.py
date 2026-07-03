@@ -1196,6 +1196,16 @@ class TestVoiceChannel:
         with pytest.raises(ValueError, match="requires a WebSocket URL"):
             generate_twiml(options=TwiMLOptions(welcome_greeting="hi"))
 
+    def test_twiml_options_rejects_empty_websocket_url(self) -> None:
+        """An empty/whitespace websocket_url is a misconfiguration — reject it
+        at the model rather than silently emitting <ConversationRelay url="">."""
+        with pytest.raises(ValueError, match="websocket_url cannot be empty"):
+            TwiMLOptions(websocket_url="")
+        with pytest.raises(ValueError, match="websocket_url cannot be empty"):
+            TwiMLOptions(websocket_url="   ")
+        # None (the default) is fine — falls through to the derived URL.
+        assert TwiMLOptions(websocket_url=None).websocket_url is None
+
     def test_generate_twiml_with_welcome_greeting(self) -> None:
         """Test TwiML generation with welcome greeting."""
         twiml = generate_twiml(

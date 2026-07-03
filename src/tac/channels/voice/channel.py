@@ -206,7 +206,13 @@ class VoiceChannel(BaseChannel):
             customized = await self._on_inbound_call_twiml(twiml_request)
 
         merged = self._build_twiml_options(host_twiml_options, customized)
-        websocket_url = merged.websocket_url or self._resolve_websocket_url("handle_incoming_call")
+        # merged.websocket_url is either a validated non-empty URL (set by some
+        # layer) or None; fall back to the TACConfig-derived URL only when None.
+        websocket_url = (
+            merged.websocket_url
+            if merged.websocket_url is not None
+            else self._resolve_websocket_url("handle_incoming_call")
+        )
         return twiml.generate_twiml(websocket_url, merged)
 
     def _build_twiml_options(
@@ -555,11 +561,12 @@ class VoiceChannel(BaseChannel):
         # ``options.websocket_url`` is the dedicated per-call outbound override
         # and wins over any websocket_url that came through the layered
         # ``twiml_options`` merge; both fall back to the TACConfig-derived URL.
-        websocket_url = (
-            options.websocket_url
-            or merged.websocket_url
-            or self._resolve_websocket_url("initiate_outbound_conversation")
-        )
+        if options.websocket_url is not None:
+            websocket_url = options.websocket_url
+        elif merged.websocket_url is not None:
+            websocket_url = merged.websocket_url
+        else:
+            websocket_url = self._resolve_websocket_url("initiate_outbound_conversation")
 
         try:
             twiml_xml = twiml.generate_twiml(websocket_url, merged)

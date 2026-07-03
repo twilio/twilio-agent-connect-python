@@ -2,7 +2,7 @@
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 # Twilio uses the same four-value enum for several attributes that control
 # what caller input (DTMF, speech, both, neither) triggers a given behavior.
@@ -199,8 +199,9 @@ class TwiMLOptions(BaseModel):
         "attribute). Leave None (the default) to use the URL the channel derives "
         "from TACConfig.voice_public_domain + voice_websocket_path. Set it only for a "
         "per-call URL — e.g. an affinity-routed host that appends a token to the "
-        "upgrade URL — typically from an on_inbound_call_twiml customizer. Like every "
-        "other field, it layers customizer > default_twiml_options > TAC default.",
+        "upgrade URL, typically via handle_incoming_call's host_twiml_options. Like "
+        "every other field, it layers: on_inbound_call_twiml customizer > "
+        "host_twiml_options > default_twiml_options > TAC default.",
     )
 
     # Language, TTS, STT
@@ -327,6 +328,20 @@ class TwiMLOptions(BaseModel):
     )
 
     model_config = {"populate_by_name": True}
+
+    @field_validator("websocket_url")
+    @classmethod
+    def _reject_empty_websocket_url(cls, v: str | None) -> str | None:
+        """Reject an empty/whitespace-only ``websocket_url``. Leave it ``None``
+        (the default) to fall through to the derived URL; an empty string is a
+        misconfiguration that would otherwise emit ``<ConversationRelay url="">``.
+        """
+        if v is not None and not v.strip():
+            raise ValueError(
+                "websocket_url cannot be empty — omit it (None) to use the "
+                "derived URL, or provide a non-empty URL."
+            )
+        return v
 
     @model_validator(mode="after")
     def _reject_extra_shadowing_typed_fields(self) -> "TwiMLOptions":

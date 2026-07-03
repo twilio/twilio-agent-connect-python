@@ -42,10 +42,11 @@ _OPTIONAL_RELAY_ATTRS = (
 )
 
 # Fields on TwiMLOptions that this module handles specially (not via the
-# generic _OPTIONAL_RELAY_ATTRS loop) — the websocket_url (resolved through the
-# layered merge and passed in as the positional ``websocket_url`` arg), the
-# action_url, the <Language> children list, the <Parameter> children dict, and
-# the extra escape hatch.
+# generic _OPTIONAL_RELAY_ATTRS loop) — the websocket_url (emitted as the
+# ``<ConversationRelay url=...>`` attribute, resolved from the positional
+# ``websocket_url`` arg or ``options.websocket_url``), the action_url, the
+# <Language> children list, the <Parameter> children dict, and the extra
+# escape hatch.
 _HANDLED_OUTSIDE_LOOP = {
     "websocket_url",
     "action_url",
@@ -124,7 +125,9 @@ def generate_twiml(
     elif isinstance(options, dict):
         options = TwiMLOptions(**options)
 
-    resolved_websocket_url = websocket_url or options.websocket_url
+    # Positional arg wins when both are set; fall back to options.websocket_url.
+    # (TwiMLOptions rejects an empty websocket_url, so any value here is real.)
+    resolved_websocket_url = websocket_url if websocket_url is not None else options.websocket_url
     if not resolved_websocket_url:
         raise ValueError(
             "generate_twiml requires a WebSocket URL — pass it positionally or "
