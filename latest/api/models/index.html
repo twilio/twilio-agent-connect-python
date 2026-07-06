@@ -1,0 +1,4889 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A Python framework for building agentic applications with Twilio">
+      
+      
+      
+        <link rel="canonical" href="https://twilio.github.io/twilio-agent-connect-python/2.1.0/api/models/">
+      
+      
+        <link rel="prev" href="../intelligence/">
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Models - Twilio Agent Connect (Python)</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="red" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#models" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Twilio Agent Connect (Python)" class="md-header__button md-logo" aria-label="Twilio Agent Connect (Python)" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Twilio Agent Connect (Python)
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Models
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="red" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="red" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/twilio/twilio-agent-connect-python" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    twilio/twilio-agent-connect-python
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Twilio Agent Connect (Python)" class="md-nav__button md-logo" aria-label="Twilio Agent Connect (Python)" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Twilio Agent Connect (Python)
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/twilio/twilio-agent-connect-python" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    twilio/twilio-agent-connect-python
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    API Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../core/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Core
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../channels/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Channels
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../context/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Context
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tools/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tools
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adapters/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Adapters
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../intelligence/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Intelligence
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Models
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Models
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#tac.models" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        models
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="models">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.ActionChannelSettings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ActionChannelSettings
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.ActionParticipantRef" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ActionParticipantRef
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.ActionResponse" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ActionResponse
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.ActionTextContent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ActionTextContent
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.Communication" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Communication
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.CommunicationContent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CommunicationContent
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.CommunicationParticipant" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CommunicationParticipant
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.CommunicationRequest" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CommunicationRequest
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.ConversationRequest" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ConversationRequest
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.ConversationResponse" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ConversationResponse
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.ParticipantAddress" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ParticipantAddress
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.ParticipantRequest" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ParticipantRequest
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.ParticipantResponse" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ParticipantResponse
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.SendMessageActionPayload" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SendMessageActionPayload
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.SendMessageActionRequest" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SendMessageActionRequest
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.HandoffPayload" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        HandoffPayload
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.CommunicationsRange" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CommunicationsRange
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.ExecutionDetails" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ExecutionDetails
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.IntelligenceConfiguration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        IntelligenceConfiguration
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.Operator" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Operator
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.OperatorResultEvent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        OperatorResultEvent
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.Participant" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Participant
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.TriggerDetails" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TriggerDetails
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.Knowledge" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Knowledge
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.KnowledgeBase" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        KnowledgeBase
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.KnowledgeChunkResult" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        KnowledgeChunkResult
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.MemoryCommunication" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MemoryCommunication
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.MemoryCommunicationContent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MemoryCommunicationContent
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.MemoryParticipant" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MemoryParticipant
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.MemoryRetrievalRequest" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MemoryRetrievalRequest
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.MemoryRetrievalResponse" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MemoryRetrievalResponse
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.ObservationInfo" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ObservationInfo
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.ProfileResponse" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ProfileResponse
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.SummaryInfo" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SummaryInfo
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.InitiateChatConversationOptions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        InitiateChatConversationOptions
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.InitiateConversationResult" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        InitiateConversationResult
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.InitiateMessagingConversationOptions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        InitiateMessagingConversationOptions
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.InitiateVoiceConversationOptions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        InitiateVoiceConversationOptions
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.InitiateVoiceConversationResult" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        InitiateVoiceConversationResult
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.PaginationMeta" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PaginationMeta
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.AuthorInfo" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        AuthorInfo
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.ConversationSession" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ConversationSession
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="ConversationSession">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.ConversationSession.build_profile_prompt" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        build_profile_prompt
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="build_profile_prompt">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.ConversationSession.build_profile_prompt--customer-profile" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Customer Profile
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.TACCommunication" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TACCommunication
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.TACCommunicationAuthor" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TACCommunicationAuthor
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.TACCommunicationContent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TACCommunicationContent
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.TACMemoryResponse" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TACMemoryResponse
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="TACMemoryResponse">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.TACMemoryResponse.observations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        observations
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.TACMemoryResponse.summaries" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        summaries
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.TACMemoryResponse.communications" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        communications
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.TACMemoryResponse.has_memory_features" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        has_memory_features
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.TACMemoryResponse.raw_data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        raw_data
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.TACMemoryResponse.build_memory_prompts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        build_memory_prompts
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="build_memory_prompts">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.TACMemoryResponse.build_memory_prompts--key-observations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Key Observations
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.TACMemoryResponse.build_memory_prompts--past-conversation-summaries" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Past Conversation Summaries
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.TwiMLOptions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TwiMLOptions
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#tac.models" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        models
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="models">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.ActionChannelSettings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ActionChannelSettings
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.ActionParticipantRef" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ActionParticipantRef
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.ActionResponse" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ActionResponse
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.ActionTextContent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ActionTextContent
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.Communication" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Communication
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.CommunicationContent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CommunicationContent
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.CommunicationParticipant" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CommunicationParticipant
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.CommunicationRequest" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CommunicationRequest
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.ConversationRequest" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ConversationRequest
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.ConversationResponse" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ConversationResponse
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.ParticipantAddress" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ParticipantAddress
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.ParticipantRequest" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ParticipantRequest
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.ParticipantResponse" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ParticipantResponse
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.SendMessageActionPayload" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SendMessageActionPayload
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.SendMessageActionRequest" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SendMessageActionRequest
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.HandoffPayload" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        HandoffPayload
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.CommunicationsRange" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CommunicationsRange
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.ExecutionDetails" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ExecutionDetails
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.IntelligenceConfiguration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        IntelligenceConfiguration
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.Operator" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Operator
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.OperatorResultEvent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        OperatorResultEvent
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.Participant" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Participant
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.TriggerDetails" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TriggerDetails
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.Knowledge" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Knowledge
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.KnowledgeBase" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        KnowledgeBase
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.KnowledgeChunkResult" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        KnowledgeChunkResult
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.MemoryCommunication" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MemoryCommunication
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.MemoryCommunicationContent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MemoryCommunicationContent
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.MemoryParticipant" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MemoryParticipant
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.MemoryRetrievalRequest" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MemoryRetrievalRequest
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.MemoryRetrievalResponse" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MemoryRetrievalResponse
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.ObservationInfo" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ObservationInfo
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.ProfileResponse" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ProfileResponse
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.SummaryInfo" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SummaryInfo
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.InitiateChatConversationOptions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        InitiateChatConversationOptions
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.InitiateConversationResult" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        InitiateConversationResult
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.InitiateMessagingConversationOptions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        InitiateMessagingConversationOptions
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.InitiateVoiceConversationOptions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        InitiateVoiceConversationOptions
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.InitiateVoiceConversationResult" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        InitiateVoiceConversationResult
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.PaginationMeta" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PaginationMeta
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.AuthorInfo" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        AuthorInfo
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.ConversationSession" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ConversationSession
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="ConversationSession">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.ConversationSession.build_profile_prompt" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        build_profile_prompt
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="build_profile_prompt">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.ConversationSession.build_profile_prompt--customer-profile" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Customer Profile
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.TACCommunication" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TACCommunication
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.TACCommunicationAuthor" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TACCommunicationAuthor
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.TACCommunicationContent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TACCommunicationContent
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.TACMemoryResponse" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TACMemoryResponse
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="TACMemoryResponse">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.TACMemoryResponse.observations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        observations
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.TACMemoryResponse.summaries" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        summaries
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.TACMemoryResponse.communications" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        communications
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.TACMemoryResponse.has_memory_features" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        has_memory_features
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.TACMemoryResponse.raw_data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        raw_data
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.TACMemoryResponse.build_memory_prompts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        build_memory_prompts
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="build_memory_prompts">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.TACMemoryResponse.build_memory_prompts--key-observations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Key Observations
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.TACMemoryResponse.build_memory_prompts--past-conversation-summaries" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Past Conversation Summaries
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.models.TwiMLOptions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TwiMLOptions
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="models">Models<a class="headerlink" href="#models" title="Permanent link">&para;</a></h1>
+
+
+<div class="doc doc-object doc-module">
+
+
+
+<h2 id="tac.models" class="doc doc-heading">
+            <span class="doc doc-object-name doc-module-name">tac.models</span>
+
+
+<a href="#tac.models" class="headerlink" title="Permanent link">&para;</a></h2>
+
+    <div class="doc doc-contents first">
+
+        <p>Shared models for the Twilio Agent Connect.</p>
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="tac.models.ActionChannelSettings" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">ActionChannelSettings</span>
+
+
+<a href="#tac.models.ActionChannelSettings" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="pydantic.BaseModel">BaseModel</span></code></p>
+
+
+
+        <p>Channel-specific settings forwarded to the downstream backend.</p>
+<p>Open pass-through: any field not explicitly modeled here (e.g.
+<code>messagingServiceSid</code>, <code>statusCallback</code>, <code>Attributes</code>) can be set by callers and
+will be forwarded as-is.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="tac.models.ActionParticipantRef" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">ActionParticipantRef</span>
+
+
+<a href="#tac.models.ActionParticipantRef" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="pydantic.BaseModel">BaseModel</span></code></p>
+
+
+
+        <p>Participant reference for the Actions API (<code>from</code>/<code>to</code> entries).</p>
+<p>Either <code>participant_id</code> or <code>address</code> must be supplied; <code>channel</code> is always required.
+When both are provided, Conversation Orchestrator uses <code>participant_id</code> and
+<code>channel</code> disambiguates
+which of the participant's addresses to use.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="tac.models.ActionResponse" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">ActionResponse</span>
+
+
+<a href="#tac.models.ActionResponse" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="pydantic.BaseModel">BaseModel</span></code></p>
+
+
+
+        <p>Response from POST /v2/Conversations/{id}/Actions (202 Accepted).</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="tac.models.ActionTextContent" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">ActionTextContent</span>
+
+
+<a href="#tac.models.ActionTextContent" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="pydantic.BaseModel">BaseModel</span></code></p>
+
+
+
+        <p>Plain-text content for a SEND_MESSAGE action.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="tac.models.Communication" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">Communication</span>
+
+
+<a href="#tac.models.Communication" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="pydantic.BaseModel">BaseModel</span></code></p>
+
+
+
+        <p>A communication representing a message exchanged in a conversation.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="tac.models.CommunicationContent" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">CommunicationContent</span>
+
+
+<a href="#tac.models.CommunicationContent" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="pydantic.BaseModel">BaseModel</span></code></p>
+
+
+
+        <p>Content of a communication (ContentText or ContentTranscription).</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="tac.models.CommunicationParticipant" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">CommunicationParticipant</span>
+
+
+<a href="#tac.models.CommunicationParticipant" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="pydantic.BaseModel">BaseModel</span></code></p>
+
+
+
+        <p>Author or recipient in a communication.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="tac.models.CommunicationRequest" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">CommunicationRequest</span>
+
+
+<a href="#tac.models.CommunicationRequest" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="pydantic.BaseModel">BaseModel</span></code></p>
+
+
+
+        <p>Request payload for adding a communication.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="tac.models.ConversationRequest" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">ConversationRequest</span>
+
+
+<a href="#tac.models.ConversationRequest" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="pydantic.BaseModel">BaseModel</span></code></p>
+
+
+
+        <p>Request payload for creating a conversation.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="tac.models.ConversationResponse" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">ConversationResponse</span>
+
+
+<a href="#tac.models.ConversationResponse" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="pydantic.BaseModel">BaseModel</span></code></p>
+
+
+
+        <p>Response from creating a conversation.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="tac.models.ParticipantAddress" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">ParticipantAddress</span>
+
+
+<a href="#tac.models.ParticipantAddress" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="pydantic.BaseModel">BaseModel</span></code></p>
+
+
+
+        <p>Communication address for a conversation participant.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="tac.models.ParticipantRequest" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">ParticipantRequest</span>
+
+
+<a href="#tac.models.ParticipantRequest" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="pydantic.BaseModel">BaseModel</span></code></p>
+
+
+
+        <p>Request payload for creating a conversation participant.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="tac.models.ParticipantResponse" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">ParticipantResponse</span>
+
+
+<a href="#tac.models.ParticipantResponse" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="pydantic.BaseModel">BaseModel</span></code></p>
+
+
+
+        <p>Response from creating a participant.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="tac.models.SendMessageActionPayload" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">SendMessageActionPayload</span>
+
+
+<a href="#tac.models.SendMessageActionPayload" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="pydantic.BaseModel">BaseModel</span></code></p>
+
+
+
+        <p>Inner payload for a SEND_MESSAGE action.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="tac.models.SendMessageActionRequest" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">SendMessageActionRequest</span>
+
+
+<a href="#tac.models.SendMessageActionRequest" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="pydantic.BaseModel">BaseModel</span></code></p>
+
+
+
+        <p>Request for POST /v2/Conversations/{id}/Actions with type=SEND_MESSAGE.</p>
+<p>Body is discriminated by <code>type</code> with the action-specific fields under <code>payload</code>.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="tac.models.HandoffPayload" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">HandoffPayload</span>
+
+
+<a href="#tac.models.HandoffPayload" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="pydantic.BaseModel">BaseModel</span></code></p>
+
+
+
+        <p>Structured payload generated during a handoff.</p>
+<p>Contains conversation context and developer-defined attributes
+for routing to the target system (e.g., Flex TaskRouter).</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="tac.models.CommunicationsRange" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">CommunicationsRange</span>
+
+
+<a href="#tac.models.CommunicationsRange" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="pydantic.BaseModel">BaseModel</span></code></p>
+
+
+
+        <p>Range of communications used in the operator execution.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="tac.models.ExecutionDetails" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">ExecutionDetails</span>
+
+
+<a href="#tac.models.ExecutionDetails" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="pydantic.BaseModel">BaseModel</span></code></p>
+
+
+
+        <p>Execution context details for the operator result.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="tac.models.IntelligenceConfiguration" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">IntelligenceConfiguration</span>
+
+
+<a href="#tac.models.IntelligenceConfiguration" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="pydantic.BaseModel">BaseModel</span></code></p>
+
+
+
+        <p>Intelligence configuration details from the CI service.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="tac.models.Operator" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">Operator</span>
+
+
+<a href="#tac.models.Operator" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="pydantic.BaseModel">BaseModel</span></code></p>
+
+
+
+        <p>Operator details from the CI service.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="tac.models.OperatorResultEvent" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">OperatorResultEvent</span>
+
+
+<a href="#tac.models.OperatorResultEvent" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="pydantic.BaseModel">BaseModel</span></code></p>
+
+
+
+        <p>Operator result event from Conversation Intelligence webhook.</p>
+<p>This model represents the webhook payload received from the CI service.
+It contains metadata about the conversation and an array of operator results.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="tac.models.Participant" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">Participant</span>
+
+
+<a href="#tac.models.Participant" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="pydantic.BaseModel">BaseModel</span></code></p>
+
+
+
+        <p>Participant in a conversation.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="tac.models.TriggerDetails" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">TriggerDetails</span>
+
+
+<a href="#tac.models.TriggerDetails" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="pydantic.BaseModel">BaseModel</span></code></p>
+
+
+
+        <p>Trigger details for the operator execution.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="tac.models.Knowledge" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">Knowledge</span>
+
+
+<a href="#tac.models.Knowledge" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="pydantic.BaseModel">BaseModel</span></code></p>
+
+
+
+        <p>Represents a Twilio Knowledge resource.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="tac.models.KnowledgeBase" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">KnowledgeBase</span>
+
+
+<a href="#tac.models.KnowledgeBase" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="pydantic.BaseModel">BaseModel</span></code></p>
+
+
+
+        <p>Represents a Twilio Knowledge Base resource.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="tac.models.KnowledgeChunkResult" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">KnowledgeChunkResult</span>
+
+
+<a href="#tac.models.KnowledgeChunkResult" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="pydantic.BaseModel">BaseModel</span></code></p>
+
+
+
+        <p>Represents a search result chunk from knowledge base search.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="tac.models.MemoryCommunication" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">MemoryCommunication</span>
+
+
+<a href="#tac.models.MemoryCommunication" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="pydantic.BaseModel">BaseModel</span></code></p>
+
+
+
+        <p>A communication from Memory API (historical conversation data).</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="tac.models.MemoryCommunicationContent" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">MemoryCommunicationContent</span>
+
+
+<a href="#tac.models.MemoryCommunicationContent" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="pydantic.BaseModel">BaseModel</span></code></p>
+
+
+
+        <p>Content of a Memory communication.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="tac.models.MemoryParticipant" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">MemoryParticipant</span>
+
+
+<a href="#tac.models.MemoryParticipant" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="pydantic.BaseModel">BaseModel</span></code></p>
+
+
+
+        <p>Participant in a Memory communication (author or recipient).</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="tac.models.MemoryRetrievalRequest" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">MemoryRetrievalRequest</span>
+
+
+<a href="#tac.models.MemoryRetrievalRequest" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="pydantic.BaseModel">BaseModel</span></code></p>
+
+
+
+        <p>Request payload for retrieving conversation memories.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="tac.models.MemoryRetrievalResponse" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">MemoryRetrievalResponse</span>
+
+
+<a href="#tac.models.MemoryRetrievalResponse" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="pydantic.BaseModel">BaseModel</span></code></p>
+
+
+
+        <p>Response from the Memory API /Recall endpoint.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="tac.models.ObservationInfo" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">ObservationInfo</span>
+
+
+<a href="#tac.models.ObservationInfo" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="pydantic.BaseModel">BaseModel</span></code></p>
+
+
+
+        <p>An observation memory from the API response.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="tac.models.ProfileResponse" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">ProfileResponse</span>
+
+
+<a href="#tac.models.ProfileResponse" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="pydantic.BaseModel">BaseModel</span></code></p>
+
+
+
+        <p>Response from the profile retrieval API.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="tac.models.SummaryInfo" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">SummaryInfo</span>
+
+
+<a href="#tac.models.SummaryInfo" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="pydantic.BaseModel">BaseModel</span></code></p>
+
+
+
+        <p>A summary memory derived from observations at the end of conversations.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="tac.models.InitiateChatConversationOptions" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">InitiateChatConversationOptions</span>
+
+
+<a href="#tac.models.InitiateChatConversationOptions" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><a class="autorefs autorefs-internal" title="InitiateMessagingConversationOptions (tac.models.outbound.InitiateMessagingConversationOptions)" href="#tac.models.InitiateMessagingConversationOptions">InitiateMessagingConversationOptions</a></code></p>
+
+
+
+        <p>Options for initiating an outbound Chat conversation.</p>
+<p>Extends InitiateMessagingConversationOptions with a required channel_id
+(Conversations v1 Channel SID) for Chat delivery.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="tac.models.InitiateConversationResult" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">InitiateConversationResult</span>
+
+
+<a href="#tac.models.InitiateConversationResult" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="pydantic.BaseModel">BaseModel</span></code></p>
+
+
+
+        <p>Result of initiating an outbound messaging conversation.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="tac.models.InitiateMessagingConversationOptions" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">InitiateMessagingConversationOptions</span>
+
+
+<a href="#tac.models.InitiateMessagingConversationOptions" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="pydantic.BaseModel">BaseModel</span></code></p>
+
+
+
+        <p>Shared options for initiating an outbound messaging conversation.</p>
+<p>This base model is used for messaging-style outbound conversations,
+including SMS, RCS, WhatsApp, and Chat. Each channel may extend this with
+channel-specific requirements (e.g., Chat requires channel_id).</p>
+<p>The sender is always TAC's configured address (<code>config.phone_number</code>
+for SMS, <code>config.rcs_sender_id</code> for RCS, <code>config.whatsapp_number</code>
+for WhatsApp, <code>ChatChannelConfig.agent_address</code> for Chat).
+Multi-sender deployments should use one TAC instance per sender so
+inbound webhook routing, memory scoping, and configuration stay in sync.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="tac.models.InitiateVoiceConversationOptions" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">InitiateVoiceConversationOptions</span>
+
+
+<a href="#tac.models.InitiateVoiceConversationOptions" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="pydantic.BaseModel">BaseModel</span></code></p>
+
+
+
+        <p>Options for initiating an outbound voice conversation.</p>
+<p>The caller identity is always TAC's configured <code>config.phone_number</code>.
+Multi-number deployments should use one TAC instance per line.</p>
+<p>TwiML for the outbound call is built by merging per-field, highest
+precedence first:
+  1. This call's <code>twiml_options</code> (per-call overrides)
+  2. <code>VoiceChannelConfig.default_twiml_options</code> (channel-wide defaults)
+  3. TAC defaults (welcome greeting, conversation_configuration,
+     action_url resolved via Studio handoff if configured)</p>
+<p>Fields you don't set at a layer fall through to lower layers — so
+<code>twiml_options=TwiMLOptions(voice="es-MX-Neural2-A")</code> on this call
+overrides only <code>voice</code>; <code>language</code>, <code>interruptible</code>, etc. from the
+channel config still apply.</p>
+<p>Set <code>voice</code>, <code>language</code>, <code>interruptible</code>, etc. on the channel's
+<code>VoiceChannelConfig.default_twiml_options</code> to apply them to every call
+(both inbound and outbound). Use this model's <code>twiml_options</code> for
+per-call overrides (e.g. campaign-specific <code>custom_parameters</code>).</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="tac.models.InitiateVoiceConversationResult" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">InitiateVoiceConversationResult</span>
+
+
+<a href="#tac.models.InitiateVoiceConversationResult" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="pydantic.BaseModel">BaseModel</span></code></p>
+
+
+
+        <p>Result of initiating an outbound voice conversation.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="tac.models.PaginationMeta" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">PaginationMeta</span>
+
+
+<a href="#tac.models.PaginationMeta" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="pydantic.BaseModel">BaseModel</span></code></p>
+
+
+
+        <p>Pagination metadata for API list responses.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="tac.models.AuthorInfo" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">AuthorInfo</span>
+
+
+<a href="#tac.models.AuthorInfo" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="pydantic.BaseModel">BaseModel</span></code></p>
+
+
+
+        <p>Information about the author of a communication.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="tac.models.ConversationSession" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">ConversationSession</span>
+
+
+<a href="#tac.models.ConversationSession" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="pydantic.BaseModel">BaseModel</span></code></p>
+
+
+
+        <p>Context information for a conversation session that's passed to callbacks.</p>
+<p>This provides the necessary context for developers to handle memory-ready
+events and send responses back through the appropriate channel.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="tac.models.ConversationSession.build_profile_prompt" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">build_profile_prompt</span>
+
+
+<a href="#tac.models.ConversationSession.build_profile_prompt" class="headerlink" title="Permanent link">&para;</a></h4>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">build_profile_prompt</span><span class="p">(</span>
+    <span class="n">trait_groups</span><span class="p">:</span> <span class="n"><span title="list">list</span></span><span class="p">[</span><span class="n"><span title="str">str</span></span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n"><span title="str">str</span></span> <span class="o">|</span> <span class="kc">None</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Build customer profile prompt section for LLM context.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>trait_groups</code>
+            </td>
+            <td>
+                  <code><span title="list">list</span>[<span title="str">str</span>] | None</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Optional list of trait group names to include.
+         If None, no filtering is applied.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="str">str</span> | None</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>LLM prompt section with profile data, or None if no profile data</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="str">str</span> | None</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>is available or no traits match the filter.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<details class="example" open>
+  <summary>Example</summary>
+  <blockquote>
+<blockquote>
+<blockquote>
+<p>section = context.build_profile_prompt(["Contact", "Preferences"])
+print(section)</p>
+</blockquote>
+</blockquote>
+</blockquote>
+<h6 id="tac.models.ConversationSession.build_profile_prompt--customer-profile">Customer Profile<a class="headerlink" href="#tac.models.ConversationSession.build_profile_prompt--customer-profile" title="Permanent link">&para;</a></h6>
+<p>Information about this customer:
+- Contact: {"name": "John Doe", "email": "john@example.com"}
+- Preferences: {"language": "en", "timezone": "PST"}</p>
+</details>
+
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="tac.models.TACCommunication" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">TACCommunication</span>
+
+
+<a href="#tac.models.TACCommunication" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="pydantic.BaseModel">BaseModel</span></code></p>
+
+
+
+        <p>Unified communication model with all fields from both Memory and Conversation Orchestrator APIs.</p>
+<p>Provides complete access to all communication fields regardless of the source.
+Fields not available from a particular API will be None.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="tac.models.TACCommunicationAuthor" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">TACCommunicationAuthor</span>
+
+
+<a href="#tac.models.TACCommunicationAuthor" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="pydantic.BaseModel">BaseModel</span></code></p>
+
+
+
+        <p>Unified author model with all fields from both Memory and Conversation Orchestrator APIs.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="tac.models.TACCommunicationContent" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">TACCommunicationContent</span>
+
+
+<a href="#tac.models.TACCommunicationContent" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="pydantic.BaseModel">BaseModel</span></code></p>
+
+
+
+        <p>Unified content model with all fields from both Memory and Conversation Orchestrator APIs.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="tac.models.TACMemoryResponse" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">TACMemoryResponse</span>
+
+
+<a href="#tac.models.TACMemoryResponse" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">TACMemoryResponse</span><span class="p">(</span>
+    <span class="n">data</span><span class="p">:</span> <span class="n"><a class="autorefs autorefs-internal" title="MemoryRetrievalResponse (tac.models.memory.MemoryRetrievalResponse)" href="#tac.models.MemoryRetrievalResponse">MemoryRetrievalResponse</a></span> <span class="o">|</span> <span class="n"><span title="list">list</span></span><span class="p">[</span><span class="n"><a class="autorefs autorefs-internal" title="Communication (tac.models.conversation.Communication)" href="#tac.models.Communication">Communication</a></span><span class="p">],</span>
+<span class="p">)</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+
+
+        <p>Unified response wrapper for TAC.retrieve_memory().</p>
+<p>Provides a consistent interface for accessing memory data regardless of whether
+Memory API is configured or falling back to Conversation Orchestrator Communications API.</p>
+<p>Memory configured:
+- observations, summaries, communications all populated
+- communications include Memory-specific fields (author id, name, type, profile_id)</p>
+<p>Conversation Orchestrator fallback:
+- observations and summaries are empty lists
+- communications include Conversation Orchestrator-specific fields
+  (conversation_id, account_id, etc.)</p>
+
+        <p>Initialize wrapper with either Memory or Conversation Orchestrator data.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>data</code>
+            </td>
+            <td>
+                  <code><a class="autorefs autorefs-internal" title="MemoryRetrievalResponse (tac.models.memory.MemoryRetrievalResponse)" href="#tac.models.MemoryRetrievalResponse">MemoryRetrievalResponse</a> | <span title="list">list</span>[<a class="autorefs autorefs-internal" title="Communication (tac.models.conversation.Communication)" href="#tac.models.Communication">Communication</a>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Either MemoryRetrievalResponse (Memory) or
+list[Communication] (Conversation Orchestrator)</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h4 id="tac.models.TACMemoryResponse.observations" class="doc doc-heading">
+            <span class="doc doc-object-name doc-attribute-name">observations</span>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+  </span>
+
+<a href="#tac.models.TACMemoryResponse.observations" class="headerlink" title="Permanent link">&para;</a></h4>
+<div class="doc-signature highlight"><pre><span></span><code><span class="n">observations</span><span class="p">:</span> <span class="n"><span title="list">list</span></span><span class="p">[</span><span class="n"><a class="autorefs autorefs-internal" title="ObservationInfo (tac.models.memory.ObservationInfo)" href="#tac.models.ObservationInfo">ObservationInfo</a></span><span class="p">]</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Get observation memories.</p>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="list">list</span>[<a class="autorefs autorefs-internal" title="ObservationInfo (tac.models.memory.ObservationInfo)" href="#tac.models.ObservationInfo">ObservationInfo</a>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>List of observations if Memory is configured,</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="list">list</span>[<a class="autorefs autorefs-internal" title="ObservationInfo (tac.models.memory.ObservationInfo)" href="#tac.models.ObservationInfo">ObservationInfo</a>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>empty list for Conversation Orchestrator fallback</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h4 id="tac.models.TACMemoryResponse.summaries" class="doc doc-heading">
+            <span class="doc doc-object-name doc-attribute-name">summaries</span>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+  </span>
+
+<a href="#tac.models.TACMemoryResponse.summaries" class="headerlink" title="Permanent link">&para;</a></h4>
+<div class="doc-signature highlight"><pre><span></span><code><span class="n">summaries</span><span class="p">:</span> <span class="n"><span title="list">list</span></span><span class="p">[</span><span class="n"><a class="autorefs autorefs-internal" title="SummaryInfo (tac.models.memory.SummaryInfo)" href="#tac.models.SummaryInfo">SummaryInfo</a></span><span class="p">]</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Get summary memories.</p>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="list">list</span>[<a class="autorefs autorefs-internal" title="SummaryInfo (tac.models.memory.SummaryInfo)" href="#tac.models.SummaryInfo">SummaryInfo</a>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>List of summaries if Memory is configured,</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="list">list</span>[<a class="autorefs autorefs-internal" title="SummaryInfo (tac.models.memory.SummaryInfo)" href="#tac.models.SummaryInfo">SummaryInfo</a>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>empty list for Conversation Orchestrator fallback</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h4 id="tac.models.TACMemoryResponse.communications" class="doc doc-heading">
+            <span class="doc doc-object-name doc-attribute-name">communications</span>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+  </span>
+
+<a href="#tac.models.TACMemoryResponse.communications" class="headerlink" title="Permanent link">&para;</a></h4>
+<div class="doc-signature highlight"><pre><span></span><code><span class="n">communications</span><span class="p">:</span> <span class="n"><span title="list">list</span></span><span class="p">[</span><span class="n"><a class="autorefs autorefs-internal" title="TACCommunication (tac.models.tac.TACCommunication)" href="#tac.models.TACCommunication">TACCommunication</a></span><span class="p">]</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Get communications in unified format with all available fields.</p>
+<p>Communications are converted to a common format during initialization that includes
+all fields from both Memory and Conversation Orchestrator APIs.
+Fields not available from a particular
+API will be None.</p>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="list">list</span>[<a class="autorefs autorefs-internal" title="TACCommunication (tac.models.tac.TACCommunication)" href="#tac.models.TACCommunication">TACCommunication</a>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>List of unified communications with all available fields</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h4 id="tac.models.TACMemoryResponse.has_memory_features" class="doc doc-heading">
+            <span class="doc doc-object-name doc-attribute-name">has_memory_features</span>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+  </span>
+
+<a href="#tac.models.TACMemoryResponse.has_memory_features" class="headerlink" title="Permanent link">&para;</a></h4>
+<div class="doc-signature highlight"><pre><span></span><code><span class="n">has_memory_features</span><span class="p">:</span> <span class="n"><span title="bool">bool</span></span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Check if Memory API is configured and providing full features.</p>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="bool">bool</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>True if Memory is configured (observations/summaries available),</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="bool">bool</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>False if using Conversation Orchestrator fallback (only communications available)</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h4 id="tac.models.TACMemoryResponse.raw_data" class="doc doc-heading">
+            <span class="doc doc-object-name doc-attribute-name">raw_data</span>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+  </span>
+
+<a href="#tac.models.TACMemoryResponse.raw_data" class="headerlink" title="Permanent link">&para;</a></h4>
+<div class="doc-signature highlight"><pre><span></span><code><span class="n">raw_data</span><span class="p">:</span> <span class="n"><a class="autorefs autorefs-internal" title="MemoryRetrievalResponse (tac.models.memory.MemoryRetrievalResponse)" href="#tac.models.MemoryRetrievalResponse">MemoryRetrievalResponse</a></span> <span class="o">|</span> <span class="n"><span title="list">list</span></span><span class="p">[</span><span class="n"><a class="autorefs autorefs-internal" title="Communication (tac.models.conversation.Communication)" href="#tac.models.Communication">Communication</a></span><span class="p">]</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Access raw underlying data for advanced use cases.</p>
+<p>Use this when you need access to all fields from the original API responses,
+not just the simplified common fields.</p>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><a class="autorefs autorefs-internal" title="MemoryRetrievalResponse (tac.models.memory.MemoryRetrievalResponse)" href="#tac.models.MemoryRetrievalResponse">MemoryRetrievalResponse</a> | <span title="list">list</span>[<a class="autorefs autorefs-internal" title="Communication (tac.models.conversation.Communication)" href="#tac.models.Communication">Communication</a>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Either MemoryRetrievalResponse or list[Communication] depending on configuration</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+    </div>
+
+</div>
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="tac.models.TACMemoryResponse.build_memory_prompts" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">build_memory_prompts</span>
+
+
+<a href="#tac.models.TACMemoryResponse.build_memory_prompts" class="headerlink" title="Permanent link">&para;</a></h4>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">build_memory_prompts</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n"><span title="list">list</span></span><span class="p">[</span><span class="n"><span title="str">str</span></span><span class="p">]</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Build all memory prompt sections (observations, summaries, communications) for LLM context.</p>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="list">list</span>[<span title="str">str</span>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>List of LLM prompt sections. Each element is a complete section</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="list">list</span>[<span title="str">str</span>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>(e.g., observations section, summaries section). Returns empty list</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="list">list</span>[<span title="str">str</span>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>if no memory data is available.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<details class="example" open>
+  <summary>Example</summary>
+  <blockquote>
+<blockquote>
+<blockquote>
+<p>sections = memory_response.build_memory_prompts()
+for section in sections:
+...     print(section)
+...     print()</p>
+</blockquote>
+</blockquote>
+</blockquote>
+<h6 id="tac.models.TACMemoryResponse.build_memory_prompts--key-observations">Key Observations<a class="headerlink" href="#tac.models.TACMemoryResponse.build_memory_prompts--key-observations" title="Permanent link">&para;</a></h6>
+<p>Important notes about the customer from previous interactions:
+- Customer prefers email communication
+- Previously reported billing issue (resolved)</p>
+<h6 id="tac.models.TACMemoryResponse.build_memory_prompts--past-conversation-summaries">Past Conversation Summaries<a class="headerlink" href="#tac.models.TACMemoryResponse.build_memory_prompts--past-conversation-summaries" title="Permanent link">&para;</a></h6>
+<p>Summaries of previous conversations with this customer:
+- Discussed product features and pricing on 2024-01-15</p>
+</details>
+
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="tac.models.TwiMLOptions" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">TwiMLOptions</span>
+
+
+<a href="#tac.models.TwiMLOptions" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="pydantic.BaseModel">BaseModel</span></code></p>
+
+
+
+        <p>Options for the TwiML inside <code>&lt;ConversationRelay&gt;</code> (plus the
+<code>&lt;Connect action&gt;</code> URL).</p>
+<p>Fields map to the attributes documented at
+https://www.twilio.com/docs/voice/twiml/connect/conversationrelay .
+All fields are optional. <code>VoiceChannel.handle_incoming_call</code> merges these
+values over TAC defaults using Pydantic's <code>model_fields_set</code> — only
+fields explicitly set by the caller override TAC's defaults.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Copyright &copy; Twilio
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "navigation.top", "navigation.instant", "content.code.copy", "toc.follow"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"alias": true, "provider": "mike"}}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>
