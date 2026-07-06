@@ -1,4 +1,4 @@
-.PHONY: help install test lint format type-check pre-commit clean build server quickstart sync dev-setup ci check install-pre-commit
+.PHONY: help install test lint format type-check pre-commit clean build server quickstart sync dev-setup ci check install-pre-commit docs docs-serve docs-versions
 
 # Include local overrides if present (not tracked in git)
 -include Makefile.local
@@ -49,6 +49,15 @@ build: ## Build the package
 
 setup: ## Start the Twilio setup wizard on port 8080
 	uv run --with fastapi --with uvicorn python getting_started/twilio_setup/server.py
+
+docs: ## Build the API documentation into site/
+	uv run --group docs mkdocs build
+
+docs-serve: ## Serve the docs locally with live reload at http://127.0.0.1:8000
+	uv run --group docs mkdocs serve
+
+docs-versions: ## List the versioned docs published to the gh-pages branch
+	uv run --group docs mike list
 
 dev-setup: sync install-pre-commit ## Complete development environment setup
 

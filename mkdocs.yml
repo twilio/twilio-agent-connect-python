@@ -1,0 +1,70 @@
+site_name: Twilio Agent Connect (Python)
+site_description: A Python framework for building agentic applications with Twilio
+site_url: https://twilio.github.io/twilio-agent-connect-python/
+repo_url: https://github.com/twilio/twilio-agent-connect-python
+repo_name: twilio/twilio-agent-connect-python
+copyright: Copyright &copy; Twilio
+
+extra:
+  version:
+    provider: mike
+    alias: true
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.top
+    - navigation.instant
+    - content.code.copy
+    - toc.follow
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: red
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: red
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+plugins:
+  - search
+  - mkdocstrings:
+      default_handler: python
+      handlers:
+        python:
+          paths: [src]
+          options:
+            docstring_style: google
+            show_source: false
+            show_root_heading: true
+            show_if_no_docstring: false
+            members_order: source
+            separate_signature: true
+            show_signature_annotations: true
+            signature_crossrefs: true
+            merge_init_into_class: true
+            filters: ["!^_"]
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - API Reference:
+      - Core: api/core.md
+      - Channels: api/channels.md
+      - Context: api/context.md
+      - Tools: api/tools.md
+      - Adapters: api/adapters.md
+      - Intelligence: api/intelligence.md
+      - Models: api/models.md
