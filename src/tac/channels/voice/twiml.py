@@ -42,9 +42,13 @@ _OPTIONAL_RELAY_ATTRS = (
 )
 
 # Fields on TwiMLOptions that this module handles specially (not via the
-# generic _OPTIONAL_RELAY_ATTRS loop) — the action_url, the <Language>
-# children list, the <Parameter> children dict, and the extra escape hatch.
+# generic _OPTIONAL_RELAY_ATTRS loop) — the websocket_url (emitted as the
+# ``<ConversationRelay url=...>`` attribute, resolved from the positional
+# ``websocket_url`` arg or ``options.websocket_url``), the action_url, the
+# <Language> children list, the <Parameter> children dict, and the extra
+# escape hatch.
 _HANDLED_OUTSIDE_LOOP = {
+    "websocket_url",
     "action_url",
     "languages",
     "custom_parameters",
@@ -78,7 +82,7 @@ _verify_attrs_in_sync()
 
 
 def generate_twiml(
-    websocket_url: str,
+    websocket_url: str | None = None,
     options: TwiMLOptions | dict[str, Any] | None = None,
 ) -> str:
     """
@@ -89,15 +93,23 @@ def generate_twiml(
     static ``twiml_options`` from ``VoiceChannelConfig``, and any per-call
     customizer output.
 
+    The WebSocket URL may be passed positionally or as ``options.websocket_url``
+    (positional wins when both are given), so a caller can pass everything in one
+    object: ``generate_twiml(options=TwiMLOptions(websocket_url=...))``.
+
     Args:
         websocket_url: Public WebSocket URL for ConversationRelay
-            (e.g. ``'wss://example.ngrok.app/ws'``).
+            (e.g. ``'wss://example.ngrok.app/ws'``). Optional if
+            ``options.websocket_url`` is set.
         options: Optional ``TwiMLOptions`` (or dict). See ``TwiMLOptions``
             for supported fields. Newly-added ConversationRelay attributes
             not yet typed on the model can be passed via ``extra``.
 
     Returns:
         TwiML XML string ready to return to Twilio.
+
+    Raises:
+        ValueError: If no WebSocket URL is provided via either source.
 
     Example:
         >>> twiml = generate_twiml(
@@ -113,6 +125,15 @@ def generate_twiml(
     elif isinstance(options, dict):
         options = TwiMLOptions(**options)
 
+    # Positional arg wins when both are set; fall back to options.websocket_url.
+    # (TwiMLOptions rejects an empty websocket_url, so any value here is real.)
+    resolved_websocket_url = websocket_url if websocket_url is not None else options.websocket_url
+    if not resolved_websocket_url:
+        raise ValueError(
+            "generate_twiml requires a WebSocket URL — pass it positionally or "
+            "set options.websocket_url."
+        )
+
     response = VoiceResponse()
 
     # Create Connect verb with optional action
@@ -123,7 +144,7 @@ def generate_twiml(
 
     # Build ConversationRelay kwargs. The twilio SDK converts snake_case to
     # camelCase automatically, and serializes bool/str as TwiML attribute values.
-    relay_kwargs: dict[str, Any] = {"url": websocket_url}
+    relay_kwargs: dict[str, Any] = {"url": resolved_websocket_url}
     for attr in _OPTIONAL_RELAY_ATTRS:
         value = getattr(options, attr)
         if value is None:

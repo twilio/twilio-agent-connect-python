@@ -203,6 +203,8 @@ class VoiceChannel(BaseChannel):
     async def handle_incoming_call(
         self,
         twiml_request: TwiMLRequest | None = None,
+        *,
+        host_twiml_options: TwiMLOptions | None = None,
     ) -> str:
         """
         Generate TwiML response for incoming voice calls.
@@ -217,44 +219,75 @@ class VoiceChannel(BaseChannel):
         TwiML fields are merged per-field, highest precedence first:
           1. Output of the customizer registered via
              ``VoiceChannel.on_inbound_call_twiml(...)`` if configured
-             and ``twiml_request`` is given.
+             and ``twiml_request`` is given. (Application-owned.)
           2. ``VoiceChannelConfig.default_twiml_options`` — per-channel defaults.
-          3. TAC defaults: a fixed default ``welcome_greeting``,
-             ``conversation_configuration`` from ``TACConfig``, and
+          3. ``host_twiml_options`` — per-call transport facts supplied by the
+             host (the code owning the route), e.g. a per-call ``websocket_url``
+             with an affinity token.
+          4. TAC defaults: a fixed default ``welcome_greeting``,
+             ``conversation_configuration`` from ``TACConfig``,
              ``action_url`` resolved via Studio handoff (when
              ``studio_handoff_flow_sid`` is configured), else derived from
-             ``TACConfig.voice_public_domain`` + ``voice_action_path``.
+             ``TACConfig.voice_public_domain`` + ``voice_action_path``, and the
+             ``websocket_url`` derived from ``TACConfig.voice_public_domain`` +
+             ``voice_websocket_path``.
 
         Fields not set at a layer fall through to lower layers. Lists
         (``languages``) and nested models (``custom_parameters``) replace
-        wholesale when set at a higher-priority layer.
+        wholesale when set at a higher-priority layer. ``websocket_url`` falls
+        back to the ``TACConfig``-derived URL if unset at every layer.
+
+        The two arguments are complementary, not alternatives — a custom host
+        typically passes both on the same call: ``twiml_request`` carries the
+        inbound call's data (so the application's customizer can run), and
+        ``host_twiml_options`` carries the host's own per-call overrides.
 
         Args:
-            twiml_request: Parsed Twilio webhook fields. Passed to the
-                customizer if one is configured on the channel.
+            twiml_request: The incoming Twilio voice webhook, parsed into a
+                framework-neutral form (From, To, CallSid, CallerCountry, …).
+                Supplied by Twilio; forwarded to the ``on_inbound_call_twiml``
+                customizer so the application can produce per-call overrides.
+            host_twiml_options: Per-call TwiML overrides supplied by the *host*
+                (the code owning the route — e.g. a custom server), for
+                transport facts the SDK can't derive, such as a per-call
+                ``websocket_url`` with an affinity token. Layered below
+                ``default_twiml_options`` and the application customizer, so a
+                developer's explicit settings still win.
 
         Returns:
             TwiML XML string for call connection.
         """
-        websocket_url = self._resolve_websocket_url("handle_incoming_call")
-
         customized: TwiMLOptions | None = None
         if self._on_inbound_call_twiml is not None and twiml_request is not None:
             customized = await self._on_inbound_call_twiml(twiml_request)
 
-        merged = self._build_twiml_options(customized)
+        merged = self._build_twiml_options(host_twiml_options, customized)
+        # merged.websocket_url is either a validated non-empty URL (set by some
+        # layer) or None; fall back to the TACConfig-derived URL only when None.
+        websocket_url = (
+            merged.websocket_url
+            if merged.websocket_url is not None
+            else self._resolve_websocket_url("handle_incoming_call")
+        )
         return twiml.generate_twiml(websocket_url, merged)
 
-    def _build_twiml_options(self, per_call: TwiMLOptions | None) -> TwiMLOptions:
-        """Layer TwiML options: TAC defaults → channel ``default_twiml_options``
-        → ``per_call`` (customizer output for inbound, or
+    def _build_twiml_options(
+        self,
+        host: TwiMLOptions | None,
+        per_call: TwiMLOptions | None,
+    ) -> TwiMLOptions:
+        """Layer TwiML options, lowest precedence first: TAC defaults →
+        ``host`` (calling host's per-call values) → ``default_twiml_options`` →
+        ``per_call`` (application customizer output for inbound, or
         ``InitiateVoiceConversationOptions.twiml_options`` for outbound).
         """
         merged = TwiMLOptions(
             welcome_greeting=DEFAULT_WELCOME_GREETING,
             conversation_configuration=self.tac.config.conversation_configuration_id,
-            action_url=self._resolve_action_url(per_call),
+            action_url=self._resolve_action_url(host, per_call),
         )
+        if host is not None:
+            self._overlay_fields(merged, host)
         if self.config.default_twiml_options is not None:
             self._overlay_fields(merged, self.config.default_twiml_options)
         if per_call is not None:
@@ -281,14 +314,19 @@ class VoiceChannel(BaseChannel):
                 continue
             setattr(target, field, getattr(source, field))
 
-    def _resolve_action_url(self, customized: TwiMLOptions | None) -> str | None:
+    def _resolve_action_url(
+        self,
+        host: TwiMLOptions | None,
+        customized: TwiMLOptions | None,
+    ) -> str | None:
         """Resolve the TwiML ``<Connect action=...>`` URL.
 
         Precedence (highest to lowest):
-          1. customizer
+          1. application customizer
           2. channel ``default_twiml_options``
-          3. Studio handoff (when ``studio_handoff_flow_sid`` is configured)
-          4. Channel default — derived from ``TACConfig.voice_public_domain``
+          3. ``host`` (calling host's per-call options)
+          4. Studio handoff (when ``studio_handoff_flow_sid`` is configured)
+          5. Channel default — derived from ``TACConfig.voice_public_domain``
              + ``TACConfig.voice_action_path``.
 
         User-expressed intent (Studio handoff is configured explicitly on
@@ -310,6 +348,8 @@ class VoiceChannel(BaseChannel):
             and "action_url" in self.config.default_twiml_options.model_fields_set
         ):
             return self.config.default_twiml_options.action_url
+        if host is not None and "action_url" in host.model_fields_set:
+            return host.action_url
         if self.tac.config.studio_handoff_flow_sid:
             return studio_voice_handoff_url(
                 self.tac.config.account_sid,
@@ -569,9 +609,6 @@ class VoiceChannel(BaseChannel):
         ``TACConfig.voice_websocket_path``, unless overridden per-call via
         ``options.websocket_url``.
         """
-        websocket_url = options.websocket_url or self._resolve_websocket_url(
-            "initiate_outbound_conversation"
-        )
         from_number = self.tac.config.phone_number
 
         self.logger.info(
@@ -580,10 +617,19 @@ class VoiceChannel(BaseChannel):
             from_number=mask_phone(from_number),
         )
 
-        # Same layering as handle_incoming_call, minus the customizer
-        # (customizers receive a TwiMLRequest from an inbound webhook; there
-        # is no equivalent for outbound).
-        merged = self._build_twiml_options(options.twiml_options)
+        # Outbound has no inbound customizer and no server layer; the per-call
+        # override is options.twiml_options.
+        merged = self._build_twiml_options(None, options.twiml_options)
+
+        # ``options.websocket_url`` is the dedicated per-call outbound override
+        # and wins over any websocket_url that came through the layered
+        # ``twiml_options`` merge; both fall back to the TACConfig-derived URL.
+        if options.websocket_url is not None:
+            websocket_url = options.websocket_url
+        elif merged.websocket_url is not None:
+            websocket_url = merged.websocket_url
+        else:
+            websocket_url = self._resolve_websocket_url("initiate_outbound_conversation")
 
         try:
             twiml_xml = twiml.generate_twiml(websocket_url, merged)
