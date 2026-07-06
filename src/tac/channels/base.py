@@ -8,9 +8,17 @@ from typing import Any
 
 from tac import TAC
 from tac.core.logging import get_logger
+from tac.models.conversation import ParticipantResponse
 from tac.models.memory import MemoryMode
 from tac.models.session import ConversationSession
 from tac.models.tac import TACMemoryResponse
+
+# Participant types that represent TAC itself at TAC's (channel, address).
+# `AI_AGENT` is the canonical type; `AGENT` is the legacy Conversation
+# Orchestrator form. A participant typed either way at TAC's address is
+# recognized as TAC and not overwritten; anything else (HUMAN_AGENT,
+# CUSTOMER, …) is someone else's assignment.
+AGENT_TYPES: frozenset[str] = frozenset({"AGENT", "AI_AGENT"})
 
 
 class BaseChannel(ABC):
@@ -164,6 +172,53 @@ class BaseChannel(ABC):
                 return False
 
         return True
+
+    @staticmethod
+    def _owns_address(
+        participant: ParticipantResponse,
+        channel: str,
+        address: str,
+        extra: dict[str, str | None] | None = None,
+    ) -> bool:
+        """Whether a participant holds the given (channel, address).
+
+        This is the address-only predicate — it does NOT consider participant
+        type. Use it directly when the type is decided separately (e.g.
+        reconciliation, which must detect an UNKNOWN at TAC's address before
+        promoting it); use `_find_agent_participant` when you want the agent.
+
+        `extra` matches additional ParticipantAddress fields (e.g. messaging
+        sub-addressing); only truthy values are compared.
+        """
+        return any(
+            a.channel == channel
+            and a.address == address
+            and (not extra or all(getattr(a, k) == v for k, v in extra.items() if v))
+            for a in participant.addresses
+        )
+
+    @classmethod
+    def _find_agent_participant(
+        cls,
+        participants: list[ParticipantResponse],
+        channel: str,
+        address: str,
+        extra: dict[str, str | None] | None = None,
+    ) -> ParticipantResponse | None:
+        """Find the participant representing TAC's agent in a conversation.
+
+        The agent is the participant that owns TAC's (channel, address) AND has
+        an agent type (`AGENT` or `AI_AGENT`). A HUMAN_AGENT or other type at
+        that address is someone else and is NOT returned.
+        """
+        return next(
+            (
+                p
+                for p in participants
+                if p.type in AGENT_TYPES and cls._owns_address(p, channel, address, extra)
+            ),
+            None,
+        )
 
     def _start_conversation(
         self,

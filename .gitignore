@@ -7,6 +7,7 @@
 !.claude/skills/
 .claude/skills/*
 !.claude/skills/sync-to-ts-sdk/
+!.claude/skills/create-release-pr/
 
 # Python
 __pycache__/

@@ -19,6 +19,7 @@ def get_test_config() -> dict:
         "api_secret": "test_api_token",
         "conversation_configuration_id": "conv_configuration_test123",
         "phone_number": "+15551234567",
+        "voice_public_domain": "test.ngrok.io",
     }
 
 
@@ -31,48 +32,38 @@ class TestTACServerConfig:
     """Test TACServerConfig."""
 
     def test_defaults(self) -> None:
-        config = TACServerConfig(public_domain="example.ngrok.io")
+        config = TACServerConfig()
         assert config.host == "0.0.0.0"
         assert config.port == 8000
-        assert config.public_domain == "example.ngrok.io"
-        assert config.welcome_greeting == "Hello! How can I assist you today?"
         assert config.conversation_webhook_path == "/webhook"
         assert config.twiml_path == "/twiml"
-        assert config.websocket_path == "/ws"
         assert config.cintel_webhook_path is None
 
     def test_custom_paths(self) -> None:
         config = TACServerConfig(
-            public_domain="my.domain.com",
             host="127.0.0.1",
             port=3000,
             conversation_webhook_path="/conversations",
             twiml_path="/voice/twiml",
-            websocket_path="/voice/ws",
             cintel_webhook_path="/ci",
         )
         assert config.host == "127.0.0.1"
         assert config.port == 3000
         assert config.conversation_webhook_path == "/conversations"
         assert config.twiml_path == "/voice/twiml"
-        assert config.websocket_path == "/voice/ws"
         assert config.cintel_webhook_path == "/ci"
 
     def test_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("TWILIO_VOICE_PUBLIC_DOMAIN", "my.ngrok.io")
         monkeypatch.setenv("TWILIO_SERVER_HOST", "127.0.0.1")
         monkeypatch.setenv("TWILIO_SERVER_PORT", "3000")
         config = TACServerConfig.from_env()
-        assert config.public_domain == "my.ngrok.io"
         assert config.host == "127.0.0.1"
         assert config.port == 3000
 
     def test_from_env_defaults(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.delenv("TWILIO_VOICE_PUBLIC_DOMAIN", raising=False)
         monkeypatch.delenv("TWILIO_SERVER_HOST", raising=False)
         monkeypatch.delenv("TWILIO_SERVER_PORT", raising=False)
         config = TACServerConfig.from_env()
-        assert config.public_domain == ""
         assert config.host == "0.0.0.0"
         assert config.port == 8000
 
@@ -88,6 +79,43 @@ class TestTACConfigStudioHandoffFlowSid:
         flow_sid = "FW" + "a" * 32
         tac = TAC({**get_test_config(), "studio_handoff_flow_sid": flow_sid})
         assert tac.config.studio_handoff_flow_sid == flow_sid
+
+
+class TestVoiceUrlConfigValidationAtStartup:
+    """TACFastAPIServer fails fast at construction if a voice channel is
+    attached but no public URL is configured. Catches the misconfiguration
+    before the first inbound call rather than returning a 500."""
+
+    def test_raises_when_voice_channel_without_public_domain(self) -> None:
+        from tac.channels.voice import VoiceChannel
+        from tac.server import TACFastAPIServer
+
+        # Config without voice_public_domain
+        cfg = {**get_test_config()}
+        cfg.pop("voice_public_domain", None)
+        tac = TAC(cfg)
+        vc = VoiceChannel(tac)
+
+        with pytest.raises(ValueError, match="voice_public_domain"):
+            TACFastAPIServer(tac=tac, voice_channel=vc)
+
+    def test_passes_when_voice_public_domain_set(self) -> None:
+        from tac.channels.voice import VoiceChannel
+        from tac.server import TACFastAPIServer
+
+        tac = TAC(get_test_config())  # has voice_public_domain
+        vc = VoiceChannel(tac)
+        TACFastAPIServer(tac=tac, voice_channel=vc)  # no raise
+
+    def test_passes_without_voice_channel(self) -> None:
+        """No voice channel attached: validation skipped, server starts fine
+        even without voice_public_domain."""
+        from tac.server import TACFastAPIServer
+
+        cfg = {**get_test_config()}
+        cfg.pop("voice_public_domain", None)
+        tac = TAC(cfg)
+        TACFastAPIServer(tac=tac)  # no raise
 
 
 class TestWebSocketDisconnectError:
@@ -220,7 +248,7 @@ class TestTACFastAPIServer:
 
         server = TACFastAPIServer(
             tac=tac,
-            config=TACServerConfig(public_domain="test.ngrok.io"),
+            config=TACServerConfig(),
             messaging_channels=[sms, chat],
         )
         app = server.app
@@ -270,7 +298,7 @@ class TestTACFastAPIServer:
 
         server = TACFastAPIServer(
             tac=tac,
-            config=TACServerConfig(public_domain="test.ngrok.io"),
+            config=TACServerConfig(),
             messaging_channels=[sms, chat],
         )
         app = server.app
@@ -316,7 +344,7 @@ class TestTACFastAPIServer:
         vc = VoiceChannel(tac)
         server = TACFastAPIServer(
             tac=tac,
-            config=TACServerConfig(public_domain="test.ngrok.io"),
+            config=TACServerConfig(),
             voice_channel=vc,
         )
         app = server.app
@@ -335,7 +363,7 @@ class TestTACFastAPIServer:
         sms = SMSChannel(tac)
         server = TACFastAPIServer(
             tac=tac,
-            config=TACServerConfig(public_domain="test.ngrok.io"),
+            config=TACServerConfig(),
             messaging_channels=[sms],
         )
         app = server.app
@@ -352,9 +380,7 @@ class TestTACFastAPIServer:
         tac = TAC(get_test_config())
         server = TACFastAPIServer(
             tac=tac,
-            config=TACServerConfig(
-                public_domain="test.ngrok.io", cintel_webhook_path="/ci-webhook"
-            ),
+            config=TACServerConfig(cintel_webhook_path="/ci-webhook"),
         )
         app = server.app
 
@@ -362,18 +388,25 @@ class TestTACFastAPIServer:
         assert "/ci-webhook" in route_paths
 
     def test_create_app_custom_paths(self) -> None:
+        """Custom server paths come from TACServerConfig (server-only paths)
+        and TACConfig (voice paths, which are also consumed by the channel
+        for URL construction)."""
         from tac.channels import SMSChannel
         from tac.channels.voice import VoiceChannel
         from tac.server import TACFastAPIServer
 
-        tac = TAC(get_test_config())
+        tac = TAC(
+            {
+                **get_test_config(),
+                "voice_websocket_path": "/voice/ws",
+                "voice_action_path": "/voice/cleanup",
+            }
+        )
         server = TACFastAPIServer(
             tac=tac,
             config=TACServerConfig(
-                public_domain="test.ngrok.io",
                 conversation_webhook_path="/conversations",
                 twiml_path="/voice/twiml",
-                websocket_path="/voice/ws",
             ),
             voice_channel=VoiceChannel(tac),
             messaging_channels=[SMSChannel(tac)],
@@ -384,6 +417,7 @@ class TestTACFastAPIServer:
         assert "/conversations" in route_paths
         assert "/voice/twiml" in route_paths
         assert "/voice/ws" in route_paths
+        assert "/voice/cleanup" in route_paths
 
     def test_custom_app_is_used(self) -> None:
         """User-supplied FastAPI instance is used directly and metadata preserved."""
@@ -395,7 +429,7 @@ class TestTACFastAPIServer:
         custom_app = FastAPI(title="My Custom Service", version="9.9.9")
         server = TACFastAPIServer(
             tac=tac,
-            config=TACServerConfig(public_domain="test.ngrok.io"),
+            config=TACServerConfig(),
             app=custom_app,
         )
         assert server.app is custom_app
@@ -413,7 +447,7 @@ class TestTACFastAPIServer:
         custom_app = FastAPI()
         server = TACFastAPIServer(
             tac=tac,
-            config=TACServerConfig(public_domain="test.ngrok.io"),
+            config=TACServerConfig(),
             messaging_channels=[SMSChannel(tac)],
             app=custom_app,
         )
@@ -429,7 +463,7 @@ class TestTACFastAPIServer:
         tac = TAC(get_test_config())
         server = TACFastAPIServer(
             tac=tac,
-            config=TACServerConfig(public_domain="test.ngrok.io"),
+            config=TACServerConfig(),
         )
         assert isinstance(server.app, FastAPI)
         assert server.app.title == "TAC Server"
@@ -444,7 +478,7 @@ class TestTACFastAPIServer:
         tac = TAC(get_test_config())
         server = TACFastAPIServer(
             tac=tac,
-            config=TACServerConfig(public_domain="test.ngrok.io"),
+            config=TACServerConfig(),
         )
 
         @server.app.get("/health")
@@ -468,7 +502,7 @@ class TestTACFastAPIServer:
         tac = TAC(get_test_config())
         server = TACFastAPIServer(
             tac=tac,
-            config=TACServerConfig(public_domain="test.ngrok.io"),
+            config=TACServerConfig(),
         )
 
         class HeaderMiddleware(BaseHTTPMiddleware):
@@ -500,7 +534,7 @@ class TestTACFastAPIServer:
         tac = TAC(get_test_config())
         server = TACFastAPIServer(
             tac=tac,
-            config=TACServerConfig(public_domain="test.ngrok.io"),
+            config=TACServerConfig(),
         )
 
         class MyError(Exception):
@@ -528,7 +562,7 @@ class TestTACFastAPIServer:
         tac = TAC(get_test_config())
         server = TACFastAPIServer(
             tac=tac,
-            config=TACServerConfig(public_domain="test.ngrok.io"),
+            config=TACServerConfig(),
             messaging_channels=[SMSChannel(tac)],
         )
         route_paths = [r.path for r in server.app.routes if hasattr(r, "path")]
@@ -547,7 +581,7 @@ class TestTwiMLConnectAction:
         tac = TAC({**get_test_config(), **tac_overrides})
         server = TACFastAPIServer(
             tac=tac,
-            config=TACServerConfig(public_domain="test.ngrok.io"),
+            config=TACServerConfig(),
             voice_channel=VoiceChannel(tac),
         )
         return TestClient(server.app)
@@ -571,7 +605,10 @@ class TestTwiMLConnectAction:
         )
         assert expected in resp.text
 
-    def test_connect_action_omitted_when_no_handoff_flow(self) -> None:
+    def test_connect_action_uses_cleanup_url_when_no_handoff_flow(self) -> None:
+        """Without Studio handoff, action_url falls back to the server's
+        session-cleanup URL — no-op in orchestrated mode, drives cleanup in
+        relay-only mode."""
         client = self._build_server()  # no studio_handoff_flow_sid
         resp = client.post(  # type: ignore[attr-defined]
             "/twiml",
@@ -579,9 +616,7 @@ class TestTwiMLConnectAction:
         )
 
         assert resp.status_code == 200
-        # No action URL when no handoff flow configured
-        assert "<Connect>" in resp.text
-        assert "action=" not in resp.text
+        assert 'action="https://test.ngrok.io/conversation-relay-callback"' in resp.text
 
 
 class TestConversationRelayCallback:
@@ -732,7 +767,7 @@ class TestSignatureValidation:
         tac = TAC(get_test_config())
         server = TACFastAPIServer(
             tac=tac,
-            config=TACServerConfig(public_domain="test.ngrok.io"),
+            config=TACServerConfig(),
             messaging_channels=[SMSChannel(tac)],
         )
         transport = ASGITransport(app=server.app)
@@ -750,7 +785,7 @@ class TestSignatureValidation:
         tac = TAC(get_test_config())
         server = TACFastAPIServer(
             tac=tac,
-            config=TACServerConfig(public_domain="test.ngrok.io"),
+            config=TACServerConfig(),
             messaging_channels=[SMSChannel(tac)],
         )
         transport = ASGITransport(app=server.app)
@@ -775,7 +810,7 @@ class TestSignatureValidation:
         sms = SMSChannel(tac)
         server = TACFastAPIServer(
             tac=tac,
-            config=TACServerConfig(public_domain="test.ngrok.io"),
+            config=TACServerConfig(),
             messaging_channels=[sms],
         )
         with patch.object(sms, "process_webhook", new_callable=AsyncMock):
@@ -799,12 +834,57 @@ class TestSignatureValidation:
         tac = TAC(get_test_config())
         server = TACFastAPIServer(
             tac=tac,
-            config=TACServerConfig(public_domain="test.ngrok.io"),
+            config=TACServerConfig(),
             voice_channel=VoiceChannel(tac),
         )
         client = TestClient(server.app)
         resp = client.post("/twiml")
         assert resp.status_code == 403
+
+    def test_conversation_relay_callback_rejects_missing_signature(self) -> None:
+        from fastapi.testclient import TestClient
+
+        from tac.channels.voice import VoiceChannel
+        from tac.server import TACFastAPIServer
+
+        tac = TAC(get_test_config())
+        server = TACFastAPIServer(
+            tac=tac,
+            config=TACServerConfig(),
+            voice_channel=VoiceChannel(tac),
+        )
+        client = TestClient(server.app)
+        resp = client.post("/conversation-relay-callback")
+        assert resp.status_code == 403
+
+    def test_conversation_relay_callback_accepts_valid_signature(self) -> None:
+        from fastapi.testclient import TestClient
+
+        from tac.channels.voice import VoiceChannel
+        from tac.server import TACFastAPIServer
+
+        tac = TAC(get_test_config())
+        server = TACFastAPIServer(
+            tac=tac,
+            config=TACServerConfig(),
+            voice_channel=VoiceChannel(tac),
+        )
+        client = TestClient(server.app)
+        form_data = {
+            "AccountSid": "ACtest123",
+            "CallSid": "CA123",
+            "CallStatus": "completed",
+            "From": "+15551234567",
+            "To": "+15559876543",
+            "Direction": "inbound",
+        }
+        signature = compute_signature("http://testserver/conversation-relay-callback", form_data)
+        resp = client.post(
+            "/conversation-relay-callback",
+            data=form_data,
+            headers={"X-Twilio-Signature": signature},
+        )
+        assert resp.status_code == 200
 
     def test_twiml_accepts_valid_form_signature(self) -> None:
         from fastapi.testclient import TestClient
@@ -815,7 +895,7 @@ class TestSignatureValidation:
         tac = TAC(get_test_config())
         server = TACFastAPIServer(
             tac=tac,
-            config=TACServerConfig(public_domain="test.ngrok.io"),
+            config=TACServerConfig(),
             voice_channel=VoiceChannel(tac),
         )
         client = TestClient(server.app)
@@ -837,9 +917,7 @@ class TestSignatureValidation:
         tac = TAC(get_test_config())
         server = TACFastAPIServer(
             tac=tac,
-            config=TACServerConfig(
-                public_domain="test.ngrok.io", cintel_webhook_path="/ci-webhook"
-            ),
+            config=TACServerConfig(cintel_webhook_path="/ci-webhook"),
         )
         transport = ASGITransport(app=server.app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -855,7 +933,7 @@ class TestSignatureValidation:
         tac = TAC(get_test_config())
         server = TACFastAPIServer(
             tac=tac,
-            config=TACServerConfig(public_domain="test.ngrok.io"),
+            config=TACServerConfig(),
         )
 
         @server.app.get("/health")
@@ -901,7 +979,7 @@ class TestSignatureValidation:
         tac = TAC(get_test_config())
         server = TACFastAPIServer(
             tac=tac,
-            config=TACServerConfig(public_domain="test.ngrok.io"),
+            config=TACServerConfig(),
             voice_channel=VoiceChannel(tac),
         )
         client = TestClient(server.app)
@@ -919,10 +997,61 @@ class TestSignatureValidation:
         tac = TAC(get_test_config())
         server = TACFastAPIServer(
             tac=tac,
-            config=TACServerConfig(public_domain="test.ngrok.io"),
+            config=TACServerConfig(),
             voice_channel=VoiceChannel(tac),
         )
         client = TestClient(server.app)
         with pytest.raises(WebSocketDisconnect):
             with client.websocket_connect("/ws", headers={"X-Twilio-Signature": "invalid"}):
                 pass
+
+
+class TestTwiMLCustomizerEndToEnd:
+    """Smoke test: server parses Twilio form and channel customizer shapes TwiML."""
+
+    def test_customizer_on_voice_channel_receives_parsed_context_and_overrides_twiml(
+        self,
+    ) -> None:
+        from fastapi.testclient import TestClient
+
+        from tac.channels.voice import VoiceChannel
+        from tac.models.voice import TwiMLOptions, TwiMLRequest
+        from tac.server import TACFastAPIServer
+
+        captured: dict[str, TwiMLRequest] = {}
+
+        async def customizer(ctx: TwiMLRequest) -> TwiMLOptions:
+            captured["ctx"] = ctx
+            return TwiMLOptions(voice="en-US-Journey-D", language="en-US")
+
+        tac = TAC(get_test_config())
+        vc = VoiceChannel(tac)
+
+        vc.on_inbound_call_twiml(customizer)
+        server = TACFastAPIServer(
+            tac=tac,
+            config=TACServerConfig(),
+            voice_channel=vc,
+        )
+        client = TestClient(server.app)
+        form_data = {
+            "From": "+14155551234",
+            "To": "+15551234567",
+            "CallerCountry": "US",
+            "ApiVersion": "2010-04-01",
+        }
+        signature = compute_signature("http://testserver/twiml", form_data)
+        resp = client.post(
+            "/twiml",
+            data=form_data,
+            headers={"X-Twilio-Signature": signature},
+        )
+        assert resp.status_code == 200
+        ctx = captured["ctx"]
+        assert ctx.from_number == "+14155551234"
+        assert ctx.caller_country == "US"
+        assert ctx.extra == {"ApiVersion": "2010-04-01"}
+        body = resp.text
+        assert 'voice="en-US-Journey-D"' in body
+        assert 'language="en-US"' in body
+        assert 'url="wss://test.ngrok.io/ws"' in body

@@ -8,7 +8,7 @@ import httpx
 from pydantic import BaseModel, Field
 
 from tac import TAC
-from tac.channels.base import BaseChannel
+from tac.channels.base import AGENT_TYPES, BaseChannel
 from tac.context.conversation import ConversationClient
 from tac.models.conversation import (
     ActionChannelSettings,
@@ -26,13 +26,6 @@ from tac.models.memory import MemoryMode
 from tac.models.outbound import InitiateConversationResult, InitiateMessagingConversationOptions
 from tac.models.session import AuthorInfo
 from tac.utils.redaction import mask_address
-
-# Participant types that represent TAC itself at TAC's (channel, address).
-# `AI_AGENT` is the canonical type; `AGENT` is the legacy Conversation
-# Orchestrator form. A participant typed either way at TAC's address is
-# recognized as TAC and not overwritten; anything else (HUMAN_AGENT,
-# CUSTOMER, …) is someone else's assignment.
-AGENT_TYPES: frozenset[str] = frozenset({"AGENT", "AI_AGENT"})
 
 
 class MessagingChannelConfig(BaseModel):
@@ -379,38 +372,20 @@ class MessagingChannel(BaseChannel):
                 conversation_id
             )
 
-            def _match_address(
-                p_addresses: list[ParticipantAddress],
-                addr: str,
-                extra_kwargs: dict[str, str | None],
-            ) -> bool:
-                return any(
-                    a.channel == channel_type
-                    and a.address == addr
-                    and all(getattr(a, k) == v for k, v in extra_kwargs.items() if v)
-                    for a in p_addresses
-                )
-
             customer = next(
                 (
                     p
                     for p in participants
                     if p.type == "CUSTOMER"
-                    and _match_address(p.addresses, options.to, customer_address_kwargs)
+                    and self._owns_address(p, channel_type, options.to, customer_address_kwargs)
                 ),
                 None,
             )
             if not customer:
                 raise RuntimeError("Customer participant not found after conversation creation")
 
-            agent = next(
-                (
-                    p
-                    for p in participants
-                    if p.type in AGENT_TYPES
-                    and _match_address(p.addresses, from_address, agent_address_kwargs)
-                ),
-                None,
+            agent = self._find_agent_participant(
+                participants, channel_type, from_address, agent_address_kwargs
             )
             if not agent:
                 raise RuntimeError("Agent participant not found after conversation creation")
@@ -517,9 +492,7 @@ class MessagingChannel(BaseChannel):
         channel = agent_address.channel
 
         def _owns_agent_address(p: ParticipantResponse) -> bool:
-            return any(
-                a.channel == channel and a.address == agent_address.address for a in p.addresses
-            )
+            return self._owns_address(p, channel, agent_address.address)
 
         def _matches_channel(p: ParticipantResponse) -> bool:
             return any(a.channel == channel for a in p.addresses)

@@ -443,6 +443,32 @@ class TestVoiceOutbound:
         assert result.call_sid == "CAsid789"
 
 
+class TestInitiateVoiceConversationOptionsForbidsExtra:
+    """Migration safety: removed fields raise ValidationError instead of
+    being silently dropped, so callers upgrading from older TAC versions
+    get a clear signal that their code needs updating."""
+
+    def test_removed_welcome_greeting_raises(self) -> None:
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError, match="welcome_greeting"):
+            InitiateVoiceConversationOptions(to="+15551234567", welcome_greeting="Hi!")  # type: ignore[call-arg]
+
+    def test_removed_action_url_raises(self) -> None:
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError, match="action_url"):
+            InitiateVoiceConversationOptions(
+                to="+15551234567", action_url="https://example.com/end"
+            )  # type: ignore[call-arg]
+
+    def test_removed_custom_parameters_raises(self) -> None:
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError, match="custom_parameters"):
+            InitiateVoiceConversationOptions(to="+15551234567", custom_parameters={"k": "v"})  # type: ignore[call-arg]
+
+
 # =============================================================================
 # isOwnMessage 2-tier
 # =============================================================================
@@ -662,6 +688,8 @@ class TestVoiceOutboundErrors:
 
     @pytest.mark.asyncio
     async def test_custom_parameters_in_twiml(self) -> None:
+        from tac.models.voice import TwiMLOptions
+
         tac = TAC(get_test_config())
         channel = VoiceChannel(tac)
 
@@ -675,7 +703,7 @@ class TestVoiceOutboundErrors:
                 InitiateVoiceConversationOptions(
                     to="+15559876543",
                     websocket_url="wss://example.com/ws",
-                    custom_parameters={"foo": "bar"},
+                    twiml_options=TwiMLOptions(custom_parameters={"foo": "bar"}),
                 )
             )
 
@@ -685,6 +713,8 @@ class TestVoiceOutboundErrors:
 
     @pytest.mark.asyncio
     async def test_welcome_greeting_in_twiml(self) -> None:
+        from tac.models.voice import TwiMLOptions
+
         tac = TAC(get_test_config())
         channel = VoiceChannel(tac)
 
@@ -698,12 +728,98 @@ class TestVoiceOutboundErrors:
                 InitiateVoiceConversationOptions(
                     to="+15559876543",
                     websocket_url="wss://example.com/ws",
-                    welcome_greeting="Hi there!",
+                    twiml_options=TwiMLOptions(welcome_greeting="Hi there!"),
                 )
             )
 
         call_kwargs = mock_client.calls.create.call_args.kwargs
         assert "Hi there!" in call_kwargs["twiml"]
+
+    @pytest.mark.asyncio
+    async def test_channel_twiml_options_applied(self) -> None:
+        """VoiceChannelConfig.twiml_options flows into outbound TwiML."""
+        from tac.channels.voice import VoiceChannelConfig
+        from tac.models.voice import TwiMLOptions
+
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(
+            tac,
+            config=VoiceChannelConfig(
+                default_twiml_options=TwiMLOptions(voice="en-US-Journey-D", interruptible="speech"),
+            ),
+        )
+
+        mock_call = MagicMock()
+        mock_call.sid = "CAchan"
+        mock_client = MagicMock()
+        mock_client.calls.create.return_value = mock_call
+
+        with patch.object(channel, "_get_twilio_client", return_value=mock_client):
+            await channel.initiate_outbound_conversation(
+                InitiateVoiceConversationOptions(
+                    to="+15559876543",
+                    websocket_url="wss://example.com/ws",
+                )
+            )
+
+        twiml_xml = mock_client.calls.create.call_args.kwargs["twiml"]
+        assert 'voice="en-US-Journey-D"' in twiml_xml
+        assert 'interruptible="speech"' in twiml_xml
+
+    @pytest.mark.asyncio
+    async def test_per_call_twiml_options_override_channel(self) -> None:
+        """Per-call twiml_options win over channel-static twiml_options."""
+        from tac.channels.voice import VoiceChannelConfig
+        from tac.models.voice import TwiMLOptions
+
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(
+            tac,
+            config=VoiceChannelConfig(
+                default_twiml_options=TwiMLOptions(voice="en-US-Journey-D"),
+            ),
+        )
+
+        mock_call = MagicMock()
+        mock_call.sid = "CApercall"
+        mock_client = MagicMock()
+        mock_client.calls.create.return_value = mock_call
+
+        with patch.object(channel, "_get_twilio_client", return_value=mock_client):
+            await channel.initiate_outbound_conversation(
+                InitiateVoiceConversationOptions(
+                    to="+15559876543",
+                    websocket_url="wss://example.com/ws",
+                    twiml_options=TwiMLOptions(voice="es-MX-Neural2-A"),
+                )
+            )
+
+        twiml_xml = mock_client.calls.create.call_args.kwargs["twiml"]
+        assert 'voice="es-MX-Neural2-A"' in twiml_xml
+        assert "en-US-Journey-D" not in twiml_xml
+
+    @pytest.mark.asyncio
+    async def test_studio_handoff_used_when_no_action_url(self) -> None:
+        """Studio handoff URL drives action_url on outbound when no override."""
+        flow_sid = "FW" + "a" * 32
+        tac = TAC({**get_test_config(), "studio_handoff_flow_sid": flow_sid})
+        channel = VoiceChannel(tac)
+
+        mock_call = MagicMock()
+        mock_call.sid = "CAstudio"
+        mock_client = MagicMock()
+        mock_client.calls.create.return_value = mock_call
+
+        with patch.object(channel, "_get_twilio_client", return_value=mock_client):
+            await channel.initiate_outbound_conversation(
+                InitiateVoiceConversationOptions(
+                    to="+15559876543",
+                    websocket_url="wss://example.com/ws",
+                )
+            )
+
+        twiml_xml = mock_client.calls.create.call_args.kwargs["twiml"]
+        assert f"Flows/{flow_sid}" in twiml_xml
 
 
 # =============================================================================

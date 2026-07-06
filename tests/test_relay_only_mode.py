@@ -17,10 +17,7 @@ from tac.channels.chat import ChatChannel
 from tac.channels.sms import SMSChannel
 from tac.channels.voice import VoiceChannel
 from tac.models.session import ConversationSession
-from tac.models.voice import (
-    ConversationRelayCallbackPayload,
-    TwiMLOptions,
-)
+from tac.models.voice import ConversationRelayCallbackPayload
 
 
 def relay_only_config() -> dict:
@@ -31,6 +28,7 @@ def relay_only_config() -> dict:
         "api_key": "SK123",
         "api_secret": "test_api_secret",
         "phone_number": "+15551234567",
+        "voice_public_domain": "example.com",
     }
 
 
@@ -90,15 +88,18 @@ class TestRelayOnlyMode:
     @pytest.mark.asyncio
     async def test_handle_incoming_call_twiml_omits_conversation_configuration(self) -> None:
         """TwiML does not include conversationConfiguration in relay-only mode."""
-        tac = TAC(relay_only_config())
-        channel = VoiceChannel(tac)
+        from tac.channels.voice import VoiceChannelConfig
+        from tac.models.voice import TwiMLOptions
 
-        twiml = await channel.handle_incoming_call(
-            TwiMLOptions(
-                websocket_url="wss://example.com/ws",
-                welcome_greeting="Hello",
-            )
+        tac = TAC(relay_only_config())
+        channel = VoiceChannel(
+            tac,
+            config=VoiceChannelConfig(
+                default_twiml_options=TwiMLOptions(welcome_greeting="Hello"),
+            ),
         )
+
+        twiml = await channel.handle_incoming_call()
 
         assert "conversationConfiguration" not in twiml
 

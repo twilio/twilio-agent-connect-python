@@ -5,6 +5,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from tac.models.session import ConversationSession
+from tac.models.voice import TwiMLOptions
 
 
 class InitiateMessagingConversationOptions(BaseModel):
@@ -52,15 +53,41 @@ class InitiateVoiceConversationOptions(BaseModel):
 
     The caller identity is always TAC's configured ``config.phone_number``.
     Multi-number deployments should use one TAC instance per line.
+
+    TwiML for the outbound call is built by merging per-field, highest
+    precedence first:
+      1. This call's ``twiml_options`` (per-call overrides)
+      2. ``VoiceChannelConfig.default_twiml_options`` (channel-wide defaults)
+      3. TAC defaults (welcome greeting, conversation_configuration,
+         action_url resolved via Studio handoff if configured)
+
+    Fields you don't set at a layer fall through to lower layers — so
+    ``twiml_options=TwiMLOptions(voice="es-MX-Neural2-A")`` on this call
+    overrides only ``voice``; ``language``, ``interruptible``, etc. from the
+    channel config still apply.
+
+    Set ``voice``, ``language``, ``interruptible``, etc. on the channel's
+    ``VoiceChannelConfig.default_twiml_options`` to apply them to every call
+    (both inbound and outbound). Use this model's ``twiml_options`` for
+    per-call overrides (e.g. campaign-specific ``custom_parameters``).
     """
 
     to: str = Field(..., min_length=1)
-    websocket_url: str = Field(...)
-    welcome_greeting: str | None = Field(default=None)
-    action_url: str | None = Field(default=None)
-    custom_parameters: dict[str, str | int | bool] | None = Field(default=None)
+    websocket_url: str | None = Field(
+        default=None,
+        description="Public WebSocket URL for ConversationRelay (e.g. "
+        "'wss://your-domain.ngrok.app/ws'). Optional — defaults to the URL "
+        "derived from ``TACConfig.voice_public_domain`` + "
+        "``voice_websocket_path``. Pass it here only to override the URL "
+        "for a specific call.",
+    )
+    twiml_options: TwiMLOptions | None = Field(
+        default=None,
+        description="Per-call overrides for the TwiML inside <ConversationRelay>. "
+        "Merged over VoiceChannelConfig.default_twiml_options and TAC defaults.",
+    )
 
-    model_config = {"populate_by_name": True}
+    model_config = {"populate_by_name": True, "extra": "forbid"}
 
 
 class InitiateVoiceConversationResult(BaseModel):

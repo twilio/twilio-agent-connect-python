@@ -277,6 +277,51 @@ class TACConfig(BaseModel):
         "from this SID.",
     )
 
+    voice_public_domain: str | None = Field(
+        default=None,
+        description="Public domain where voice routes are reachable (e.g. "
+        "'example.ngrok.app'). Used by VoiceChannel to construct the public "
+        "WebSocket URL and ConversationRelay action URL. Required when using "
+        "the Voice channel. Schemes (https://, wss://) and trailing slashes "
+        "are stripped automatically.",
+    )
+
+    voice_websocket_path: str = Field(
+        default="/ws",
+        description="Path the voice WebSocket is served at. Combined with "
+        "voice_public_domain to build the public WebSocket URL the voice "
+        "channel hands to Twilio in TwiML; TACFastAPIServer also registers "
+        "its WebSocket route at this path. Override only if you mount the "
+        "route at a non-default path.",
+    )
+
+    voice_action_path: str = Field(
+        default="/conversation-relay-callback",
+        description="Path the ConversationRelay action callback is served at. "
+        "Same role as voice_websocket_path but for the <Connect action=...> "
+        "cleanup callback.",
+    )
+
+    @field_validator("voice_public_domain", mode="before")
+    @classmethod
+    def _normalize_voice_public_domain(cls, v: str | None) -> str | None:
+        """Strip whitespace, schemes, and trailing slashes from voice_public_domain.
+
+        A naive copy-paste from a browser address bar produces values like
+        ``https://example.ngrok.app/`` which would otherwise concatenate into
+        ``wss://https://example.ngrok.app//ws`` — clean them up at parse time.
+        """
+        if v is None:
+            return v
+        v = v.strip()
+        if not v:
+            return None
+        for scheme in ("https://", "http://", "wss://", "ws://"):
+            if v.lower().startswith(scheme):
+                v = v[len(scheme) :]
+                break
+        return v.rstrip("/") or None
+
     conversation_intelligence_config: ConversationIntelligenceConfig | None = Field(
         default=None,
         description="Optional Conversation Intelligence configuration for filtering webhook "
@@ -330,6 +375,10 @@ class TACConfig(BaseModel):
           Default: INFO
         - TWILIO_REGION: Twilio region for data residency (e.g., 'au1', 'ie1')
         - TWILIO_STUDIO_HANDOFF_FLOW_SID: Studio Flow SID (FWxxx...) for handoff tool
+        - TWILIO_VOICE_PUBLIC_DOMAIN: Public domain for voice routes (required for voice)
+        - TWILIO_VOICE_WEBSOCKET_PATH: Path for voice WebSocket (default: /ws)
+        - TWILIO_VOICE_ACTION_PATH: Path for ConversationRelay action callback
+          (default: /conversation-relay-callback)
 
         Memory Configuration:
         - TWILIO_MEMORY_PROFILE_TRAIT_GROUPS: Trait groups to include
@@ -368,6 +417,11 @@ class TACConfig(BaseModel):
             log_level=os.environ.get("TWILIO_LOG_LEVEL", "INFO"),
             region=os.environ.get("TWILIO_REGION"),
             studio_handoff_flow_sid=os.environ.get("TWILIO_STUDIO_HANDOFF_FLOW_SID"),
+            voice_public_domain=os.environ.get("TWILIO_VOICE_PUBLIC_DOMAIN"),
+            voice_websocket_path=os.environ.get("TWILIO_VOICE_WEBSOCKET_PATH", "/ws"),
+            voice_action_path=os.environ.get(
+                "TWILIO_VOICE_ACTION_PATH", "/conversation-relay-callback"
+            ),
             memory_config=memory_config,
             conversation_intelligence_config=conversation_intelligence_config,
         )
