@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+    <url>
+         <loc>https://twilio.github.io/twilio-agent-connect-python/dev/</loc>
+         <lastmod>2026-07-06</lastmod>
+    </url>
+    <url>
+         <loc>https://twilio.github.io/twilio-agent-connect-python/dev/api/adapters/</loc>
+         <lastmod>2026-07-06</lastmod>
+    </url>
+    <url>
+         <loc>https://twilio.github.io/twilio-agent-connect-python/dev/api/channels/</loc>
+         <lastmod>2026-07-06</lastmod>
+    </url>
+    <url>
+         <loc>https://twilio.github.io/twilio-agent-connect-python/dev/api/context/</loc>
+         <lastmod>2026-07-06</lastmod>
+    </url>
+    <url>
+         <loc>https://twilio.github.io/twilio-agent-connect-python/dev/api/core/</loc>
+         <lastmod>2026-07-06</lastmod>
+    </url>
+    <url>
+         <loc>https://twilio.github.io/twilio-agent-connect-python/dev/api/intelligence/</loc>
+         <lastmod>2026-07-06</lastmod>
+    </url>
+    <url>
+         <loc>https://twilio.github.io/twilio-agent-connect-python/dev/api/models/</loc>
+         <lastmod>2026-07-06</lastmod>
+    </url>
+    <url>
+         <loc>https://twilio.github.io/twilio-agent-connect-python/dev/api/tools/</loc>
+         <lastmod>2026-07-06</lastmod>
+    </url>
+</urlset>
