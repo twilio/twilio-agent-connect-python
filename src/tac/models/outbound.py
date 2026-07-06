@@ -86,6 +86,16 @@ class InitiateVoiceConversationOptions(BaseModel):
         description="Per-call overrides for the TwiML inside <ConversationRelay>. "
         "Merged over VoiceChannelConfig.default_twiml_options and TAC defaults.",
     )
+    call_options: dict[str, Any] | None = Field(
+        default=None,
+        description="Extra parameters forwarded verbatim to Twilio's "
+        "``client.calls.create()`` (e.g. ``machine_detection``, ``async_amd``, "
+        "``status_callback``, ``record``, ``timeout``, SIP auth). TAC does not "
+        "validate these — Twilio does. Cannot override ``to``/``from``/``twiml`` "
+        "(TAC owns those). Callback URLs are auto-wired from "
+        "``TACConfig.voice_public_domain`` + ``voice_call_event_path`` when "
+        "omitted; an explicit URL here always wins.",
+    )
 
     model_config = {"populate_by_name": True, "extra": "forbid"}
 

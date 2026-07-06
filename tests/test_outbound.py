@@ -442,6 +442,112 @@ class TestVoiceOutbound:
 
         assert result.call_sid == "CAsid789"
 
+    async def _place_call(
+        self, channel: VoiceChannel, options: InitiateVoiceConversationOptions
+    ) -> dict[str, Any]:
+        """Place a call with a mocked Twilio client and return the calls.create kwargs."""
+        mock_call = MagicMock()
+        mock_call.sid = "CAxyz"
+        mock_client = MagicMock()
+        mock_client.calls.create.return_value = mock_call
+        with patch.object(channel, "_get_twilio_client", return_value=mock_client):
+            await channel.initiate_outbound_conversation(options)
+        return mock_client.calls.create.call_args.kwargs
+
+    @pytest.mark.asyncio
+    async def test_call_options_passthrough(self) -> None:
+        """Arbitrary call_options are forwarded verbatim to calls.create."""
+        tac = TAC(get_test_config())  # no voice_public_domain → no auto-wiring
+        channel = VoiceChannel(tac)
+
+        kwargs = await self._place_call(
+            channel,
+            InitiateVoiceConversationOptions(
+                to="+15559876543",
+                websocket_url="wss://example.com/ws",
+                call_options={"machine_detection": "Enable", "timeout": 20},
+            ),
+        )
+        assert kwargs["machine_detection"] == "Enable"
+        assert kwargs["timeout"] == 20
+
+    @pytest.mark.asyncio
+    async def test_call_options_cannot_override_reserved(self) -> None:
+        """call_options may not override to/from/twiml (TAC owns those)."""
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+
+        with pytest.raises(ValueError, match="TAC-owned"):
+            await self._place_call(
+                channel,
+                InitiateVoiceConversationOptions(
+                    to="+15559876543",
+                    websocket_url="wss://example.com/ws",
+                    call_options={"from": "+19998887777"},
+                ),
+            )
+
+    @pytest.mark.asyncio
+    async def test_status_callback_auto_wired_when_domain_set(self) -> None:
+        """status_callback is auto-wired whenever voice_public_domain is set."""
+        config = {**get_test_config(), "voice_public_domain": "example.com"}
+        channel = VoiceChannel(TAC(config))
+
+        kwargs = await self._place_call(
+            channel,
+            InitiateVoiceConversationOptions(
+                to="+15559876543", websocket_url="wss://example.com/ws"
+            ),
+        )
+        assert kwargs["status_callback"] == "https://example.com/twilio/call-events"
+        # AMD/recording are opt-in: not wired unless the feature is enabled.
+        assert "async_amd_status_callback" not in kwargs
+        assert "recording_status_callback" not in kwargs
+
+    @pytest.mark.asyncio
+    async def test_amd_callback_auto_wired_only_when_amd_enabled(self) -> None:
+        config = {**get_test_config(), "voice_public_domain": "example.com"}
+        channel = VoiceChannel(TAC(config))
+
+        kwargs = await self._place_call(
+            channel,
+            InitiateVoiceConversationOptions(
+                to="+15559876543",
+                websocket_url="wss://example.com/ws",
+                call_options={"async_amd": "true"},
+            ),
+        )
+        assert kwargs["async_amd_status_callback"] == "https://example.com/twilio/call-events"
+
+    @pytest.mark.asyncio
+    async def test_explicit_callback_url_wins_over_auto_wiring(self) -> None:
+        """setdefault: an explicit URL in call_options is never overwritten."""
+        config = {**get_test_config(), "voice_public_domain": "example.com"}
+        channel = VoiceChannel(TAC(config))
+
+        kwargs = await self._place_call(
+            channel,
+            InitiateVoiceConversationOptions(
+                to="+15559876543",
+                websocket_url="wss://example.com/ws",
+                call_options={"status_callback": "https://other.example/cb"},
+            ),
+        )
+        assert kwargs["status_callback"] == "https://other.example/cb"
+
+    @pytest.mark.asyncio
+    async def test_no_auto_wiring_without_domain(self) -> None:
+        tac = TAC(get_test_config())  # no voice_public_domain
+        channel = VoiceChannel(tac)
+
+        kwargs = await self._place_call(
+            channel,
+            InitiateVoiceConversationOptions(
+                to="+15559876543", websocket_url="wss://example.com/ws"
+            ),
+        )
+        assert "status_callback" not in kwargs
+
 
 class TestInitiateVoiceConversationOptionsForbidsExtra:
     """Migration safety: removed fields raise ValidationError instead of

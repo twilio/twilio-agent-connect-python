@@ -236,6 +236,25 @@ class TACFastAPIServer:
                     return Response(content="", media_type="text/plain", status_code=400)
                 return Response(content="", media_type="text/plain", status_code=200)
 
+            @app.post(
+                self.tac.config.voice_call_event_path,
+                dependencies=[Depends(http_sig)],
+            )
+            async def call_event_callback(request: Request) -> Response:
+                """Handle outbound call events (status callbacks, async AMD, recording).
+
+                All three Twilio callback URLs point here; the channel classifies
+                the payload and dispatches to the on_call_event handler.
+                """
+                try:
+                    form_data = await request.form()
+                    payload_dict = {k: v for k, v in form_data.items() if isinstance(v, str)}
+                    await vc.handle_call_event(payload_dict)
+                except Exception:
+                    logger.error("Failed to process call event callback", exc_info=True)
+                    return Response(content="", media_type="text/plain", status_code=400)
+                return Response(content="", media_type="text/plain", status_code=200)
+
         if config.cintel_webhook_path is not None:
             tac = self.tac
 

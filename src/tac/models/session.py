@@ -31,6 +31,14 @@ class ConversationSession(BaseModel):
     """
 
     conversation_id: str = Field(..., description="Unique conversation identifier")
+    call_sid: str | None = Field(
+        None,
+        description="Twilio Call SID for voice conversations. Populated on the "
+        "Voice channel (equals conversation_id in ConversationRelay-only mode; "
+        "the Twilio Call SID in Conversation Orchestrator mode). None on "
+        "messaging channels. Use it as the correlation key with call events "
+        "(see VoiceChannel.on_call_event) and VoiceChannel.end_call.",
+    )
     profile_id: str | None = Field(
         None, description="Profile ID associated with conversation (optional)"
     )

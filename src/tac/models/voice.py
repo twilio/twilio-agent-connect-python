@@ -134,6 +134,71 @@ class ConversationRelayCallbackPayload(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+CallEventKind = Literal["status", "amd", "recording"]
+
+
+class CallEvent(BaseModel):
+    """A framework-neutral event parsed from a Twilio outbound-call webhook.
+
+    Twilio has three independent call-callback URLs — ``status_callback``,
+    ``async_amd_status_callback``, and ``recording_status_callback`` — but TAC
+    points all three at a single route and classifies the payload here, so a
+    developer registers just one handler via ``VoiceChannel.on_call_event``.
+
+    ``kind`` discriminates the source:
+      - ``"recording"`` — a recording-status callback (``RecordingSid`` present).
+      - ``"amd"`` — an async AMD result (``AnsweredBy`` present, no recording).
+      - ``"status"`` — a call-progress callback (anything else).
+
+    ``call_sid`` is the correlation key across every surface (it matches
+    ``ConversationSession.call_sid`` passed to ``on_message_ready`` and the
+    ``call_sid`` returned by ``initiate_outbound_conversation``). ``raw`` holds
+    the full form dict for fields not surfaced as typed attributes.
+    """
+
+    kind: CallEventKind
+    call_sid: str
+    account_sid: str | None = None
+    # status-callback fields
+    call_status: str | None = None
+    # async-AMD fields
+    answered_by: str | None = None
+    machine_detection_duration: str | None = None
+    # recording fields
+    recording_sid: str | None = None
+    recording_url: str | None = None
+    recording_status: str | None = None
+    raw: dict[str, str] = Field(default_factory=dict)
+
+    model_config = {"populate_by_name": True}
+
+    @classmethod
+    def from_form(cls, form: dict[str, str]) -> "CallEvent":
+        """Build a CallEvent from a raw Twilio webhook form dict.
+
+        Classifies by which fields are present, following the same
+        bucket-unknown-keys-into-raw pattern as ``TwiMLRequest.from_form``.
+        """
+        if form.get("RecordingSid"):
+            kind: CallEventKind = "recording"
+        elif form.get("AnsweredBy"):
+            kind = "amd"
+        else:
+            kind = "status"
+        return cls(
+            kind=kind,
+            call_sid=form.get("CallSid", ""),
+            account_sid=form.get("AccountSid"),
+            call_status=form.get("CallStatus"),
+            answered_by=form.get("AnsweredBy"),
+            machine_detection_duration=form.get("MachineDetectionDuration"),
+            recording_sid=form.get("RecordingSid"),
+            recording_url=form.get("RecordingUrl"),
+            recording_status=form.get("RecordingStatus"),
+            raw=form,
+        )
+
+
 class LanguageConfig(BaseModel):
     """A single ``<Language>`` child for multi-language ConversationRelay setups.
 

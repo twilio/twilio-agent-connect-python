@@ -1,9 +1,14 @@
 """Voice channel for handling voice-based conversations."""
 
 from tac.channels.voice.channel import VoiceChannel
-from tac.channels.voice.config import InboundCallTwiMLHandler, VoiceChannelConfig
+from tac.channels.voice.config import (
+    CallEventHandler,
+    InboundCallTwiMLHandler,
+    VoiceChannelConfig,
+)
 from tac.channels.voice.twiml import generate_twiml
 from tac.models.voice import (
+    CallEvent,
     InterruptMode,
     LanguageConfig,
     TwiMLOptions,
@@ -11,6 +16,8 @@ from tac.models.voice import (
 )
 
 __all__ = [
+    "CallEvent",
+    "CallEventHandler",
     "InboundCallTwiMLHandler",
     "InterruptMode",
     "LanguageConfig",

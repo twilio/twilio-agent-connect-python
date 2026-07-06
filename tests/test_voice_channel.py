@@ -2349,3 +2349,128 @@ class TestVoicePathsOnTACConfig:
         tac = TAC(get_test_config())
         assert tac.config.voice_websocket_path == "/ws"
         assert tac.config.voice_action_path == "/conversation-relay-callback"
+        assert tac.config.voice_call_event_path == "/twilio/call-events"
+
+
+class TestCallEventModel:
+    """CallEvent.from_form classifies a Twilio webhook by present fields."""
+
+    def test_classifies_amd(self) -> None:
+        from tac.models.voice import CallEvent
+
+        event = CallEvent.from_form(
+            {"CallSid": "CA1", "AccountSid": "ACtest123", "AnsweredBy": "machine_end_beep"}
+        )
+        assert event.kind == "amd"
+        assert event.call_sid == "CA1"
+        assert event.answered_by == "machine_end_beep"
+
+    def test_classifies_recording(self) -> None:
+        from tac.models.voice import CallEvent
+
+        event = CallEvent.from_form(
+            {"CallSid": "CA1", "RecordingSid": "RE1", "RecordingUrl": "https://x/r"}
+        )
+        assert event.kind == "recording"
+        assert event.recording_sid == "RE1"
+
+    def test_classifies_status(self) -> None:
+        from tac.models.voice import CallEvent
+
+        event = CallEvent.from_form({"CallSid": "CA1", "CallStatus": "no-answer"})
+        assert event.kind == "status"
+        assert event.call_status == "no-answer"
+
+    def test_keeps_raw_form(self) -> None:
+        from tac.models.voice import CallEvent
+
+        form = {"CallSid": "CA1", "CallStatus": "completed", "Custom": "x"}
+        event = CallEvent.from_form(form)
+        assert event.raw["Custom"] == "x"
+
+
+class TestHandleCallEvent:
+    @pytest.mark.asyncio
+    async def test_fires_registered_handler(self) -> None:
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+        received = []
+
+        async def handler(event: object) -> None:
+            received.append(event)
+
+        channel.on_call_event(handler)
+        await channel.handle_call_event(
+            {"CallSid": "CA1", "AccountSid": "ACtest123", "AnsweredBy": "human"}
+        )
+        assert len(received) == 1
+        assert received[0].kind == "amd"
+        assert received[0].answered_by == "human"
+
+    @pytest.mark.asyncio
+    async def test_noop_without_handler(self) -> None:
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+        # Should not raise despite no handler registered.
+        await channel.handle_call_event({"CallSid": "CA1", "CallStatus": "completed"})
+
+    @pytest.mark.asyncio
+    async def test_ignores_account_sid_mismatch(self) -> None:
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+        received = []
+
+        async def handler(event: object) -> None:
+            received.append(event)
+
+        channel.on_call_event(handler)
+        await channel.handle_call_event(
+            {"CallSid": "CA1", "AccountSid": "ACwrong", "CallStatus": "completed"}
+        )
+        assert received == []
+
+
+class TestEndCall:
+    @pytest.mark.asyncio
+    async def test_hangs_up_via_twilio(self) -> None:
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+
+        mock_client = MagicMock()
+        with patch.object(channel, "_get_twilio_client", return_value=mock_client):
+            await channel.end_call("CA1")
+
+        mock_client.calls.assert_called_once_with("CA1")
+        mock_client.calls().update.assert_called_with(status="completed")
+
+    @pytest.mark.asyncio
+    async def test_cleans_up_session_via_callsid_map(self) -> None:
+        """In orchestrator mode conv_id != call_sid; end_call resolves through
+        the CallSid map to clean up the right session."""
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+
+        # Simulate an active orchestrator-mode session.
+        channel._start_conversation("conv_abc")
+        channel._call_sid_to_conv_id["CA1"] = "conv_abc"
+        channel._end_conversation = AsyncMock()  # type: ignore[method-assign]
+
+        mock_client = MagicMock()
+        with patch.object(channel, "_get_twilio_client", return_value=mock_client):
+            await channel.end_call("CA1")
+
+        channel._end_conversation.assert_awaited_once_with("conv_abc")
+
+    @pytest.mark.asyncio
+    async def test_hangup_works_without_tracked_session(self) -> None:
+        """A machine may never prompt (no session); the hangup must still work."""
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+        channel._end_conversation = AsyncMock()  # type: ignore[method-assign]
+
+        mock_client = MagicMock()
+        with patch.object(channel, "_get_twilio_client", return_value=mock_client):
+            await channel.end_call("CA_unknown")
+
+        mock_client.calls().update.assert_called_with(status="completed")
+        channel._end_conversation.assert_not_awaited()

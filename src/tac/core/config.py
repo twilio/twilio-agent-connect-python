@@ -302,6 +302,16 @@ class TACConfig(BaseModel):
         "cleanup callback.",
     )
 
+    voice_call_event_path: str = Field(
+        default="/twilio/call-events",
+        description="Path the outbound call-event callback is served at (Twilio "
+        "status callbacks, async AMD results, and recording status). Combined "
+        "with voice_public_domain to build the callback URL the voice channel "
+        "hands to Twilio on calls.create; TACFastAPIServer registers one route "
+        "here that all three Twilio callback params point at. Same role as "
+        "voice_action_path.",
+    )
+
     @field_validator("voice_public_domain", mode="before")
     @classmethod
     def _normalize_voice_public_domain(cls, v: str | None) -> str | None:
@@ -421,6 +431,9 @@ class TACConfig(BaseModel):
             voice_websocket_path=os.environ.get("TWILIO_VOICE_WEBSOCKET_PATH", "/ws"),
             voice_action_path=os.environ.get(
                 "TWILIO_VOICE_ACTION_PATH", "/conversation-relay-callback"
+            ),
+            voice_call_event_path=os.environ.get(
+                "TWILIO_VOICE_CALL_EVENT_PATH", "/twilio/call-events"
             ),
             memory_config=memory_config,
             conversation_intelligence_config=conversation_intelligence_config,
