@@ -62,7 +62,9 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
       - name: Deploy versioned docs
+        # --alias-type=copy writes real files for the "latest" alias instead of a
+        # symlink; GitHub Pages' legacy branch builder rejects symlinks.
         run: |
-          uv run --group docs mike deploy --push --update-aliases \
+          uv run --group docs mike deploy --push --update-aliases --alias-type=copy \
             "${{ steps.version.outputs.version }}" latest
           uv run --group docs mike set-default --push latest
