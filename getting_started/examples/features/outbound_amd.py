@@ -1,15 +1,19 @@
 """
-Example: Outbound voice with AMD and call events.
+Example: Outbound voice with AMD, recording, and call events.
 
 Places an outbound ConversationRelay call with answering machine detection
-(AMD) enabled, and reacts to Twilio's out-of-band call webhooks:
+(AMD) and recording enabled, and reacts to Twilio's out-of-band call webhooks.
+One on_call_event handler receives all three CallEvent kinds:
 
-- on a detected answering machine -> hang up (don't monologue at voicemail)
-- on no-answer / busy / failed     -> report the call as unreached
+- kind="status"    -> call progress: ringing / answered / completed, and
+                      no-answer / busy / failed (report as unreached)
+- kind="amd"       -> answering machine detection result; hang up on a machine
+                      instead of monologuing at voicemail
+- kind="recording" -> recording ready (RecordingUrl available)
 
 Shows the three outbound Calls-API seams:
   1. InitiateVoiceConversationOptions.call_options -> forwarded to calls.create
-  2. VoiceChannel.on_call_event                    -> one handler for status/AMD
+  2. VoiceChannel.on_call_event                    -> one handler, all kinds
   3. VoiceChannel.end_call(call_sid)               -> hang up + session cleanup
 
 TACFastAPIServer auto-registers the call-event route (at voice_call_event_path)
@@ -46,15 +50,19 @@ voice_channel = VoiceChannel(tac)
 
 # Seam 2: one handler for every call webhook, discriminated by event.kind.
 async def handle_call_event(event: CallEvent) -> None:
-    if event.kind == "amd":
+    if event.kind == "status":
+        print(f"[STATUS] {event.call_sid}: {event.call_status}")
+        if event.call_status in {"no-answer", "busy", "failed"}:
+            print(f"[STATUS] {event.call_sid} unreached — queue retry")
+
+    elif event.kind == "amd":
         print(f"[AMD] {event.call_sid}: answered_by={event.answered_by}")
         if event.answered_by and event.answered_by.startswith("machine"):
             # Seam 3: hang up instead of talking to an answering machine.
             await voice_channel.end_call(event.call_sid)
-    elif event.kind == "status":
-        print(f"[STATUS] {event.call_sid}: {event.call_status}")
-        if event.call_status in {"no-answer", "busy", "failed"}:
-            print(f"[STATUS] {event.call_sid} unreached — queue retry")
+
+    elif event.kind == "recording":
+        print(f"[RECORDING] {event.call_sid}: {event.recording_status} {event.recording_url}")
 
 
 voice_channel.on_call_event(handle_call_event)
@@ -65,9 +73,11 @@ async def place_call(to: str) -> None:
         InitiateVoiceConversationOptions(
             to=to,
             # Seam 1: forwarded to calls.create(). No callback URLs needed —
-            # TAC auto-wires them from TWILIO_VOICE_PUBLIC_DOMAIN.
+            # TAC auto-wires status/AMD/recording callbacks (all to one route)
+            # from TWILIO_VOICE_PUBLIC_DOMAIN when the feature is enabled.
             call_options={
-                "async_amd": "true",
+                "async_amd": "true",  # AMD (Twilio types this as a string) -> kind="amd"
+                "record": True,  # recording (Twilio types this as a bool) -> kind="recording"
                 "status_callback_event": ["initiated", "ringing", "answered", "completed"],
                 "timeout": 30,
             },
