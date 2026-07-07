@@ -161,6 +161,8 @@ class CallEvent(BaseModel):
     account_sid: str | None = None
     # status-callback fields
     call_status: str | None = None
+    call_duration: str | None = None
+    sip_response_code: str | None = None
     # async-AMD fields
     answered_by: str | None = None
     machine_detection_duration: str | None = None
@@ -168,6 +170,7 @@ class CallEvent(BaseModel):
     recording_sid: str | None = None
     recording_url: str | None = None
     recording_status: str | None = None
+    recording_duration: str | None = None
     raw: dict[str, str] = Field(default_factory=dict)
 
     model_config = {"populate_by_name": True}
@@ -178,8 +181,12 @@ class CallEvent(BaseModel):
 
         Classifies by which fields are present, following the same
         bucket-unknown-keys-into-raw pattern as ``TwiMLRequest.from_form``.
+
+        A completed status callback can also carry ``RecordingSid``/``RecordingUrl``,
+        so recording is discriminated on ``RecordingStatus`` (posted only by the
+        recording callback), not on the mere presence of a recording SID.
         """
-        if form.get("RecordingSid"):
+        if form.get("RecordingStatus"):
             kind: CallEventKind = "recording"
         elif form.get("AnsweredBy"):
             kind = "amd"
@@ -190,11 +197,14 @@ class CallEvent(BaseModel):
             call_sid=form.get("CallSid", ""),
             account_sid=form.get("AccountSid"),
             call_status=form.get("CallStatus"),
+            call_duration=form.get("CallDuration"),
+            sip_response_code=form.get("SipResponseCode"),
             answered_by=form.get("AnsweredBy"),
             machine_detection_duration=form.get("MachineDetectionDuration"),
             recording_sid=form.get("RecordingSid"),
             recording_url=form.get("RecordingUrl"),
             recording_status=form.get("RecordingStatus"),
+            recording_duration=form.get("RecordingDuration"),
             raw=form,
         )
 

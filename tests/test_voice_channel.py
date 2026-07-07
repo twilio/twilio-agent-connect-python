@@ -2369,17 +2369,48 @@ class TestCallEventModel:
         from tac.models.voice import CallEvent
 
         event = CallEvent.from_form(
-            {"CallSid": "CA1", "RecordingSid": "RE1", "RecordingUrl": "https://x/r"}
+            {
+                "CallSid": "CA1",
+                "RecordingSid": "RE1",
+                "RecordingUrl": "https://x/r",
+                "RecordingStatus": "completed",
+                "RecordingDuration": "12",
+            }
         )
         assert event.kind == "recording"
         assert event.recording_sid == "RE1"
+        assert event.recording_duration == "12"
 
     def test_classifies_status(self) -> None:
         from tac.models.voice import CallEvent
 
-        event = CallEvent.from_form({"CallSid": "CA1", "CallStatus": "no-answer"})
+        event = CallEvent.from_form(
+            {
+                "CallSid": "CA1",
+                "CallStatus": "no-answer",
+                "CallDuration": "0",
+                "SipResponseCode": "480",
+            }
+        )
         assert event.kind == "status"
         assert event.call_status == "no-answer"
+        assert event.call_duration == "0"
+        assert event.sip_response_code == "480"
+
+    def test_completed_status_with_recording_sid_is_status_not_recording(self) -> None:
+        """A completed statusCallback also carries RecordingSid/RecordingUrl;
+        it must classify as status (recording is keyed on RecordingStatus)."""
+        from tac.models.voice import CallEvent
+
+        event = CallEvent.from_form(
+            {
+                "CallSid": "CA1",
+                "CallStatus": "completed",
+                "RecordingSid": "RE1",
+                "RecordingUrl": "https://x/r",
+            }
+        )
+        assert event.kind == "status"
 
     def test_keeps_raw_form(self) -> None:
         from tac.models.voice import CallEvent
