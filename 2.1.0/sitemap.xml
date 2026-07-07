@@ -2,34 +2,34 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <url>
          <loc>https://twilio.github.io/twilio-agent-connect-python/2.1.0/</loc>
-         <lastmod>2026-07-06</lastmod>
+         <lastmod>2026-07-07</lastmod>
     </url>
     <url>
          <loc>https://twilio.github.io/twilio-agent-connect-python/2.1.0/api/adapters/</loc>
-         <lastmod>2026-07-06</lastmod>
+         <lastmod>2026-07-07</lastmod>
     </url>
     <url>
          <loc>https://twilio.github.io/twilio-agent-connect-python/2.1.0/api/channels/</loc>
-         <lastmod>2026-07-06</lastmod>
+         <lastmod>2026-07-07</lastmod>
     </url>
     <url>
          <loc>https://twilio.github.io/twilio-agent-connect-python/2.1.0/api/context/</loc>
-         <lastmod>2026-07-06</lastmod>
+         <lastmod>2026-07-07</lastmod>
     </url>
     <url>
          <loc>https://twilio.github.io/twilio-agent-connect-python/2.1.0/api/core/</loc>
-         <lastmod>2026-07-06</lastmod>
+         <lastmod>2026-07-07</lastmod>
     </url>
     <url>
          <loc>https://twilio.github.io/twilio-agent-connect-python/2.1.0/api/intelligence/</loc>
-         <lastmod>2026-07-06</lastmod>
+         <lastmod>2026-07-07</lastmod>
     </url>
     <url>
          <loc>https://twilio.github.io/twilio-agent-connect-python/2.1.0/api/models/</loc>
-         <lastmod>2026-07-06</lastmod>
+         <lastmod>2026-07-07</lastmod>
     </url>
     <url>
          <loc>https://twilio.github.io/twilio-agent-connect-python/2.1.0/api/tools/</loc>
-         <lastmod>2026-07-06</lastmod>
+         <lastmod>2026-07-07</lastmod>
     </url>
 </urlset>
