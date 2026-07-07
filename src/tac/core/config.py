@@ -355,47 +355,52 @@ class TACConfig(BaseModel):
         """
         Create TACConfig from environment variables.
 
-        Required:
-        - TWILIO_ACCOUNT_SID: Twilio Account SID
-        - TWILIO_AUTH_TOKEN: Twilio Auth Token for API authentication
-        - TWILIO_API_KEY: Twilio API Key SID (starts with SK)
-        - TWILIO_API_SECRET: Twilio API Secret for API Key authentication
-        - TWILIO_PHONE_NUMBER: Phone number for voice and SMS channels
+        **Required:**
 
-        Required for Conversation Orchestrator / Memory / Knowledge:
-        - TWILIO_CONVERSATION_CONFIGURATION_ID: Conversation Orchestrator configuration ID
+        - `TWILIO_ACCOUNT_SID`: Twilio Account SID
+        - `TWILIO_AUTH_TOKEN`: Twilio Auth Token for API authentication
+        - `TWILIO_API_KEY`: Twilio API Key SID (starts with SK)
+        - `TWILIO_API_SECRET`: Twilio API Secret for API Key authentication
+        - `TWILIO_PHONE_NUMBER`: Phone number for voice and SMS channels
+
+        **Required for Conversation Orchestrator / Memory / Knowledge:**
+
+        - `TWILIO_CONVERSATION_CONFIGURATION_ID`: Conversation Orchestrator configuration ID
           (when omitted, TAC runs in ConversationRelay-only mode)
 
-        Optional:
-        - TWILIO_RCS_SENDER_ID: RCS Sender ID for RCS channel
-        - TWILIO_WHATSAPP_NUMBER: WhatsApp-enabled phone number
-          (format: whatsapp:+1234567890)
-        - TWILIO_KNOWLEDGE_BASE_ID: Knowledge Base ID for RAG search functionality
-        - TWILIO_LOG_LEVEL: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL).
+        **Optional:**
+
+        - `TWILIO_RCS_SENDER_ID`: RCS Sender ID for RCS channel
+        - `TWILIO_WHATSAPP_NUMBER`: WhatsApp-enabled phone number
+          (format: `whatsapp:+1234567890`)
+        - `TWILIO_KNOWLEDGE_BASE_ID`: Knowledge Base ID for RAG search functionality
+        - `TWILIO_LOG_LEVEL`: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL).
           Default: INFO
-        - TWILIO_REGION: Twilio region for data residency (e.g., 'au1', 'ie1')
-        - TWILIO_STUDIO_HANDOFF_FLOW_SID: Studio Flow SID (FWxxx...) for handoff tool
-        - TWILIO_VOICE_PUBLIC_DOMAIN: Public domain for voice routes (required for voice)
-        - TWILIO_VOICE_WEBSOCKET_PATH: Path for voice WebSocket (default: /ws)
-        - TWILIO_VOICE_ACTION_PATH: Path for ConversationRelay action callback
+        - `TWILIO_REGION`: Twilio region for data residency (e.g., 'au1', 'ie1')
+        - `TWILIO_STUDIO_HANDOFF_FLOW_SID`: Studio Flow SID (FWxxx...) for handoff tool
+        - `TWILIO_VOICE_PUBLIC_DOMAIN`: Public domain for voice routes (required for voice)
+        - `TWILIO_VOICE_WEBSOCKET_PATH`: Path for voice WebSocket (default: /ws)
+        - `TWILIO_VOICE_ACTION_PATH`: Path for ConversationRelay action callback
           (default: /conversation-relay-callback)
 
-        Memory Configuration:
-        - TWILIO_MEMORY_PROFILE_TRAIT_GROUPS: Trait groups to include
-          (comma-separated, e.g., "Contact,Preferences")
-        - TWILIO_MEMORY_OBSERVATIONS_LIMIT: Max observations in memory retrieval.
-          Default: 20
-        - TWILIO_MEMORY_SUMMARIES_LIMIT: Max summaries in memory retrieval. Default: 5
-        - TWILIO_MEMORY_COMMUNICATIONS_LIMIT: Max communications in memory retrieval.
-          Default: 0
-        - TWILIO_MEMORY_RELEVANCE_THRESHOLD: Min relevance score (0.0-1.0). Default: 0.0
+        **Memory Configuration:**
 
-        Conversation Intelligence:
-        - CONVERSATION_INTELLIGENCE_CONFIGURATION_ID: CI Service configuration ID
+        - `TWILIO_MEMORY_PROFILE_TRAIT_GROUPS`: Trait groups to include
+          (comma-separated, e.g., "Contact,Preferences")
+        - `TWILIO_MEMORY_OBSERVATIONS_LIMIT`: Max observations in memory retrieval.
+          Default: 20
+        - `TWILIO_MEMORY_SUMMARIES_LIMIT`: Max summaries in memory retrieval. Default: 5
+        - `TWILIO_MEMORY_COMMUNICATIONS_LIMIT`: Max communications in memory retrieval.
+          Default: 0
+        - `TWILIO_MEMORY_RELEVANCE_THRESHOLD`: Min relevance score (0.0-1.0). Default: 0.0
+
+        **Conversation Intelligence:**
+
+        - `CONVERSATION_INTELLIGENCE_CONFIGURATION_ID`: CI Service configuration ID
           for webhook filtering
-        - CONVERSATION_INTELLIGENCE_OBSERVATION_OPERATOR_SID: Operator SID for
+        - `CONVERSATION_INTELLIGENCE_OBSERVATION_OPERATOR_SID`: Operator SID for
           observation extraction
-        - CONVERSATION_INTELLIGENCE_SUMMARY_OPERATOR_SID: Operator SID for summary
+        - `CONVERSATION_INTELLIGENCE_SUMMARY_OPERATOR_SID`: Operator SID for summary
           extraction
         """
         # Load memory configuration from optional env vars (config object is always present)

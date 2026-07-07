@@ -1,4 +1,4 @@
-# Intelligence
+# Conversation Intelligence
 
 ::: tac.intelligence
     options:

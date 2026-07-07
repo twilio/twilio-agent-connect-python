@@ -12,6 +12,8 @@ extra:
 
 theme:
   name: material
+  logo: assets/twilio-logo.svg
+  favicon: assets/twilio-logo.svg
   features:
     - navigation.sections
     - navigation.top
@@ -21,13 +23,15 @@ theme:
   palette:
     - media: "(prefers-color-scheme: light)"
       scheme: default
-      primary: red
+      primary: indigo
+      accent: blue
       toggle:
         icon: material/weather-night
         name: Switch to dark mode
     - media: "(prefers-color-scheme: dark)"
       scheme: slate
-      primary: red
+      primary: indigo
+      accent: blue
       toggle:
         icon: material/weather-sunny
         name: Switch to light mode
@@ -49,7 +53,8 @@ plugins:
             show_signature_annotations: true
             signature_crossrefs: true
             merge_init_into_class: true
-            filters: ["!^_"]
+            filters:
+              ["!^_", "!^trigger_message_ready$", "!^trigger_interrupt$", "!^trigger_conversation_ended$", "!^register_partner_connector$", "!^is_orchestrator_enabled$"]
 
 markdown_extensions:
   - admonition
@@ -70,5 +75,5 @@ nav:
       - Context: api/context.md
       - Tools: api/tools.md
       - Adapters: api/adapters.md
-      - Intelligence: api/intelligence.md
+      - Conversation Intelligence: api/intelligence.md
       - Models: api/models.md

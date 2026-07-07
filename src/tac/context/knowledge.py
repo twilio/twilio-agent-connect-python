@@ -7,7 +7,11 @@ from tac.models.knowledge import KnowledgeBase, KnowledgeChunkResult
 
 
 class KnowledgeClient(BaseAPIClient):
-    """Client for interacting with Twilio Knowledge Base API."""
+    """Client for interacting with Twilio Knowledge Base API.
+
+    See [Enterprise Knowledge](https://www.twilio.com/docs/conversations/knowledge) for
+    the product overview.
+    """
 
     def __init__(
         self,

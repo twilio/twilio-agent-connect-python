@@ -1,7 +1,5 @@
 # Core
 
-::: tac.core.TAC
-
-::: tac.core.TACConfig
-
-::: tac.context.base.PartnerConnector
+::: tac.core
+    options:
+      show_submodules: false

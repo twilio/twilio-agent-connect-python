@@ -21,6 +21,7 @@
   
   <p>
     <a href="https://www.twilio.com/docs/conversations/agent-connect">Documentation</a>
+    ◆ <a href="https://twilio.github.io/twilio-agent-connect-python/">API Reference</a>
     ◆ <a href="https://github.com/twilio/twilio-agent-connect-python">Python SDK</a>
     ◆ <a href="https://github.com/twilio/twilio-agent-connect-typescript">TypeScript SDK</a>
     ◆ <a href="https://github.com/twilio/twilio-agent-connect-python/tree/main/getting_started/examples">Examples</a>
@@ -178,6 +179,7 @@ For detailed architecture and advanced usage, see [CLAUDE.md](https://github.com
 - **[TAC for Microsoft](https://github.com/twilio/twilio-agent-connect-microsoft)** — `AgentFrameworkConnector` and `VoiceLiveConnector` for Microsoft Agent Framework, Azure AI Foundry (including Voice Live), and Azure OpenAI
 
 **Documentation:**
+- **[API Reference](https://twilio.github.io/twilio-agent-connect-python/)** - Full API documentation generated from the source
 - **[CLAUDE.md](https://github.com/twilio/twilio-agent-connect-python/blob/main/CLAUDE.md)** - Architecture, development guide, and API reference
 - **[Getting Started Guide](https://github.com/twilio/twilio-agent-connect-python/blob/main/getting_started/README.md)** - Setup instructions, environment variables, and troubleshooting
 

@@ -13,7 +13,11 @@ from tac.models.memory import (
 
 
 class MemoryClient(BaseAPIClient):
-    """Client for interacting with Twilio Conversation Memory data plane API."""
+    """Client for interacting with Twilio Conversation Memory data plane API.
+
+    See [Conversation Memory](https://www.twilio.com/docs/conversations/memory) for
+    the product overview.
+    """
 
     def __init__(
         self,
