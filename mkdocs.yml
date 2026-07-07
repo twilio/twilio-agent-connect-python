@@ -55,6 +55,10 @@ markdown_extensions:
   - admonition
   - pymdownx.details
   - pymdownx.superfences
+  - pymdownx.snippets:
+      # Allow docs pages to include files from the repo root (e.g. README.md).
+      base_path: ["."]
+      check_paths: true
   - toc:
       permalink: true
 
