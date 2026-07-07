@@ -10,18 +10,16 @@ Requires: pip install tac[server]
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from tac.channels.base import BaseChannel
+from tac.channels.messaging import MessagingChannel
+from tac.channels.voice import VoiceChannel
 from tac.channels.websocket_protocol import WebSocketDisconnectError
 from tac.core.logging import get_logger
 from tac.core.tac import TAC
 from tac.models.voice import TwiMLRequest
 from tac.server.config import TACServerConfig
-
-if TYPE_CHECKING:
-    from tac.channels.messaging import MessagingChannel
-    from tac.channels.voice import VoiceChannel
 
 try:
     import uvicorn
@@ -112,6 +110,8 @@ class TACFastAPIServer:
         self.voice_channel = voice_channel
         self.messaging_channels: list[MessagingChannel] = messaging_channels or []
 
+        self._validate_channel_types()
+
         if self.voice_channel is not None:
             self._validate_voice_url_config()
 
@@ -123,6 +123,30 @@ class TACFastAPIServer:
 
         self.app: FastAPI = app if app is not None else FastAPI(title="TAC Server")
         self._register_routes(self.app)
+
+    def _validate_channel_types(self) -> None:
+        """Fail fast at server construction if a channel is the wrong type.
+
+        A common mistake is passing ``None`` (e.g. a connector channel that
+        wasn't configured) or an otherwise wrong object into
+        ``messaging_channels`` / ``voice_channel``. Without this check that
+        surfaces much later as an opaque ``AttributeError`` (e.g. ``'NoneType'
+        object has no attribute 'get_channel_name'``) deep in webhook dispatch,
+        far from the actual misconfiguration.
+        """
+        if self.voice_channel is not None and not isinstance(self.voice_channel, VoiceChannel):
+            raise TypeError(
+                "voice_channel must be a VoiceChannel or None, got "
+                f"{type(self.voice_channel).__name__}."
+            )
+        for channel in self.messaging_channels:
+            if not isinstance(channel, MessagingChannel):
+                raise TypeError(
+                    "messaging_channels must contain MessagingChannel instances "
+                    "(SMSChannel, RCSChannel, WhatsAppChannel, ChatChannel), got "
+                    f"{type(channel).__name__}. A None here usually means a channel "
+                    "that wasn't configured was passed through — filter those out."
+                )
 
     def _validate_voice_url_config(self) -> None:
         """Fail fast at server construction if the voice channel can't build a
