@@ -1,5 +1,5 @@
 """
-Example: Outbound voice with AMD, recording, and call events.
+Example: Voice call events (status, AMD, and recording).
 
 Places an outbound ConversationRelay call with answering machine detection
 (AMD) and recording enabled, and reacts to Twilio's out-of-band call webhooks.
@@ -11,10 +11,16 @@ One on_call_event handler receives all three CallEvent kinds:
                       instead of monologuing at voicemail
 - kind="recording" -> recording ready (RecordingUrl available)
 
-Shows the three outbound Calls-API seams:
+Shows the three Calls-API seams:
   1. InitiateVoiceConversationOptions.call_options -> forwarded to calls.create
   2. VoiceChannel.on_call_event                    -> one handler, all kinds
   3. VoiceChannel.end_call(call_sid)               -> hang up + session cleanup
+
+This example enables AMD/recording by placing an OUTBOUND call (call_options
+only applies to calls TAC creates). The on_call_event and end_call seams also
+work for INBOUND calls — if status/recording callbacks are enabled on the
+number's incoming-call config, the same handler receives those events and
+end_call() hangs up an inbound call the same way.
 
 TACFastAPIServer auto-registers the call-event route (at voice_call_event_path)
 and auto-wires the callback URLs from TWILIO_VOICE_PUBLIC_DOMAIN, so there is no
@@ -26,7 +32,7 @@ Env vars required:
 - TWILIO_VOICE_PUBLIC_DOMAIN (ngrok or similar)
 
 Usage:
-    python outbound_amd.py --to +16505551234
+    python voice_call_events.py --to +16505551234
 """
 
 import argparse
@@ -87,7 +93,7 @@ async def place_call(to: str) -> None:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Outbound voice with AMD")
+    parser = argparse.ArgumentParser(description="Voice call events (status, AMD, recording)")
     parser.add_argument("--to", required=True, help="Destination number, e.g. +16505551234")
     args = parser.parse_args()
 
