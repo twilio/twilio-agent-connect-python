@@ -18,13 +18,17 @@ from typing import (
     get_type_hints,
 )
 
-from pydantic import TypeAdapter
+from pydantic import BaseModel, TypeAdapter
+
+from tac import get_logger
 
 if TYPE_CHECKING:
     # Typing-only soft dep: `openai-agents` is optional at runtime. The ignore
     # silences strict-mode downstream mypy when the package isn't installed
     # (and is a no-op when it is — `unused-ignore` covers both environments).
     from agents import FunctionTool  # type: ignore[import-not-found,unused-ignore]
+
+logger = get_logger(__name__)
 
 
 # Marker class for injected tool arguments
@@ -188,12 +192,10 @@ class TACTool:
 
             try:
                 try:
-                    from pydantic import BaseModel
-
                     is_pydantic_model = isinstance(expected_type, type) and issubclass(
                         expected_type, BaseModel
                     )
-                except (ImportError, TypeError):
+                except TypeError:
                     is_pydantic_model = False
 
                 adapter: TypeAdapter[object]
@@ -296,10 +298,19 @@ class TACTool:
                 "Install with: pip install openai-agents"
             ) from e
 
+        def _json_default(obj: object) -> object:
+            # Tool implementations may return Pydantic models (e.g. the
+            # knowledge tool returns list[KnowledgeChunkResult]), which the
+            # stdlib json encoder can't handle on its own.
+            if isinstance(obj, BaseModel):
+                return obj.model_dump(by_alias=True, exclude_none=True)
+            raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
+
         async def on_invoke(_ctx: object, args_json: str) -> str:
             args = json.loads(args_json) if args_json else {}
+            logger.debug("TOOL | Called", tool_name=self.name)
             result = await self(**args)
-            return json.dumps(result)
+            return json.dumps(result, default=_json_default)
 
         return FunctionTool(
             name=self.name,
