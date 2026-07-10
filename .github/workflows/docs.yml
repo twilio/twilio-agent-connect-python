@@ -67,7 +67,11 @@ jobs:
       - name: Deploy versioned docs
         # --alias-type=copy writes real files for the "latest" alias instead of a
         # symlink; GitHub Pages' legacy branch builder rejects symlinks.
+        # VERSION is passed via env: (not interpolated into the script) so a
+        # crafted workflow_dispatch input can't inject shell commands.
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           uv run --group docs mike deploy --push --update-aliases --alias-type=copy \
-            "${{ steps.version.outputs.version }}" latest
+            "$VERSION" latest
           uv run --group docs mike set-default --push latest
