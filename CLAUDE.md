@@ -77,6 +77,14 @@ The OpenAI adapter (`src/tac/adapters/openai/adapter.py`) supports both Chat Com
 
 Both APIs are fully supported with sync/async variants and streaming support.
 
+## Documentation
+
+- The full public API reference is published at https://twilio.github.io/twilio-agent-connect-python/ — consult it for the surface exposed to package consumers.
+- API docs are generated from docstrings by MkDocs Material + mkdocstrings, so **docstrings are published documentation** — write them for both source readers and the rendered site.
+- Use **Markdown** in docstrings and `Field(description=...)` text: `**bold**` for emphasis/headers, `- ` bullet lists, backticks for code/identifiers, and fenced code blocks for examples. These render on the docs site.
+- Keep Markdown blocks well-formed: leave a blank line before a bullet list or fenced block, and indent consistently, so mkdocstrings parses them correctly.
+- Internal-facing methods are hidden from the docs via the mkdocstrings `filters` list in `mkdocs.yml`. When you add, rename, or change the visibility of an internal-facing API method (one that consumers shouldn't call), update that `filters` list so the published reference stays accurate.
+
 ## Dependencies
 
 - **Core**: `pydantic>=2`, `httpx>=0.27`, `twilio>=9.8.3`
