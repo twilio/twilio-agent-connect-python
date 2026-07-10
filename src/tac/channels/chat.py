@@ -11,6 +11,7 @@ from tac.models.conversation import (
     ActionChannelSettings,
     ActionParticipantRef,
     ActionTextContent,
+    ChannelType,
     ParticipantAddress,
     SendMessageActionPayload,
     SendMessageActionRequest,
@@ -64,10 +65,7 @@ class ChatChannel(MessagingChannel):
         )
         self.agent_address = config.agent_address
 
-    def get_channel_name(self) -> str:
-        return "chat"
-
-    def get_channel_type_upper(self) -> str:
+    def get_channel_name(self) -> ChannelType:
         return "CHAT"
 
     def is_default_agent_address(self, author_address: str) -> bool:

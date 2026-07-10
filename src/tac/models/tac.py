@@ -4,7 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from tac.models.conversation import Communication, Transcription
+from tac.models.conversation import ChannelType, Communication, Transcription
 from tac.models.memory import (
     MemoryCommunication,
     MemoryRetrievalResponse,
@@ -20,9 +20,7 @@ class TACCommunicationAuthor(BaseModel):
 
     # Common fields (both APIs)
     address: str = Field(..., description="Address of the communication author")
-    channel: Literal["VOICE", "SMS", "RCS", "EMAIL", "WHATSAPP", "CHAT", "API", "SYSTEM"] = Field(
-        ..., description="Channel type"
-    )
+    channel: ChannelType = Field(..., description="Channel type")
 
     # Conversation Orchestrator-only fields
     participant_id: str | None = Field(

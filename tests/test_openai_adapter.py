@@ -131,7 +131,7 @@ def sample_context() -> ConversationSession:
     return ConversationSession(
         conversation_id="conv123",
         profile_id="prof456",
-        channel="sms",
+        channel="SMS",
         profile=ProfileResponse(
             id="prof456",
             createdAt="2024-01-01T00:00:00Z",
@@ -321,7 +321,7 @@ def test_multiple_wrappers_no_memory_bleeding(
 
     context_1 = sample_context
     context_2 = ConversationSession(
-        conversation_id="conv456", profile_id="prof789", channel="voice"
+        conversation_id="conv456", profile_id="prof789", channel="VOICE"
     )
 
     wrapper_1 = with_tac_memory(mock_openai_client, memory_1, context_1)

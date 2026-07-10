@@ -14,6 +14,7 @@ from tac.channels.base import BaseChannel
 from tac.channels.websocket_manager import WebSocketManager
 from tac.channels.websocket_protocol import WebSocketDisconnectError, WebSocketProtocol
 from tac.core.tac import TAC
+from tac.models.conversation import ChannelType
 from tac.models.outbound import InitiateVoiceConversationOptions, InitiateVoiceConversationResult
 from tac.models.session import AuthorInfo
 from tac.models.voice import (
@@ -848,8 +849,8 @@ class VoiceChannel(BaseChannel):
                 f"Error sending response: {e}", conversation_id=conversation_id, exc_info=True
             )
 
-    def get_channel_name(self) -> str:
-        return "voice"
+    def get_channel_name(self) -> ChannelType:
+        return "VOICE"
 
     def get_websocket(self, conversation_id: str) -> WebSocketProtocol | None:
         """

@@ -2,6 +2,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
+from tac.models.conversation import ChannelType
+
 # Memory retrieval mode for channels
 MemoryMode = Literal["always", "never", "once"]
 
@@ -93,9 +95,7 @@ class MemoryParticipant(BaseModel):
         description="Address of the Participant (e.g., phone number, email address)",
         json_schema_extra={"example": "+12025551234"},
     )
-    channel: Literal["VOICE", "SMS", "RCS", "EMAIL", "WHATSAPP", "CHAT", "API", "SYSTEM"] = Field(
-        ..., description="The channel on which the message originated"
-    )
+    channel: ChannelType = Field(..., description="The channel on which the message originated")
     type: Literal["HUMAN_AGENT", "CUSTOMER", "AI_AGENT", "AGENT", "UNKNOWN"] | None = Field(
         default=None,
         description="Type of Participant in the Conversation",

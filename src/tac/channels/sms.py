@@ -11,6 +11,7 @@ from tac.models.conversation import (
     ActionChannelSettings,
     ActionParticipantRef,
     ActionTextContent,
+    ChannelType,
     ParticipantAddress,
     SendMessageActionPayload,
     SendMessageActionRequest,
@@ -65,10 +66,7 @@ class SMSChannel(MessagingChannel):
                 "provide phone_number in TACConfig."
             )
 
-    def get_channel_name(self) -> str:
-        return "sms"
-
-    def get_channel_type_upper(self) -> str:
+    def get_channel_name(self) -> ChannelType:
         return "SMS"
 
     def is_default_agent_address(self, author_address: str) -> bool:

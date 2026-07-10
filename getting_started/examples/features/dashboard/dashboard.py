@@ -59,13 +59,6 @@ def create_dashboard_router(
             sessions.update(get_voice_sessions())
         return sessions
 
-    def _resolve_channel(conv_id: str) -> str:
-        if get_sms_sessions and conv_id in get_sms_sessions():
-            return "sms"
-        if get_voice_sessions and conv_id in get_voice_sessions():
-            return "voice"
-        return "chat"
-
     def _get_display_messages(conv_id: str) -> list[dict[str, str]]:
         """Get user/assistant messages for display."""
         if not get_messages:
@@ -115,7 +108,7 @@ def create_dashboard_router(
             results.append(
                 {
                     "id": conv_id,
-                    "channel": session.channel or _resolve_channel(conv_id),
+                    "channel": session.channel,
                     "status": live_status.get(conv_id, "ACTIVE")
                     if live_status is not None
                     else "ACTIVE",
@@ -143,7 +136,7 @@ def create_dashboard_router(
         return JSONResponse(
             content={
                 "id": conv_id,
-                "channel": session.channel or _resolve_channel(conv_id),
+                "channel": session.channel,
                 "profile_id": session.profile_id,
                 "author_address": (session.author_info.address if session.author_info else None),
                 "messages": msgs,

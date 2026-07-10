@@ -133,7 +133,7 @@ class TestProfileFetchingInRetrieveMemory:
         context = ConversationSession(
             conversation_id="conv123",
             profile_id="profile_test_123",
-            channel="sms",
+            channel="SMS",
         )
 
         await tac.retrieve_memory(context)
@@ -165,7 +165,7 @@ class TestProfileFetchingInRetrieveMemory:
         context = ConversationSession(
             conversation_id="conv123",
             profile_id="profile_test_123",
-            channel="sms",
+            channel="SMS",
         )
 
         await tac.retrieve_memory(context)
@@ -199,7 +199,7 @@ class TestProfileFetchingInRetrieveMemory:
         context = ConversationSession(
             conversation_id="conv123",
             profile_id="profile_test_123",
-            channel="sms",
+            channel="SMS",
         )
 
         # Should not raise - exception is swallowed and memory retrieval continues
@@ -383,7 +383,7 @@ class TestProfileInConversationSession:
         session = ConversationSession(
             conversation_id="CH123456",
             profile_id="profile_test_123",
-            channel="sms",
+            channel="SMS",
             profile=mock_profile,
         )
 
@@ -396,7 +396,7 @@ class TestProfileInConversationSession:
         session = ConversationSession(
             conversation_id="CH123456",
             profile_id="profile_test_123",
-            channel="sms",
+            channel="SMS",
             profile=None,
         )
 
@@ -407,7 +407,7 @@ class TestProfileInConversationSession:
         session = ConversationSession(
             conversation_id="CH123456",
             profile_id="profile_test_123",
-            channel="sms",
+            channel="SMS",
             profile=None,  # Explicitly set to None (also the default)
         )
 

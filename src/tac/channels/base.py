@@ -8,7 +8,7 @@ from typing import Any
 
 from tac import TAC
 from tac.core.logging import get_logger
-from tac.models.conversation import ParticipantResponse
+from tac.models.conversation import ChannelType, ParticipantResponse
 from tac.models.memory import MemoryMode
 from tac.models.session import ConversationSession
 from tac.models.tac import TACMemoryResponse
@@ -104,24 +104,15 @@ class BaseChannel(ABC):
         pass
 
     @abstractmethod
-    def get_channel_name(self) -> str:
+    def get_channel_name(self) -> ChannelType:
         """
-        Get the channel name identifier.
+        Get the channel type identifier.
 
         Returns:
-            Channel name (e.g., 'sms', 'voice')
+            Uppercase Twilio channel type (e.g., 'SMS', 'VOICE')
         """
         # TODO: Parse Channel Type based on webhook data
         pass
-
-    def get_channel_type_upper(self) -> str:
-        """
-        Get uppercase channel type for webhook filtering.
-
-        Returns:
-            Uppercase channel type (e.g., 'SMS', 'VOICE')
-        """
-        return self.get_channel_name().upper()
 
     def _is_duplicate_webhook(self, idempotency_token: str) -> bool:
         """Check if a webhook has already been processed using Twilio's idempotency token.
@@ -162,7 +153,7 @@ class BaseChannel(ABC):
             author_channel = author.get("channel")
             if not author_channel:
                 return False
-            return bool(author_channel == self.get_channel_type_upper())
+            return bool(author_channel == self.get_channel_name())
 
         if event_type == "CONVERSATION_UPDATED":
             if not isinstance(event_data, dict):
@@ -253,7 +244,7 @@ class BaseChannel(ABC):
         )
 
         self.logger.info(
-            f"CONVERSATION | Started {self.get_channel_name().upper()} conversation",
+            f"CONVERSATION | Started {self.get_channel_name()} conversation",
             conversation_id=conv_id,
             profile_id=profile_id,
         )

@@ -57,7 +57,7 @@ class TestProfileLookupInMemoryRetrieval:
         session = ConversationSession(
             conversation_id="conv_test_123",
             profile_id="mem_profile_existing",
-            channel="sms",
+            channel="SMS",
         )
 
         # Retrieve memory
@@ -106,7 +106,7 @@ class TestProfileLookupInMemoryRetrieval:
         session = ConversationSession(
             conversation_id="conv_test_123",
             profile_id=None,  # No profile_id
-            channel="sms",
+            channel="SMS",
             author_info=AuthorInfo(
                 address="+1 (317) 555-6789",
                 participant_id="participant_123",
@@ -170,7 +170,7 @@ class TestProfileLookupInMemoryRetrieval:
         session = ConversationSession(
             conversation_id="conv_test_123",
             profile_id=None,
-            channel="sms",
+            channel="SMS",
             author_info=AuthorInfo(address="+13175556789"),
         )
 
@@ -234,7 +234,7 @@ class TestProfileLookupInMemoryRetrieval:
         session = ConversationSession(
             conversation_id="conv_test_123",
             profile_id=None,
-            channel="sms",
+            channel="SMS",
             author_info=None,  # No author info
         )
 
@@ -290,7 +290,7 @@ class TestProfileLookupInMemoryRetrieval:
         session = ConversationSession(
             conversation_id="conv_test_123",
             profile_id=None,
-            channel="sms",
+            channel="SMS",
             author_info=AuthorInfo(
                 address="",  # Empty address
                 participant_id="participant_123",
@@ -357,7 +357,7 @@ class TestProfileLookupInMemoryRetrieval:
         session = ConversationSession(
             conversation_id="conv_test_123",
             profile_id=None,
-            channel="sms",
+            channel="SMS",
             author_info=AuthorInfo(address="+13175556789"),
         )
 
@@ -419,7 +419,7 @@ class TestProfileLookupInMemoryRetrieval:
         session = ConversationSession(
             conversation_id="conv_test_123",
             profile_id=None,
-            channel="sms",
+            channel="SMS",
             author_info=AuthorInfo(address="+13175556789"),
         )
 
@@ -454,7 +454,7 @@ class TestProfileLookupInMemoryRetrieval:
         session = ConversationSession(
             conversation_id="conv_test_123",
             profile_id=None,
-            channel="sms",
+            channel="SMS",
             author_info=AuthorInfo(address="+13175556789"),
         )
 
@@ -490,7 +490,7 @@ class TestProfileLookupInMemoryRetrieval:
         session = ConversationSession(
             conversation_id="conv_test_123",
             profile_id=None,
-            channel="sms",
+            channel="SMS",
             author_info=AuthorInfo(
                 address="+1 (317) 555-6789"  # Formatted input
             ),

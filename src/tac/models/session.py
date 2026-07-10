@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from tac.models.conversation import ChannelType
 from tac.models.handoff import PendingHandoffData
 from tac.models.memory import ProfileResponse
 
@@ -34,7 +35,7 @@ class ConversationSession(BaseModel):
     profile_id: str | None = Field(
         None, description="Profile ID associated with conversation (optional)"
     )
-    channel: str = Field(..., description="Channel type (e.g., 'sms', 'voice')")
+    channel: ChannelType = Field(..., description="Channel type (e.g., 'SMS', 'VOICE')")
     started_at: datetime = Field(
         default_factory=datetime.now,
         description="When the conversation session was started",

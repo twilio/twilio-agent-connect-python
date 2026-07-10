@@ -6,6 +6,10 @@ from pydantic import BaseModel, Field, model_validator
 
 from tac.models.pagination import PaginationMeta
 
+# Twilio Conversation Orchestrator channel-type enum. Used for API payloads
+# (participant addresses, action refs) and webhook `author.channel` matching.
+ChannelType = Literal["VOICE", "SMS", "RCS", "EMAIL", "WHATSAPP", "CHAT", "API", "SYSTEM"]
+
 
 class StatusTimeouts(BaseModel):
     """Timeout settings for channel status transitions."""
@@ -80,7 +84,7 @@ class StatusCallback(BaseModel):
 class ParticipantAddress(BaseModel):
     """Communication address for a conversation participant."""
 
-    channel: Literal["VOICE", "SMS", "RCS", "EMAIL", "WHATSAPP", "CHAT", "API", "SYSTEM"] = Field(
+    channel: ChannelType = Field(
         ..., description="The channel for Communication (VOICE, SMS, EMAIL, etc.)"
     )
     address: str = Field(..., description="The address value (phone number, email, etc.)")
@@ -267,9 +271,7 @@ class CommunicationParticipant(BaseModel):
         description="Address of the participant formatted according to channel type",
         json_schema_extra={"example": "+12025551234"},
     )
-    channel: Literal["VOICE", "SMS", "RCS", "EMAIL", "WHATSAPP", "CHAT", "API", "SYSTEM"] = Field(
-        ..., description="Channel type for the participant address"
-    )
+    channel: ChannelType = Field(..., description="Channel type for the participant address")
     participant_id: str = Field(
         ...,
         alias="participantId",
@@ -442,9 +444,7 @@ class ActionParticipantRef(BaseModel):
     address: str | None = Field(
         default=None, min_length=1, max_length=254, description="Participant address"
     )
-    channel: Literal["VOICE", "SMS", "RCS", "EMAIL", "WHATSAPP", "CHAT", "API", "SYSTEM"] = Field(
-        ..., description="Channel type"
-    )
+    channel: ChannelType = Field(..., description="Channel type")
 
     model_config = {"populate_by_name": True}
 

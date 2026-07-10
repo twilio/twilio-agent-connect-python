@@ -89,7 +89,7 @@ class TestTAC:
         session = ConversationSession(
             conversation_id="CH123",
             profile_id="prof123",
-            channel="sms",
+            channel="SMS",
         )
 
         with pytest.raises(
@@ -114,7 +114,7 @@ class TestTAC:
         session = ConversationSession(
             conversation_id="CH123",
             profile_id="prof123",
-            channel="sms",
+            channel="SMS",
         )
 
         with pytest.raises(
@@ -139,7 +139,7 @@ class TestTAC:
         session = ConversationSession(
             conversation_id="CH123",
             profile_id="prof123",
-            channel="sms",
+            channel="SMS",
         )
 
         with pytest.raises(
@@ -164,7 +164,7 @@ class TestTAC:
         session = ConversationSession(
             conversation_id="CH123",
             profile_id="prof123",
-            channel="sms",
+            channel="SMS",
         )
 
         result = await tac.trigger_message_ready("test message", session, None)
@@ -186,7 +186,7 @@ class TestTAC:
         session = ConversationSession(
             conversation_id="CH123",
             profile_id="prof123",
-            channel="sms",
+            channel="SMS",
         )
 
         result = await tac.trigger_message_ready("test message", session, None)
@@ -209,7 +209,7 @@ class TestTAC:
         session = ConversationSession(
             conversation_id="CH123",
             profile_id="prof123",
-            channel="sms",
+            channel="SMS",
         )
 
         result = await tac.trigger_message_ready("test message", session, None)
