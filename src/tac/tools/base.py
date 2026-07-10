@@ -303,7 +303,8 @@ class TACTool:
             # knowledge tool returns list[KnowledgeChunkResult]), which the
             # stdlib json encoder can't handle on its own.
             if isinstance(obj, BaseModel):
-                return obj.model_dump(by_alias=True, exclude_none=True)
+                # mode="json" coerces datetime/UUID/Decimal to JSON primitives.
+                return obj.model_dump(mode="json", by_alias=True, exclude_none=True)
             raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
 
         async def on_invoke(_ctx: object, args_json: str) -> str:
