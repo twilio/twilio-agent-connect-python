@@ -2439,6 +2439,9 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+realtime = [
+    { name = "websockets" },
+]
 server = [
     { name = "fastapi" },
     { name = "python-multipart" },
@@ -2473,8 +2476,9 @@ requires-dist = [
     { name = "python-multipart", marker = "extra == 'server'", specifier = ">=0.0.20,<1" },
     { name = "twilio", specifier = ">=9.8.3,<10" },
     { name = "uvicorn", extras = ["standard"], marker = "extra == 'server'", specifier = ">=0.32.0,<1" },
+    { name = "websockets", marker = "extra == 'realtime'", specifier = ">=13.0,<16.1" },
 ]
-provides-extras = ["server"]
+provides-extras = ["server", "realtime"]
 
 [package.metadata.requires-dev]
 dev = [
