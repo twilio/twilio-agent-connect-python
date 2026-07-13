@@ -128,7 +128,7 @@ See `examples/.env.example` for all available configuration options. Key variabl
 ### Optional (OpenAI Example)
 - `OPENAI_API_KEY`: Your OpenAI API key (only needed to run OpenAI examples)
 
-### Optional (Channel-Specific)
+### Optional
 - `TWILIO_STUDIO_HANDOFF_FLOW_SID`: Studio Flow SID used by `create_studio_handoff_tool` (required for `features/handoff.py`)
 - `TWILIO_KNOWLEDGE_BASE_ID`: Knowledge Base ID used by `create_knowledge_tool` (required for `features/knowledge.py`)
 - `TWILIO_RCS_SENDER_ID`: RCS Sender ID (required for `features/rcs.py`)

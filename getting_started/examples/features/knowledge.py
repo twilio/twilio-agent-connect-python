@@ -2,7 +2,7 @@
 Feature: Knowledge Base Search Tool
 
 Demonstrates TAC's knowledge tool letting an LLM agent answer questions by
-searching a Twilio Knowledge Base. Works on voice and SMS.
+searching a Twilio Knowledge Base.
 
 Requires ``TWILIO_KNOWLEDGE_BASE_ID`` in addition to the usual TAC env vars —
 see ``.env.example``. The knowledge base must be ACTIVE.
