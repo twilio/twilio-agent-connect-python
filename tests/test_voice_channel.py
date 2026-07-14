@@ -2423,8 +2423,8 @@ class TestHandleCallEvents:
         async def handler(event: object) -> None:
             received.append(event)
 
-        channel.on_status(handler)
-        await channel.handle_status_event(
+        channel.on_call_status(handler)
+        await channel.handle_call_status_event(
             {"CallSid": "CA1", "AccountSid": "ACtest123", "CallStatus": "no-answer"}
         )
         assert len(received) == 1
@@ -2471,7 +2471,7 @@ class TestHandleCallEvents:
             received.append(event)
 
         channel.on_amd(handler)
-        await channel.handle_status_event({"CallSid": "CA1", "CallStatus": "completed"})
+        await channel.handle_call_status_event({"CallSid": "CA1", "CallStatus": "completed"})
         await channel.handle_recording_event({"CallSid": "CA1", "RecordingStatus": "completed"})
         await channel.handle_amd_event({"CallSid": "CA1", "AnsweredBy": "human"})
         assert len(received) == 1
@@ -2482,7 +2482,7 @@ class TestHandleCallEvents:
         tac = TAC(get_test_config())
         channel = VoiceChannel(tac)
         # Should not raise despite no handler registered.
-        await channel.handle_status_event({"CallSid": "CA1", "CallStatus": "completed"})
+        await channel.handle_call_status_event({"CallSid": "CA1", "CallStatus": "completed"})
 
     @pytest.mark.asyncio
     async def test_ignores_account_sid_mismatch(self) -> None:
@@ -2493,8 +2493,8 @@ class TestHandleCallEvents:
         async def handler(event: object) -> None:
             received.append(event)
 
-        channel.on_status(handler)
-        await channel.handle_status_event(
+        channel.on_call_status(handler)
+        await channel.handle_call_status_event(
             {"CallSid": "CA1", "AccountSid": "ACwrong", "CallStatus": "completed"}
         )
         assert received == []

@@ -102,7 +102,7 @@ class VoiceChannel(BaseChannel):
         self.config = config
         self.session_manager = config.session_manager
         self._on_inbound_call_twiml: InboundCallTwiMLHandler | None = None
-        self._on_status: CallStatusHandler | None = None
+        self._on_call_status: CallStatusHandler | None = None
         self._on_amd: AmdHandler | None = None
         self._on_recording: RecordingHandler | None = None
         self._websocket_manager = WebSocketManager()
@@ -133,28 +133,32 @@ class VoiceChannel(BaseChannel):
         """
         self._on_inbound_call_twiml = callback
 
-    def on_status(self, callback: CallStatusHandler) -> None:
+    def on_call_status(self, callback: CallStatusHandler) -> None:
         """Register a handler for Twilio ``status_callback`` webhooks.
 
         Fires through the call lifecycle and for unreached dispositions
         (``no-answer`` / ``busy`` / ``failed``). Independently optional — register
         only the call-event handlers you need.
 
-        The developer routes the webhook into :meth:`handle_status_event`;
+        This is the outbound Calls-API ``status_callback`` (call disposition), not
+        the ConversationRelay session callback (see
+        :meth:`handle_conversation_relay_callback`), which reports session status.
+
+        The developer routes the webhook into :meth:`handle_call_status_event`;
         ``TACFastAPIServer`` registers that route (at
         ``TACConfig.voice_call_event_path`` + ``/status``) automatically.
 
         Example:
             ```python
-            async def on_status(event: CallStatusEvent) -> None:
+            async def on_call_status(event: CallStatusEvent) -> None:
                 if event.call_status in {"no-answer", "busy", "failed"}:
                     ...  # report unreached for retry
 
 
-            voice_channel.on_status(on_status)
+            voice_channel.on_call_status(on_call_status)
             ```
         """
-        self._on_status = callback
+        self._on_call_status = callback
 
     def on_amd(self, callback: AmdHandler) -> None:
         """Register a handler for Twilio ``async_amd_status_callback`` webhooks.
@@ -453,18 +457,18 @@ class VoiceChannel(BaseChannel):
             return False
         return True
 
-    async def handle_status_event(self, payload_dict: dict[str, str]) -> None:
+    async def handle_call_status_event(self, payload_dict: dict[str, str]) -> None:
         """Handle a Twilio ``status_callback`` webhook.
 
         The developer routes the request here (``TACFastAPIServer`` does this
         automatically for its ``/status`` call-event route). Parsed into a
-        :class:`CallStatusEvent` and dispatched to the :meth:`on_status` handler.
-        No-op if no handler is registered.
+        :class:`CallStatusEvent` and dispatched to the :meth:`on_call_status`
+        handler. No-op if no handler is registered.
 
         Args:
             payload_dict: Raw form data dict from the webhook request.
         """
-        if self._on_status is None or not self._call_event_account_ok(payload_dict):
+        if self._on_call_status is None or not self._call_event_account_ok(payload_dict):
             return
         event = CallStatusEvent.from_form(payload_dict)
         self.logger.debug(
@@ -472,7 +476,7 @@ class VoiceChannel(BaseChannel):
             call_sid=event.call_sid,
             call_status=event.call_status,
         )
-        await self._on_status(event)
+        await self._on_call_status(event)
 
     async def handle_amd_event(self, payload_dict: dict[str, str]) -> None:
         """Handle a Twilio ``async_amd_status_callback`` webhook.

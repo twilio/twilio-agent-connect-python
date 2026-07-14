@@ -243,7 +243,7 @@ class TACFastAPIServer:
             # suffix parses the payload into its typed event.
             _call_event_base = self.tac.config.voice_call_event_path.rstrip("/")
             _call_event_routes = (
-                ("status", vc.handle_status_event),
+                ("status", vc.handle_call_status_event),
                 ("amd", vc.handle_amd_event),
                 ("recording", vc.handle_recording_event),
             )

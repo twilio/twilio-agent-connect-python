@@ -145,7 +145,7 @@ class _CallEventBase(BaseModel):
     one route per callback (see ``TACConfig.voice_call_event_path`` + the
     ``/status`` ``/amd`` ``/recording`` suffixes) and parses each into its own
     typed event, so a developer registers a separate handler per event via
-    ``VoiceChannel.on_status`` / ``on_amd`` / ``on_recording``.
+    ``VoiceChannel.on_call_status`` / ``on_amd`` / ``on_recording``.
 
     ``call_sid`` is the correlation key across every surface (it matches
     ``ConversationSession.call_sid`` passed to ``on_message_ready`` and the
@@ -186,7 +186,7 @@ class CallStatusEvent(_CallEventBase):
 
     Fires through the call lifecycle (``initiated`` / ``ringing`` / ``answered``
     / ``completed``) and for unreached dispositions (``no-answer`` / ``busy`` /
-    ``failed``). Register via ``VoiceChannel.on_status``.
+    ``failed``). Register via ``VoiceChannel.on_call_status``.
     """
 
     call_status: str | None = Field(None, alias="CallStatus")

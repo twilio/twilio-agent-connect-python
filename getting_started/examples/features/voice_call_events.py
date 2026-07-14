@@ -6,8 +6,8 @@ Places an outbound ConversationRelay call with answering machine detection
 Twilio posts to three independent callback URLs, and TAC serves one route per
 callback, so you register a separate typed handler for each:
 
-- on_status    -> call progress: ringing / answered / completed, and
-                  no-answer / busy / failed (report as unreached)
+- on_call_status -> call progress: ringing / answered / completed, and
+                    no-answer / busy / failed (report as unreached)
 - on_amd       -> answering machine detection result; hang up on a machine
                   instead of monologuing at voicemail
 - on_recording -> recording ready (recording_url available)
@@ -16,7 +16,7 @@ Each handler is independently optional — register only the ones you need.
 
 Shows the three Calls-API seams:
   1. InitiateVoiceConversationOptions.call_options -> forwarded to calls.create
-  2. VoiceChannel.on_status / on_amd / on_recording -> one handler per callback
+  2. VoiceChannel.on_call_status / on_amd / on_recording -> one handler per callback
   3. VoiceChannel.end_call(call_sid)                -> hang up + session cleanup
 
 This example enables AMD/recording by placing an OUTBOUND call (call_options
@@ -58,7 +58,7 @@ voice_channel = VoiceChannel(tac)
 
 
 # Seam 2: one typed handler per Twilio call callback.
-async def on_status(event: CallStatusEvent) -> None:
+async def on_call_status(event: CallStatusEvent) -> None:
     print(f"[STATUS] {event.call_sid}: {event.call_status}")
     if event.call_status in {"no-answer", "busy", "failed"}:
         print(f"[STATUS] {event.call_sid} unreached — queue retry")
@@ -75,7 +75,7 @@ async def on_recording(event: RecordingEvent) -> None:
     print(f"[RECORDING] {event.call_sid}: {event.recording_status} {event.recording_url}")
 
 
-voice_channel.on_status(on_status)
+voice_channel.on_call_status(on_call_status)
 voice_channel.on_amd(on_amd)
 voice_channel.on_recording(on_recording)
 
