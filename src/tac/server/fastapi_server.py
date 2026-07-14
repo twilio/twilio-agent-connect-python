@@ -10,6 +10,7 @@ Requires: pip install tac[server]
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
 from tac.channels.base import BaseChannel
@@ -236,24 +237,38 @@ class TACFastAPIServer:
                     return Response(content="", media_type="text/plain", status_code=400)
                 return Response(content="", media_type="text/plain", status_code=200)
 
-            @app.post(
-                self.tac.config.voice_call_event_path,
-                dependencies=[Depends(http_sig)],
+            # One route per Twilio call callback, derived from the single
+            # voice_call_event_path base + a /status, /amd, /recording suffix.
+            # The route is the discriminator: the channel handler matched to the
+            # suffix parses the payload into its typed event.
+            _call_event_base = self.tac.config.voice_call_event_path.rstrip("/")
+            _call_event_routes = (
+                ("status", vc.handle_status_event),
+                ("amd", vc.handle_amd_event),
+                ("recording", vc.handle_recording_event),
             )
-            async def call_event_callback(request: Request) -> Response:
-                """Handle outbound call events (status callbacks, async AMD, recording).
 
-                All three Twilio callback URLs point here; the channel classifies
-                the payload and dispatches to the on_call_event handler.
-                """
-                try:
-                    form_data = await request.form()
-                    payload_dict = {k: v for k, v in form_data.items() if isinstance(v, str)}
-                    await vc.handle_call_event(payload_dict)
-                except Exception:
-                    logger.error("Failed to process call event callback", exc_info=True)
-                    return Response(content="", media_type="text/plain", status_code=400)
-                return Response(content="", media_type="text/plain", status_code=200)
+            def _make_call_event_route(
+                handler: Callable[[dict[str, str]], Awaitable[None]],
+            ) -> Callable[[Request], Awaitable[Response]]:
+                async def call_event_callback(request: Request) -> Response:
+                    """Handle an outbound call event (status / AMD / recording)."""
+                    try:
+                        form_data = await request.form()
+                        payload_dict = {k: v for k, v in form_data.items() if isinstance(v, str)}
+                        await handler(payload_dict)
+                    except Exception:
+                        logger.error("Failed to process call event callback", exc_info=True)
+                        return Response(content="", media_type="text/plain", status_code=400)
+                    return Response(content="", media_type="text/plain", status_code=200)
+
+                return call_event_callback
+
+            for _suffix, _handler in _call_event_routes:
+                app.post(
+                    f"{_call_event_base}/{_suffix}",
+                    dependencies=[Depends(http_sig)],
+                )(_make_call_event_route(_handler))
 
         if config.cintel_webhook_path is not None:
             tac = self.tac

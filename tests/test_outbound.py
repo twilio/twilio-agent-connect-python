@@ -499,7 +499,7 @@ class TestVoiceOutbound:
                 to="+15559876543", websocket_url="wss://example.com/ws"
             ),
         )
-        assert kwargs["status_callback"] == "https://example.com/twilio/call-events"
+        assert kwargs["status_callback"] == "https://example.com/twilio/call-events/status"
         # AMD/recording are opt-in: not wired unless the feature is enabled.
         assert "async_amd_status_callback" not in kwargs
         assert "recording_status_callback" not in kwargs
@@ -517,7 +517,43 @@ class TestVoiceOutbound:
                 call_options={"async_amd": "true"},
             ),
         )
-        assert kwargs["async_amd_status_callback"] == "https://example.com/twilio/call-events"
+        assert kwargs["async_amd_status_callback"] == "https://example.com/twilio/call-events/amd"
+
+    @pytest.mark.asyncio
+    async def test_recording_callback_auto_wired_when_record_enabled(self) -> None:
+        config = {**get_test_config(), "voice_public_domain": "example.com"}
+        channel = VoiceChannel(TAC(config))
+
+        kwargs = await self._place_call(
+            channel,
+            InitiateVoiceConversationOptions(
+                to="+15559876543",
+                websocket_url="wss://example.com/ws",
+                call_options={"record": True},
+            ),
+        )
+        assert (
+            kwargs["recording_status_callback"]
+            == "https://example.com/twilio/call-events/recording"
+        )
+
+    @pytest.mark.asyncio
+    async def test_feature_flags_accept_bool_or_string(self) -> None:
+        """async_amd/record opt-in accepts both a real bool and the string 'true'."""
+        config = {**get_test_config(), "voice_public_domain": "example.com"}
+        channel = VoiceChannel(TAC(config))
+
+        # bool True for async_amd, string "true" for record — both must wire.
+        kwargs = await self._place_call(
+            channel,
+            InitiateVoiceConversationOptions(
+                to="+15559876543",
+                websocket_url="wss://example.com/ws",
+                call_options={"async_amd": True, "record": "true"},
+            ),
+        )
+        assert kwargs["async_amd_status_callback"].endswith("/amd")
+        assert kwargs["recording_status_callback"].endswith("/recording")
 
     @pytest.mark.asyncio
     async def test_explicit_callback_url_wins_over_auto_wiring(self) -> None:
@@ -547,6 +583,24 @@ class TestVoiceOutbound:
             ),
         )
         assert "status_callback" not in kwargs
+
+    @pytest.mark.asyncio
+    async def test_trailing_slash_in_path_normalized(self) -> None:
+        """A trailing slash on voice_call_event_path doesn't produce '//status'."""
+        config = {
+            **get_test_config(),
+            "voice_public_domain": "example.com",
+            "voice_call_event_path": "/hooks/calls/",
+        }
+        channel = VoiceChannel(TAC(config))
+
+        kwargs = await self._place_call(
+            channel,
+            InitiateVoiceConversationOptions(
+                to="+15559876543", websocket_url="wss://example.com/ws"
+            ),
+        )
+        assert kwargs["status_callback"] == "https://example.com/hooks/calls/status"
 
 
 class TestInitiateVoiceConversationOptionsForbidsExtra:

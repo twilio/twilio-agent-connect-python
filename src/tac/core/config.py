@@ -304,12 +304,13 @@ class TACConfig(BaseModel):
 
     voice_call_event_path: str = Field(
         default="/twilio/call-events",
-        description="Path the outbound call-event callback is served at (Twilio "
+        description="Base path for the outbound call-event callbacks (Twilio "
         "status callbacks, async AMD results, and recording status). Combined "
-        "with voice_public_domain to build the callback URL the voice channel "
-        "hands to Twilio on calls.create; TACFastAPIServer registers one route "
-        "here that all three Twilio callback params point at. Same role as "
-        "voice_action_path.",
+        "with voice_public_domain to build the callback URLs the voice channel "
+        "hands to Twilio on calls.create. TACFastAPIServer registers one route "
+        "per callback under this base — <base>/status, <base>/amd, "
+        "<base>/recording — so the route it arrives on identifies the event. "
+        "Same role as voice_action_path.",
     )
 
     @field_validator("voice_public_domain", mode="before")

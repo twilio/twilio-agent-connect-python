@@ -37,7 +37,8 @@ class ConversationSession(BaseModel):
         "Voice channel (equals conversation_id in ConversationRelay-only mode; "
         "the Twilio Call SID in Conversation Orchestrator mode). None on "
         "messaging channels. Use it as the correlation key with call events "
-        "(see VoiceChannel.on_call_event) and VoiceChannel.end_call.",
+        "(see VoiceChannel.on_status / on_amd / on_recording) and "
+        "VoiceChannel.end_call.",
     )
     profile_id: str | None = Field(
         None, description="Profile ID associated with conversation (optional)"

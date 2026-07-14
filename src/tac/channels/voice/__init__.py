@@ -2,25 +2,33 @@
 
 from tac.channels.voice.channel import VoiceChannel
 from tac.channels.voice.config import (
-    CallEventHandler,
+    AmdHandler,
+    CallStatusHandler,
     InboundCallTwiMLHandler,
+    RecordingHandler,
     VoiceChannelConfig,
 )
 from tac.channels.voice.twiml import generate_twiml
 from tac.models.voice import (
-    CallEvent,
+    AmdEvent,
+    CallStatusEvent,
     InterruptMode,
     LanguageConfig,
+    RecordingEvent,
     TwiMLOptions,
     TwiMLRequest,
 )
 
 __all__ = [
-    "CallEvent",
-    "CallEventHandler",
+    "AmdEvent",
+    "AmdHandler",
+    "CallStatusEvent",
+    "CallStatusHandler",
     "InboundCallTwiMLHandler",
     "InterruptMode",
     "LanguageConfig",
+    "RecordingEvent",
+    "RecordingHandler",
     "TwiMLOptions",
     "TwiMLRequest",
     "VoiceChannel",

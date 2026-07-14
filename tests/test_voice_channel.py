@@ -2352,23 +2352,29 @@ class TestVoicePathsOnTACConfig:
         assert tac.config.voice_call_event_path == "/twilio/call-events"
 
 
-class TestCallEventModel:
-    """CallEvent.from_form classifies a Twilio webhook by present fields."""
+class TestCallEventModels:
+    """The three call-event models parse their own fields from a Twilio form
+    and bucket everything else into ``extra``."""
 
-    def test_classifies_amd(self) -> None:
-        from tac.models.voice import CallEvent
+    def test_amd_event(self) -> None:
+        from tac.models.voice import AmdEvent
 
-        event = CallEvent.from_form(
-            {"CallSid": "CA1", "AccountSid": "ACtest123", "AnsweredBy": "machine_end_beep"}
+        event = AmdEvent.from_form(
+            {
+                "CallSid": "CA1",
+                "AccountSid": "ACtest123",
+                "AnsweredBy": "machine_end_beep",
+                "MachineDetectionDuration": "3200",
+            }
         )
-        assert event.kind == "amd"
         assert event.call_sid == "CA1"
         assert event.answered_by == "machine_end_beep"
+        assert event.machine_detection_duration == "3200"
 
-    def test_classifies_recording(self) -> None:
-        from tac.models.voice import CallEvent
+    def test_recording_event(self) -> None:
+        from tac.models.voice import RecordingEvent
 
-        event = CallEvent.from_form(
+        event = RecordingEvent.from_form(
             {
                 "CallSid": "CA1",
                 "RecordingSid": "RE1",
@@ -2377,14 +2383,14 @@ class TestCallEventModel:
                 "RecordingDuration": "12",
             }
         )
-        assert event.kind == "recording"
         assert event.recording_sid == "RE1"
+        assert event.recording_url == "https://x/r"
         assert event.recording_duration == "12"
 
-    def test_classifies_status(self) -> None:
-        from tac.models.voice import CallEvent
+    def test_status_event(self) -> None:
+        from tac.models.voice import CallStatusEvent
 
-        event = CallEvent.from_form(
+        event = CallStatusEvent.from_form(
             {
                 "CallSid": "CA1",
                 "CallStatus": "no-answer",
@@ -2392,37 +2398,24 @@ class TestCallEventModel:
                 "SipResponseCode": "480",
             }
         )
-        assert event.kind == "status"
         assert event.call_status == "no-answer"
         assert event.call_duration == "0"
         assert event.sip_response_code == "480"
 
-    def test_completed_status_with_recording_sid_is_status_not_recording(self) -> None:
-        """A completed statusCallback also carries RecordingSid/RecordingUrl;
-        it must classify as status (recording is keyed on RecordingStatus)."""
-        from tac.models.voice import CallEvent
+    def test_keeps_extra_form(self) -> None:
+        from tac.models.voice import CallStatusEvent
 
-        event = CallEvent.from_form(
-            {
-                "CallSid": "CA1",
-                "CallStatus": "completed",
-                "RecordingSid": "RE1",
-                "RecordingUrl": "https://x/r",
-            }
+        event = CallStatusEvent.from_form(
+            {"CallSid": "CA1", "CallStatus": "completed", "Custom": "x"}
         )
-        assert event.kind == "status"
-
-    def test_keeps_raw_form(self) -> None:
-        from tac.models.voice import CallEvent
-
-        form = {"CallSid": "CA1", "CallStatus": "completed", "Custom": "x"}
-        event = CallEvent.from_form(form)
-        assert event.raw["Custom"] == "x"
+        assert event.extra["Custom"] == "x"
+        # Fields belonging to another event type land in extra, not dropped.
+        assert "RecordingSid" not in event.extra
 
 
-class TestHandleCallEvent:
+class TestHandleCallEvents:
     @pytest.mark.asyncio
-    async def test_fires_registered_handler(self) -> None:
+    async def test_status_fires_registered_handler(self) -> None:
         tac = TAC(get_test_config())
         channel = VoiceChannel(tac)
         received = []
@@ -2430,12 +2423,58 @@ class TestHandleCallEvent:
         async def handler(event: object) -> None:
             received.append(event)
 
-        channel.on_call_event(handler)
-        await channel.handle_call_event(
-            {"CallSid": "CA1", "AccountSid": "ACtest123", "AnsweredBy": "human"}
+        channel.on_status(handler)
+        await channel.handle_status_event(
+            {"CallSid": "CA1", "AccountSid": "ACtest123", "CallStatus": "no-answer"}
         )
         assert len(received) == 1
-        assert received[0].kind == "amd"
+        assert received[0].call_status == "no-answer"
+
+    @pytest.mark.asyncio
+    async def test_amd_fires_registered_handler(self) -> None:
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+        received = []
+
+        async def handler(event: object) -> None:
+            received.append(event)
+
+        channel.on_amd(handler)
+        await channel.handle_amd_event(
+            {"CallSid": "CA1", "AccountSid": "ACtest123", "AnsweredBy": "human"}
+        )
+        assert received[0].answered_by == "human"
+
+    @pytest.mark.asyncio
+    async def test_recording_fires_registered_handler(self) -> None:
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+        received = []
+
+        async def handler(event: object) -> None:
+            received.append(event)
+
+        channel.on_recording(handler)
+        await channel.handle_recording_event(
+            {"CallSid": "CA1", "AccountSid": "ACtest123", "RecordingStatus": "completed"}
+        )
+        assert received[0].recording_status == "completed"
+
+    @pytest.mark.asyncio
+    async def test_handlers_are_independently_optional(self) -> None:
+        """Only on_amd registered: amd fires, status/recording no-op silently."""
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+        received = []
+
+        async def handler(event: object) -> None:
+            received.append(event)
+
+        channel.on_amd(handler)
+        await channel.handle_status_event({"CallSid": "CA1", "CallStatus": "completed"})
+        await channel.handle_recording_event({"CallSid": "CA1", "RecordingStatus": "completed"})
+        await channel.handle_amd_event({"CallSid": "CA1", "AnsweredBy": "human"})
+        assert len(received) == 1
         assert received[0].answered_by == "human"
 
     @pytest.mark.asyncio
@@ -2443,7 +2482,7 @@ class TestHandleCallEvent:
         tac = TAC(get_test_config())
         channel = VoiceChannel(tac)
         # Should not raise despite no handler registered.
-        await channel.handle_call_event({"CallSid": "CA1", "CallStatus": "completed"})
+        await channel.handle_status_event({"CallSid": "CA1", "CallStatus": "completed"})
 
     @pytest.mark.asyncio
     async def test_ignores_account_sid_mismatch(self) -> None:
@@ -2454,8 +2493,8 @@ class TestHandleCallEvent:
         async def handler(event: object) -> None:
             received.append(event)
 
-        channel.on_call_event(handler)
-        await channel.handle_call_event(
+        channel.on_status(handler)
+        await channel.handle_status_event(
             {"CallSid": "CA1", "AccountSid": "ACwrong", "CallStatus": "completed"}
         )
         assert received == []
@@ -2475,15 +2514,15 @@ class TestEndCall:
         mock_client.calls().update.assert_called_with(status="completed")
 
     @pytest.mark.asyncio
-    async def test_cleans_up_session_via_callsid_map(self) -> None:
-        """In orchestrator mode conv_id != call_sid; end_call resolves through
-        the CallSid map to clean up the right session."""
+    async def test_cleans_up_session_via_call_sid(self) -> None:
+        """In orchestrator mode conv_id != call_sid; end_call resolves the right
+        session by scanning tracked sessions for the matching call_sid."""
         tac = TAC(get_test_config())
         channel = VoiceChannel(tac)
 
-        # Simulate an active orchestrator-mode session.
-        channel._start_conversation("conv_abc")
-        channel._call_sid_to_conv_id["CA1"] = "conv_abc"
+        # Simulate an active orchestrator-mode session (conv id != call sid).
+        session = channel._start_conversation("conv_abc")
+        session.call_sid = "CA1"
         channel._end_conversation = AsyncMock()  # type: ignore[method-assign]
 
         mock_client = MagicMock()
@@ -2491,6 +2530,18 @@ class TestEndCall:
             await channel.end_call("CA1")
 
         channel._end_conversation.assert_awaited_once_with("conv_abc")
+
+    @pytest.mark.asyncio
+    async def test_hangup_failure_does_not_raise(self) -> None:
+        """A failed hangup is logged, not raised — a call-event handler that
+        calls end_call must not turn into a webhook 400 that Twilio retries."""
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+
+        mock_client = MagicMock()
+        mock_client.calls("CA1").update.side_effect = RuntimeError("Twilio 400")
+        with patch.object(channel, "_get_twilio_client", return_value=mock_client):
+            await channel.end_call("CA1")  # must not raise
 
     @pytest.mark.asyncio
     async def test_hangup_works_without_tracked_session(self) -> None:

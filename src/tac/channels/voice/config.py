@@ -5,11 +5,19 @@ from collections.abc import Awaitable, Callable
 from pydantic import BaseModel, Field
 
 from tac.models.memory import MemoryMode
-from tac.models.voice import CallEvent, TwiMLOptions, TwiMLRequest
+from tac.models.voice import (
+    AmdEvent,
+    CallStatusEvent,
+    RecordingEvent,
+    TwiMLOptions,
+    TwiMLRequest,
+)
 from tac.session import SessionManager, ThreadSafeSessionManager
 
 InboundCallTwiMLHandler = Callable[[TwiMLRequest], Awaitable[TwiMLOptions]]
-CallEventHandler = Callable[[CallEvent], Awaitable[None]]
+CallStatusHandler = Callable[[CallStatusEvent], Awaitable[None]]
+AmdHandler = Callable[[AmdEvent], Awaitable[None]]
+RecordingHandler = Callable[[RecordingEvent], Awaitable[None]]
 
 
 class VoiceChannelConfig(BaseModel):
