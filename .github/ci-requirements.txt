@@ -1,0 +1,12 @@
+# Pinned versions for the "Check package metadata" step in ci.yml.
+#
+# jaraco.functools is pinned because the latest release isn't always mirrored
+# yet in Twilio's Artifactory virtual-pypi-thirdparty repo, which causes a 403
+# on download. twine is pinned alongside it to reduce future resolution drift.
+#
+# Dependabot watches this file (see dependabot.yml) and will open a PR when a
+# newer version is available on PyPI. Before merging such a PR, confirm the
+# new version is actually mirrored in Artifactory (re-run this workflow) —
+# Dependabot only checks PyPI, not Artifactory's mirror status.
+twine==6.2.0
+jaraco.functools==4.5.0
