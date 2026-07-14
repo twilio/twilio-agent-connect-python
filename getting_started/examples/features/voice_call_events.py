@@ -1,35 +1,16 @@
 """
 Example: Voice call events (status, AMD, and recording).
 
-Places an outbound ConversationRelay call with answering machine detection
-(AMD) and recording enabled, and reacts to Twilio's out-of-band call webhooks.
-Twilio posts to three independent callback URLs, and TAC serves one route per
-callback, so you register a separate typed handler for each:
+Places an outbound ConversationRelay call with answering machine detection and
+recording enabled, then reacts to Twilio's call webhooks: hang up on voicemail,
+and log which calls went unreached. Each handler is optional — register only
+the events you care about.
 
-- on_call_status -> call progress: ringing / answered / completed, and
-                    no-answer / busy / failed (report as unreached)
-- on_amd       -> answering machine detection result; hang up on a machine
-                  instead of monologuing at voicemail
-- on_recording -> recording ready (recording_url available)
+TACFastAPIServer registers the call-event routes and auto-wires their URLs from
+TWILIO_VOICE_PUBLIC_DOMAIN, so there is no webhook setup here. The same handlers
+also fire for inbound calls whose status/recording callbacks point at TAC.
 
-Each handler is independently optional — register only the ones you need.
-
-Shows the three Calls-API seams:
-  1. InitiateVoiceConversationOptions.call_options -> forwarded to calls.create
-  2. VoiceChannel.on_call_status / on_amd / on_recording -> one handler per callback
-  3. VoiceChannel.end_call(call_sid)                -> hang up + session cleanup
-
-This example enables AMD/recording by placing an OUTBOUND call (call_options
-only applies to calls TAC creates). The call-event and end_call seams also work
-for INBOUND calls — if status/recording callbacks are enabled on the number's
-incoming-call config and pointed at the matching route, the same handlers
-receive those events and end_call() hangs up an inbound call the same way.
-
-TACFastAPIServer auto-registers the three call-event routes (under
-voice_call_event_path: /status, /amd, /recording) and auto-wires the callback
-URLs from TWILIO_VOICE_PUBLIC_DOMAIN, so there is no webhook wiring to do here.
-
-Env vars required:
+Env vars:
 - TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_API_KEY, TWILIO_API_SECRET
 - TWILIO_PHONE_NUMBER
 - TWILIO_VOICE_PUBLIC_DOMAIN (ngrok or similar)
@@ -57,7 +38,6 @@ tac = TAC(config=TACConfig.from_env())
 voice_channel = VoiceChannel(tac)
 
 
-# Seam 2: one typed handler per Twilio call callback.
 async def on_call_status(event: CallStatusEvent) -> None:
     print(f"[STATUS] {event.call_sid}: {event.call_status}")
     if event.call_status in {"no-answer", "busy", "failed"}:
@@ -67,8 +47,7 @@ async def on_call_status(event: CallStatusEvent) -> None:
 async def on_amd(event: AmdEvent) -> None:
     print(f"[AMD] {event.call_sid}: answered_by={event.answered_by}")
     if event.answered_by and event.answered_by.startswith("machine"):
-        # Seam 3: hang up instead of talking to an answering machine.
-        await voice_channel.end_call(event.call_sid)
+        await voice_channel.end_call(event.call_sid)  # voicemail → hang up
 
 
 async def on_recording(event: RecordingEvent) -> None:
@@ -84,13 +63,11 @@ async def place_call(to: str) -> None:
     result = await voice_channel.initiate_outbound_conversation(
         InitiateVoiceConversationOptions(
             to=to,
-            # Seam 1: forwarded to calls.create(). No callback URLs needed —
-            # TAC auto-wires the status/AMD/recording callbacks (each to its own
-            # route) from TWILIO_VOICE_PUBLIC_DOMAIN when the feature is enabled.
+            # Passed through to calls.create(). Note the mixed types — Twilio
+            # takes async_amd as a string but record as a bool.
             call_options={
-                "async_amd": "true",  # AMD (Twilio types this as a string) -> on_amd
-                "record": True,  # recording (Twilio types this as a bool) -> on_recording
-                "status_callback_event": ["initiated", "ringing", "answered", "completed"],
+                "async_amd": "true",  # required for the AMD callback (sync AMD won't fire it)
+                "record": True,
                 "timeout": 30,
             },
         )
@@ -109,7 +86,5 @@ if __name__ == "__main__":
         yield
 
     app = FastAPI(lifespan=lifespan)
-    # Registers /twiml, the WebSocket, the action callback, AND the three
-    # call-event routes that status/AMD/recording webhooks POST to.
     server = TACFastAPIServer(tac=tac, voice_channel=voice_channel, app=app)
     server.start()
