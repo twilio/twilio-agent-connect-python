@@ -162,7 +162,7 @@ jobs:
         run: |
           uv venv
           . .venv/bin/activate
-          pip install twine
+          pip install twine "jaraco.functools==4.5.0"
           twine check dist/*
 
       - name: Test package installation
