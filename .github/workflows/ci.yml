@@ -165,7 +165,7 @@ jobs:
           # Pin jaraco.functools (a transitive dep via twine->keyring): the latest
           # release (4.6.0) isn't mirrored in Artifactory's virtual-pypi-thirdparty
           # repo yet and 403s on download. Remove this pin once 4.6.0+ is mirrored.
-          pip install twine "jaraco.functools==4.5.0"
+          pip install "twine==6.2.0" "jaraco.functools==4.5.0"
           twine check dist/*
 
       - name: Test package installation
