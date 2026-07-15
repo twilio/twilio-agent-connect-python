@@ -210,7 +210,12 @@ class RealtimeVoiceChannel(BaseChannel):
                 "input": {
                     # TWILIO_AUDIO_FORMAT is u-law, matching Twilio's stream, so no transcoding.
                     "format": TWILIO_AUDIO_FORMAT,
-                    "turn_detection": {"type": "server_vad"},
+                    # semantic_vad waits for the caller to actually finish a thought
+                    # (vs. server_vad's fixed silence timeout), so it's less likely to
+                    # cut in mid-sentence. eagerness="low" biases toward waiting longer
+                    # before deciding the caller is done, which suits phone calls where
+                    # cutting the caller off feels much worse than a slightly longer pause.
+                    "turn_detection": {"type": "semantic_vad", "eagerness": "low"},
                     "transcription": {"model": "whisper-1"},
                 },
                 "output": {

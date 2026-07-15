@@ -13,13 +13,27 @@ from tac.tools.base import TACTool
 TWILIO_AUDIO_FORMAT = {"type": "audio/pcmu"}
 
 DEFAULT_REALTIME_MODEL = "gpt-realtime"
-DEFAULT_REALTIME_VOICE = "ash"
-DEFAULT_REALTIME_INSTRUCTIONS = (
-    "You are a voice assistant speaking with a user over the phone. "
-    "Always speak English. "
-    "Keep responses short and conversational. Do not use markdown or emojis; "
-    "your words will be spoken aloud."
-)
+# OpenAI recommends marin/cedar for the best audio quality of the available voices.
+DEFAULT_REALTIME_VOICE = "marin"
+DEFAULT_REALTIME_INSTRUCTIONS = """\
+# Personality & Tone
+## Personality
+A warm, friendly voice assistant speaking with a caller over the phone — like a \
+helpful colleague, not a script.
+
+## Tone
+Conversational and natural. Always speak English.
+
+## Pacing
+Keep responses short — a sentence or two per turn.
+
+## Variety
+Do not repeat the same phrasing twice in a row. Vary your wording and \
+acknowledgements so you don't sound robotic.
+
+## Format
+No markdown, emojis, or bullet lists — your words will be spoken aloud.\
+"""
 DEFAULT_WELCOME_GREETING = "Hello! How can I help you today?"
 
 
@@ -40,7 +54,8 @@ class RealtimeVoiceChannelConfig(BaseModel):
     )
     voice: str = Field(
         default=DEFAULT_REALTIME_VOICE,
-        description="Realtime voice name (e.g. 'ash', 'ballad', 'coral', 'sage', 'verse').",
+        description="Realtime voice name (e.g. 'marin', 'cedar', 'ash', 'ballad', 'coral', "
+        "'sage', 'verse'). OpenAI recommends 'marin' or 'cedar' for the best audio quality.",
     )
     instructions: str = Field(
         default=DEFAULT_REALTIME_INSTRUCTIONS,

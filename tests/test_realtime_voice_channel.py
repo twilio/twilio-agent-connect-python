@@ -162,7 +162,10 @@ class TestRealtimeBridge:
         assert session_obj["output_modalities"] == ["audio"]
         assert session_obj["audio"]["input"]["format"] == {"type": "audio/pcmu"}
         assert session_obj["audio"]["output"]["format"] == {"type": "audio/pcmu"}
-        assert session_obj["audio"]["input"]["turn_detection"] == {"type": "server_vad"}
+        assert session_obj["audio"]["input"]["turn_detection"] == {
+            "type": "semantic_vad",
+            "eagerness": "low",
+        }
         # No beta header — that would trigger beta_api_shape_disabled on gpt-realtime.
         assert "OpenAI-Beta" not in headers
 
