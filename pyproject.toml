@@ -36,6 +36,11 @@ server = [
     "uvicorn[standard]>=0.32.0,<1",
     "python-multipart>=0.0.20,<1",
 ]
+realtime = [
+    # WebSocket client used by RealtimeVoiceChannel to connect to the OpenAI
+    # Realtime API for the Media Streams (speech-to-speech) voice path.
+    "websockets>=13.0,<16.1",
+]
 
 [dependency-groups]
 dev = [
