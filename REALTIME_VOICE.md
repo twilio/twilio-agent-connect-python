@@ -36,7 +36,7 @@ sequenceDiagram
 
     Note over Caller,OpenAI: Call connects
     Caller->>Twilio: dials number
-    Twilio->>Channel: POST /twiml-realtime
+    Twilio->>Channel: POST /twiml
     Channel-->>Twilio: <Connect><Stream url="wss://…/voice-realtime">
     Twilio->>Channel: WS open + "start" (call metadata)
     Channel->>OpenAI: WS open + session.update (u-law audio, server VAD)
@@ -62,7 +62,7 @@ sequenceDiagram
     Channel-->>Twilio: clear (drop buffered audio)
 ```
 
-1. **TwiML** — Twilio hits `POST /twiml-realtime`; we return
+1. **TwiML** — Twilio hits `POST /twiml`; we return
    `<Connect><Stream>` pointing at our WebSocket.
 2. **Connect** — On the stream's `start` event we open a WebSocket to OpenAI
    Realtime, configure the session (u-law audio to match telephony; server-side
@@ -102,7 +102,7 @@ Optional: `OPENAI_REALTIME_MODEL` (default `gpt-realtime`),
 `OPENAI_REALTIME_VOICE` (default `ash`).
 
 Then point your Twilio number's **voice webhook** at
-`https://<your-domain>/twiml-realtime` and call the number.
+`https://<your-domain>/twiml` and call the number.
 
 ## Status & limitations (POC)
 

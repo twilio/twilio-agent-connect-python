@@ -5,7 +5,11 @@ import json
 from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING, Any
 
+from opentelemetry import trace as otel_trace
+
 if TYPE_CHECKING:
+    from opentelemetry.context import Context
+    from opentelemetry.trace import Span
     from twilio.rest import Client
 
 from pydantic import ValidationError
@@ -14,6 +18,7 @@ from tac.channels.base import BaseChannel
 from tac.channels.websocket_manager import WebSocketManager
 from tac.channels.websocket_protocol import WebSocketDisconnectError, WebSocketProtocol
 from tac.core.tac import TAC
+from tac.core.tracing import get_tracer, setup_tracing
 from tac.models.outbound import InitiateVoiceConversationOptions, InitiateVoiceConversationResult
 from tac.models.session import AuthorInfo
 from tac.models.voice import (
@@ -82,6 +87,13 @@ class VoiceChannel(BaseChannel):
         self._on_inbound_call_twiml: InboundCallTwiMLHandler | None = None
         self._websocket_manager = WebSocketManager()
         self._twilio_client: Client | None = None
+        setup_tracing()
+        self._tracer = get_tracer(__name__)
+        # Per-call spans, keyed by conversation_id so concurrent calls never
+        # share state. Mirrors RealtimeVoiceChannel's tracing so both voice
+        # paths show up comparably in Langfuse.
+        self._call_spans: dict[str, Span] = {}
+        self._pending_response_spans: dict[str, Span] = {}
 
     def on_inbound_call_twiml(self, callback: InboundCallTwiMLHandler) -> None:
         """Register a callback that produces per-call overrides for the
@@ -152,6 +164,103 @@ class VoiceChannel(BaseChannel):
                 self.tac.config.account_sid,
             )
         return self._twilio_client
+
+    # -- Tracing: root call span + per-turn response latency, keyed by conv_id.
+    # Mirrors RealtimeVoiceChannel's spans (see tac.channels.realtime.channel)
+    # so the two voice paths show up as comparable traces in Langfuse. --------
+
+    def _parent_context(self, conv_id: str | None) -> Context | None:
+        """Context that attaches a new span as a child of the call's root span.
+
+        Returns None (new root span) if no call span is open yet for conv_id.
+        """
+        if conv_id is None:
+            return None
+        call_span = self._call_spans.get(conv_id)
+        if call_span is None:
+            return None
+        return otel_trace.set_span_in_context(call_span)
+
+    def _start_call_span(self, conv_id: str) -> None:
+        """Open the root span for one call, covering setup -> cleanup.
+
+        Idempotent: called from both the orchestrated and relay-only paths
+        the first time conv_id is resolved, so a second call is a no-op.
+        """
+        if conv_id in self._call_spans:
+            return
+        self._call_spans[conv_id] = self._tracer.start_span(
+            "conversation_relay.call",
+            attributes={
+                "conversation_id": conv_id,
+                "langfuse.trace.name": "ConversationRelay Voice Call",
+            },
+        )
+
+    def _start_response_latency_span(self, conv_id: str) -> None:
+        """Open the span covering "final prompt received -> first response
+        token sent" — the ConversationRelay equivalent of the realtime
+        channel's "caller stopped talking -> model's first audio byte" span.
+        """
+        # A previous turn's span may still be open if send_response was never
+        # reached (e.g. the message-ready callback raised) — close it out
+        # rather than leaking it.
+        self._end_response_latency_span(conv_id)
+        self._pending_response_spans[conv_id] = self._tracer.start_span(
+            "conversation_relay.response_latency",
+            context=self._parent_context(conv_id),
+            attributes={"conversation_id": conv_id},
+        )
+
+    def _end_response_latency_span(self, conv_id: str) -> None:
+        """Close and discard the pending response-latency span, if any.
+
+        Safe to call unconditionally — a no-op once already closed (e.g. on
+        every streamed chunk after the first) or if none was ever opened.
+        """
+        span = self._pending_response_spans.pop(conv_id, None)
+        if span is not None:
+            span.end()
+
+    def _end_call_span(self, conv_id: str) -> None:
+        """Close the root call span, if any, and any response-latency span
+        still pending underneath it."""
+        self._end_response_latency_span(conv_id)
+        call_span = self._call_spans.pop(conv_id, None)
+        if call_span is not None:
+            call_span.end()
+
+    def trace_context(self, conversation_id: str) -> Context | None:
+        """OpenTelemetry context parented to this call's root span.
+
+        Public so application code — most usefully an ``on_message_ready``
+        callback — can nest its own spans under the same call trace TAC's
+        spans appear in. The cascaded (ConversationRelay) path invokes the LLM
+        inside that callback, not inside TAC, so wrapping the model call is the
+        application's job; pass this as the ``context=`` when starting the
+        span so it shows up as a child of ``conversation_relay.call`` rather
+        than as a disconnected root trace.
+
+        Returns None if no call span is open for ``conversation_id`` (e.g.
+        tracing not yet started for this call); starting a span with a None
+        context just yields a new root span, so callers need no special-case.
+
+        Example:
+            ```python
+            from tac.core.tracing import get_tracer
+
+            tracer = get_tracer(__name__)
+
+
+            async def on_message_ready(user_message, context, memory):
+                with tracer.start_as_current_span(
+                    "model_invocation",
+                    context=voice_channel.trace_context(context.conversation_id),
+                ):
+                    ...  # invoke the LLM
+            ```
+        """
+        return self._parent_context(conversation_id)
 
     async def handle_incoming_call(
         self,
@@ -427,6 +536,7 @@ class VoiceChannel(BaseChannel):
 
         self._websocket_manager.add_websocket(conv_id, websocket)
         session = self._start_conversation(conv_id, profile_id)
+        self._start_call_span(conv_id)
 
         session_state = None
         if self.session_manager is not None:
@@ -490,6 +600,7 @@ class VoiceChannel(BaseChannel):
                                 conv_id = call_sid
                                 self._websocket_manager.add_websocket(conv_id, websocket)
                                 self._start_conversation(conv_id, profile_id=None)
+                                self._start_call_span(conv_id)
 
                                 caller = self._caller_address(setup_msg)
                                 if caller:
@@ -621,6 +732,7 @@ class VoiceChannel(BaseChannel):
             if should_process:
                 prompt_msg = PromptMessage(**data)
                 conv_id = prompt_msg.conversation_id or conv_id
+                self._start_response_latency_span(conv_id)
 
                 # Cancel previous stream task if session manager is enabled
                 if session_state:
@@ -655,25 +767,34 @@ class VoiceChannel(BaseChannel):
             interrupt_msg = InterruptMessage(**data)
             conv_id = interrupt_msg.conversation_id or conv_id
 
-            # Cancel in-flight stream task if session manager is enabled
-            if session_state:
-                await session_state.cancel_stream_task()
+            with self._tracer.start_as_current_span(
+                "conversation_relay.barge_in", context=self._parent_context(conv_id)
+            ) as span:
+                span.set_attribute("conversation_id", conv_id)
+                # The caller cut off an in-flight response; that turn's
+                # response-latency span will never see a first token sent,
+                # so close it out here instead of leaking it.
+                self._end_response_latency_span(conv_id)
 
-                # Send acknowledgment to Twilio after cancelling
-                websocket = self._websocket_manager.get_websocket(conv_id)
-                if websocket:
-                    try:
-                        await websocket.send_text(
-                            json.dumps({"type": "text", "token": "", "last": True})
-                        )
-                    except (WebSocketDisconnectError, RuntimeError):
-                        self.logger.debug(
-                            f"WebSocket closed before sending interrupt acknowledgment "
-                            f"for {conv_id}."
-                        )
+                # Cancel in-flight stream task if session manager is enabled
+                if session_state:
+                    await session_state.cancel_stream_task()
 
-            # Call the interrupt handler
-            self._handle_interrupt(conv_id, interrupt_msg)
+                    # Send acknowledgment to Twilio after cancelling
+                    websocket = self._websocket_manager.get_websocket(conv_id)
+                    if websocket:
+                        try:
+                            await websocket.send_text(
+                                json.dumps({"type": "text", "token": "", "last": True})
+                            )
+                        except (WebSocketDisconnectError, RuntimeError):
+                            self.logger.debug(
+                                f"WebSocket closed before sending interrupt acknowledgment "
+                                f"for {conv_id}."
+                            )
+
+                # Call the interrupt handler
+                self._handle_interrupt(conv_id, interrupt_msg)
         except Exception as e:
             self.logger.error(f"Failed to handle interrupt: {str(e)}")
 
@@ -789,6 +910,8 @@ class VoiceChannel(BaseChannel):
 
                         try:
                             await websocket.send_text(json.dumps(json_template))
+                            # No-op past the first chunk — see _end_response_latency_span.
+                            self._end_response_latency_span(conversation_id)
                         except (WebSocketDisconnectError, RuntimeError):
                             self.logger.info(
                                 "WebSocket closed during streaming",
@@ -815,6 +938,7 @@ class VoiceChannel(BaseChannel):
                 await websocket.send_text(
                     json.dumps({"type": "text", "token": response, "last": True})
                 )
+                self._end_response_latency_span(conversation_id)
 
             # If a handoff is pending, send the WS "end" message now that the
             # LLM's final response has been delivered to the caller.
@@ -935,6 +1059,8 @@ class VoiceChannel(BaseChannel):
         # Remove WebSocket from manager
         if self._websocket_manager.has_websocket(conv_id):
             self._websocket_manager.remove_websocket(conv_id)
+
+        self._end_call_span(conv_id)
 
         # Cancel running stream task and cleanup session if session manager is enabled
         if self.session_manager is not None and self.session_manager.has_session(conv_id):

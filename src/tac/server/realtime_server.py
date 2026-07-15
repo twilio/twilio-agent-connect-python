@@ -64,7 +64,7 @@ class RealtimeVoiceServer:
         *,
         host: str = "0.0.0.0",
         port: int = 8000,
-        twiml_path: str = "/twiml-realtime",
+        twiml_path: str = "/twiml",
         websocket_path: str = "/voice-realtime",
         validate_twiml_signature: bool = True,
         app: FastAPI | None = None,

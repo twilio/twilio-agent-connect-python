@@ -974,7 +974,7 @@ class TestRealtimeVoiceServer:
         server = RealtimeVoiceServer(tac, channel, validate_twiml_signature=False)
 
         client = TestClient(server.app)
-        resp = client.post("/twiml-realtime")
+        resp = client.post("/twiml")
         assert resp.status_code == 200
         assert "<Stream" in resp.text
         assert 'url="wss://example.com/voice-realtime"' in resp.text

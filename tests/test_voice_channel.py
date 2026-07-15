@@ -2349,3 +2349,227 @@ class TestVoicePathsOnTACConfig:
         tac = TAC(get_test_config())
         assert tac.config.voice_websocket_path == "/ws"
         assert tac.config.voice_action_path == "/conversation-relay-callback"
+
+
+class TestVoiceChannelTracing:
+    """ConversationRelay-side counterpart of RealtimeVoiceChannel's tracing
+    (see TestRealtimeTracing in test_realtime_voice_channel.py). Span names
+    are namespaced ``conversation_relay.*`` (vs. ``twilio_media_stream.*`` /
+    ``openai_realtime.*`` for the realtime path) so both voice paths show up
+    as directly comparable traces in Langfuse.
+    """
+
+    @staticmethod
+    def _install_exporter():  # type: ignore[no-untyped-def]
+        from opentelemetry import trace
+        from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+        from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
+            InMemorySpanExporter,
+        )
+
+        from tac.core.tracing import setup_tracing
+
+        setup_tracing()
+        exporter = InMemorySpanExporter()
+        trace.get_tracer_provider().add_span_processor(SimpleSpanProcessor(exporter))  # type: ignore[attr-defined]
+        return exporter
+
+    @pytest.mark.asyncio
+    async def test_call_span_opened_and_closed_across_websocket_lifecycle(self) -> None:
+        """The root call span opens once conv_id is resolved (here, via the
+        orchestrated-mode CO lookup) and closes when the websocket connection
+        is cleaned up."""
+        from tac.channels.websocket_protocol import WebSocketDisconnectError
+        from tac.models.conversation import ParticipantAddress, ParticipantResponse
+
+        exporter = self._install_exporter()
+
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+
+        mock_conversation = ConversationResponse(
+            id="CH_trace_call",
+            accountId="ACtest123",
+            configuration_id="conv_configuration_test123",
+            status="ACTIVE",
+        )
+        co_client = tac.conversation_orchestrator_client
+        co_client.list_conversations = AsyncMock(return_value=[mock_conversation])
+        co_client.list_participants = AsyncMock(
+            return_value=[
+                ParticipantResponse(
+                    id="PA_customer",
+                    conversation_id="CH_trace_call",
+                    account_id="ACtest123",
+                    name="Customer",
+                    addresses=[ParticipantAddress(channel="VOICE", address="+15551234567")],
+                )
+            ]
+        )
+
+        mock_websocket = AsyncMock()
+        mock_websocket.receive_json = AsyncMock(
+            side_effect=[
+                {"type": "setup", "callSid": "CA_trace_call", "from": "+15551234567"},
+                {"type": "prompt", "voicePrompt": "Hello"},
+                WebSocketDisconnectError(),
+            ]
+        )
+
+        await channel.handle_websocket(mock_websocket)
+
+        spans = [s for s in exporter.get_finished_spans() if s.name == "conversation_relay.call"]
+        assert len(spans) == 1
+        assert spans[0].attributes is not None
+        assert spans[0].attributes["conversation_id"] == "CH_trace_call"
+        assert spans[0].end_time is not None and spans[0].start_time is not None
+        assert spans[0].end_time >= spans[0].start_time
+        assert "CH_trace_call" not in channel._call_spans
+
+    @pytest.mark.asyncio
+    async def test_response_latency_span_closed_on_first_streamed_token(self) -> None:
+        """The response-latency span — final prompt received -> first
+        response token sent — closes on the *first* streamed token, not when
+        the full generation finishes. That's the number comparable to the
+        realtime channel's "caller stopped talking -> model's first audio
+        byte" span."""
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac, config={"session_manager": None})
+        channel._websocket_manager.add_websocket("CONV_LATENCY", AsyncMock())
+        channel._start_call_span("CONV_LATENCY")
+
+        exporter = self._install_exporter()
+        channel._start_response_latency_span("CONV_LATENCY")
+
+        async def gen():  # type: ignore[no-untyped-def]
+            yield "Hello"
+            yield " there"
+
+        await channel.send_response("CONV_LATENCY", gen())
+
+        assert "CONV_LATENCY" not in channel._pending_response_spans
+        spans = [
+            s
+            for s in exporter.get_finished_spans()
+            if s.name == "conversation_relay.response_latency"
+        ]
+        assert len(spans) == 1
+        assert spans[0].attributes is not None
+        assert spans[0].attributes["conversation_id"] == "CONV_LATENCY"
+
+    @pytest.mark.asyncio
+    async def test_orphaned_response_latency_span_closed_by_next_prompt(self) -> None:
+        """If a turn's response never reaches send_response (e.g. the
+        message-ready callback raised), the next final prompt still closes
+        the stale span instead of leaking it forever."""
+        exporter = self._install_exporter()
+
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac, config={"session_manager": None})
+        channel._start_call_span("CONV_ORPHAN")
+
+        channel._start_response_latency_span("CONV_ORPHAN")
+        channel._start_response_latency_span("CONV_ORPHAN")
+
+        spans = [
+            s
+            for s in exporter.get_finished_spans()
+            if s.name == "conversation_relay.response_latency"
+        ]
+        assert len(spans) == 1  # the first (orphaned) span was closed out
+        assert "CONV_ORPHAN" in channel._pending_response_spans  # the second is still open
+
+    @pytest.mark.asyncio
+    async def test_barge_in_emits_span_and_closes_pending_response_latency(self) -> None:
+        """Interrupting mid-response closes that turn's response-latency span
+        (it will never see a first token sent) and emits a barge_in span."""
+        exporter = self._install_exporter()
+
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+        channel._start_call_span("CONV_BARGE")
+        channel._start_response_latency_span("CONV_BARGE")
+
+        await channel._handle_interrupt_async(
+            "CONV_BARGE", {"type": "interrupt", "conversationId": "CONV_BARGE"}, None
+        )
+
+        assert "CONV_BARGE" not in channel._pending_response_spans
+        spans = [
+            s for s in exporter.get_finished_spans() if s.name == "conversation_relay.barge_in"
+        ]
+        assert len(spans) == 1
+        assert spans[0].attributes is not None
+        assert spans[0].attributes["conversation_id"] == "CONV_BARGE"
+
+    @pytest.mark.asyncio
+    async def test_full_call_spans_share_one_trace(self) -> None:
+        """Call, response-latency, and barge-in spans for one call all nest
+        under the same root span — so Langfuse groups them as one trace,
+        matching RealtimeVoiceChannel's tracing."""
+        exporter = self._install_exporter()
+
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac, config={"session_manager": None})
+        channel._websocket_manager.add_websocket("CONV_FULL_TRACE", AsyncMock())
+        channel._start_conversation("CONV_FULL_TRACE", profile_id=None)
+        channel._start_call_span("CONV_FULL_TRACE")
+
+        channel._start_response_latency_span("CONV_FULL_TRACE")
+        await channel.send_response("CONV_FULL_TRACE", "Hi there")
+
+        channel._start_response_latency_span("CONV_FULL_TRACE")
+        await channel._handle_interrupt_async(
+            "CONV_FULL_TRACE", {"type": "interrupt", "conversationId": "CONV_FULL_TRACE"}, None
+        )
+
+        await channel._cleanup_connection("CONV_FULL_TRACE")
+
+        spans = exporter.get_finished_spans()
+        by_name = {s.name: s for s in spans if s.name.startswith("conversation_relay.")}
+        assert {
+            "conversation_relay.call",
+            "conversation_relay.response_latency",
+            "conversation_relay.barge_in",
+        } <= set(by_name)
+
+        root_trace_id = by_name["conversation_relay.call"].context.trace_id
+        for name, span in by_name.items():
+            assert span.context.trace_id == root_trace_id, f"{name} is not part of the call's trace"
+
+    @pytest.mark.asyncio
+    async def test_trace_context_nests_app_span_under_call_trace(self) -> None:
+        """trace_context() lets application code (e.g. an on_message_ready
+        callback timing its own model call) nest a span under the same call
+        trace — the cascaded path's stand-in for the realtime channel's
+        model-connect span, which TAC can't emit because the app, not TAC,
+        invokes the model."""
+        from opentelemetry import trace
+
+        exporter = self._install_exporter()
+
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac, config={"session_manager": None})
+        channel._start_call_span("CONV_APP_SPAN")
+
+        tracer = trace.get_tracer(__name__)
+        with tracer.start_as_current_span(
+            "model_invocation", context=channel.trace_context("CONV_APP_SPAN")
+        ):
+            pass
+
+        channel._end_call_span("CONV_APP_SPAN")
+
+        by_name = {s.name: s for s in exporter.get_finished_spans()}
+        assert "model_invocation" in by_name
+        assert (
+            by_name["model_invocation"].context.trace_id
+            == by_name["conversation_relay.call"].context.trace_id
+        )
+
+    def test_trace_context_none_when_no_call_span(self) -> None:
+        """No open call span for the id -> None, so a caller passing it to
+        start_span just gets a new root (no special-casing needed)."""
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+        assert channel.trace_context("never-started") is None
