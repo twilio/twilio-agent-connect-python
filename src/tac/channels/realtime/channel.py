@@ -29,11 +29,14 @@ import asyncio
 import json
 from typing import TYPE_CHECKING, Any
 
+from opentelemetry import trace as otel_trace
+
 from tac.channels.base import BaseChannel
 from tac.channels.realtime.config import TWILIO_AUDIO_FORMAT, RealtimeVoiceChannelConfig
 from tac.channels.realtime.twiml import generate_stream_twiml
 from tac.channels.websocket_protocol import WebSocketDisconnectError, WebSocketProtocol
 from tac.core.tac import TAC
+from tac.core.tracing import get_tracer, setup_tracing
 from tac.tools.base import TACTool
 
 try:
@@ -44,6 +47,8 @@ except ImportError:  # pragma: no cover - exercised only without the extra
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
+    from opentelemetry.context import Context
+    from opentelemetry.trace import Span
     from websockets.asyncio.client import ClientConnection
 
 OPENAI_REALTIME_URL = "wss://api.openai.com/v1/realtime"
@@ -84,6 +89,21 @@ class _RealtimeCallSession:
         # events. Each entry is {"role": "user" | "assistant", "text": str}.
         self.transcript: list[dict[str, str]] = []
 
+        # Root span for the whole call, covering accept -> disconnect. Every
+        # other span (model connect, tool calls, per-turn latency) is created
+        # as its child so Langfuse groups them into one trace per call instead
+        # of scattering them as unrelated root spans.
+        self.call_span: Span | None = None
+
+        # Span covering "caller stopped talking" -> "model's first audio byte
+        # back" — the responsiveness number that matters most for a voice call.
+        # Started on input_audio_buffer.speech_stopped, ended on the next
+        # response's first output_audio delta. These are two different
+        # iterations of the model-event read loop, so (unlike a plain function
+        # call) the span can't be a `with` block — it has to be stashed here
+        # and closed out later, same as response_start_timestamp above.
+        self.pending_response_span: Span | None = None
+
 
 class RealtimeVoiceChannel(BaseChannel):
     """Voice channel bridging Twilio Media Streams to OpenAI Realtime.
@@ -102,6 +122,20 @@ class RealtimeVoiceChannel(BaseChannel):
         super().__init__(tac)
         self.config = config
         self._tools_by_name: dict[str, TACTool] = {tool.name: tool for tool in config.tools}
+        setup_tracing()
+        self._tracer = get_tracer(__name__)
+
+    def _parent_context(self, session: _RealtimeCallSession) -> Context | None:
+        """Context that attaches a new span as a child of the call's root span.
+
+        Explicit rather than relying on contextvars propagation: spans are
+        created from both the main WebSocket loop and the background
+        ``_pump_model_to_twilio`` task, and passing the parent explicitly
+        avoids depending on how asyncio tasks happen to copy context.
+        """
+        if session.call_span is None:
+            return None
+        return otel_trace.set_span_in_context(session.call_span)
 
     def get_channel_name(self) -> str:
         return "voice"
@@ -145,6 +179,11 @@ class RealtimeVoiceChannel(BaseChannel):
         except Exception as e:
             self.logger.error(f"Realtime voice WebSocket error: {e}", exc_info=True)
         finally:
+            if session.pending_response_span is not None:
+                # Call ended before the in-flight turn got a response — close the
+                # span out so it isn't left open (and unexported) forever.
+                session.pending_response_span.end()
+                session.pending_response_span = None
             if model_reader is not None:
                 model_reader.cancel()
             if session.model_ws is not None:
@@ -164,6 +203,9 @@ class RealtimeVoiceChannel(BaseChannel):
                     transcript=session.transcript,
                 )
                 await self._end_conversation(session.conv_id)
+            if session.call_span is not None:
+                session.call_span.end()
+                session.call_span = None
 
     async def _on_stream_start(
         self, session: _RealtimeCallSession, start: dict[str, Any]
@@ -173,6 +215,15 @@ class RealtimeVoiceChannel(BaseChannel):
         session.stream_sid = start.get("streamSid")
         session.conv_id = start.get("callSid") or session.stream_sid or "unknown-call"
         self._start_conversation(session.conv_id, profile_id=None)
+
+        session.call_span = self._tracer.start_span(
+            "twilio_media_stream.call",
+            attributes={
+                "conversation_id": session.conv_id,
+                "media_format": str(start.get("mediaFormat")),
+                "langfuse.trace.name": "Realtime Voice Call",
+            },
+        )
 
         self.logger.info(
             "Realtime voice stream started",
@@ -185,18 +236,29 @@ class RealtimeVoiceChannel(BaseChannel):
 
     async def _connect_model(self, session: _RealtimeCallSession) -> None:
         """Open the OpenAI Realtime WebSocket and configure the session."""
-        if _ws_connect is None:  # pragma: no cover - exercised only without the extra
-            raise ImportError(
-                "RealtimeVoiceChannel needs the 'websockets' package. "
-                "Install it with: pip install 'twilio-agent-connect[realtime]'"
-            )
+        with self._tracer.start_as_current_span(
+            "openai_realtime.connect", context=self._parent_context(session)
+        ) as span:
+            span.set_attribute("conversation_id", session.conv_id or "unknown")
+            span.set_attribute("model", self.config.model)
+            # Without this, Langfuse auto-classifies any span carrying a "model"
+            # attribute as a "generation" observation — misleading here since
+            # this span is just the websocket handshake + session config, not
+            # an actual model inference call.
+            span.set_attribute("langfuse.observation.type", "span")
 
-        # No "OpenAI-Beta" header: it selects the old beta request shape, which
-        # gpt-realtime rejects with close code 4000 (beta_api_shape_disabled).
-        session.model_ws = await _ws_connect(
-            f"{OPENAI_REALTIME_URL}?model={self.config.model}",
-            additional_headers={"Authorization": f"Bearer {self.config.openai_api_key}"},
-        )
+            if _ws_connect is None:  # pragma: no cover - exercised only without the extra
+                raise ImportError(
+                    "RealtimeVoiceChannel needs the 'websockets' package. "
+                    "Install it with: pip install 'twilio-agent-connect[realtime]'"
+                )
+
+            # No "OpenAI-Beta" header: it selects the old beta request shape, which
+            # gpt-realtime rejects with close code 4000 (beta_api_shape_disabled).
+            session.model_ws = await _ws_connect(
+                f"{OPENAI_REALTIME_URL}?model={self.config.model}",
+                additional_headers={"Authorization": f"Bearer {self.config.openai_api_key}"},
+            )
         self.logger.info(
             "Connected to OpenAI Realtime", conversation_id=session.conv_id, model=self.config.model
         )
@@ -267,7 +329,20 @@ class RealtimeVoiceChannel(BaseChannel):
                     self.logger.info(
                         "Caller speech detected (VAD)", conversation_id=session.conv_id
                     )
+                    if session.pending_response_span is not None:
+                        # Caller spoke again before the previous turn's response ever
+                        # arrived (e.g. they gave up waiting) — that span will never
+                        # see its first delta, so close it out now rather than leak it.
+                        session.pending_response_span.end()
+                        session.pending_response_span = None
                     await self._handle_barge_in(session)
+
+                elif event_type == "input_audio_buffer.speech_stopped":
+                    session.pending_response_span = self._tracer.start_span(
+                        "openai_realtime.response_latency",
+                        context=self._parent_context(session),
+                        attributes={"conversation_id": session.conv_id or "unknown"},
+                    )
 
                 elif event_type == "conversation.item.input_audio_transcription.completed":
                     if event.get("transcript"):
@@ -316,6 +391,10 @@ class RealtimeVoiceChannel(BaseChannel):
                         session.response_start_timestamp = session.latest_media_timestamp
                         session.response_active = True
 
+                        if session.pending_response_span is not None:
+                            session.pending_response_span.end()
+                            session.pending_response_span = None
+
                     await self._twilio_send(
                         session,
                         {
@@ -342,33 +421,43 @@ class RealtimeVoiceChannel(BaseChannel):
             )
             return
 
-        if session.response_active and session.response_start_timestamp is not None:
-            played_ms = session.latest_media_timestamp - session.response_start_timestamp
-            self.logger.info(
-                "Barge-in: truncating assistant reply", conversation_id=session.conv_id
-            )
-            await self._model_send(
-                session,
-                {
-                    "type": "conversation.item.truncate",
-                    "item_id": session.last_assistant_item,
-                    "content_index": 0,
-                    "audio_end_ms": max(played_ms, 0),
-                },
-            )
-        else:
-            # The model already finished generating this item — nothing left to
-            # truncate server-side. Just clear whatever Twilio hasn't played yet.
-            self.logger.info(
-                "Barge-in: reply already finished, clearing leftover playback",
-                conversation_id=session.conv_id,
-            )
-        await self._twilio_send(session, {"event": "clear", "streamSid": session.stream_sid})
+        with self._tracer.start_as_current_span(
+            "openai_realtime.barge_in", context=self._parent_context(session)
+        ) as span:
+            span.set_attribute("conversation_id", session.conv_id or "unknown")
 
-        session.muted_item_id = session.last_assistant_item
-        session.last_assistant_item = None
-        session.response_start_timestamp = None
-        session.response_active = False
+            if session.response_active and session.response_start_timestamp is not None:
+                played_ms = max(
+                    session.latest_media_timestamp - session.response_start_timestamp, 0
+                )
+                span.set_attribute("truncated", True)
+                span.set_attribute("played_ms", played_ms)
+                self.logger.info(
+                    "Barge-in: truncating assistant reply", conversation_id=session.conv_id
+                )
+                await self._model_send(
+                    session,
+                    {
+                        "type": "conversation.item.truncate",
+                        "item_id": session.last_assistant_item,
+                        "content_index": 0,
+                        "audio_end_ms": played_ms,
+                    },
+                )
+            else:
+                # The model already finished generating this item — nothing left to
+                # truncate server-side. Just clear whatever Twilio hasn't played yet.
+                span.set_attribute("truncated", False)
+                self.logger.info(
+                    "Barge-in: reply already finished, clearing leftover playback",
+                    conversation_id=session.conv_id,
+                )
+            await self._twilio_send(session, {"event": "clear", "streamSid": session.stream_sid})
+
+            session.muted_item_id = session.last_assistant_item
+            session.last_assistant_item = None
+            session.response_start_timestamp = None
+            session.response_active = False
 
     async def _handle_function_call(
         self, session: _RealtimeCallSession, item: dict[str, Any]
@@ -385,27 +474,36 @@ class RealtimeVoiceChannel(BaseChannel):
         name = item.get("name")
         call_id = item.get("call_id")
         tool = self._tools_by_name.get(name) if name else None
-        self.logger.info(
-            f"Tool call: {name}({item.get('arguments')})", conversation_id=session.conv_id
-        )
 
-        output: object
-        if tool is None:
-            output = {"error": f"Unknown tool '{name}'"}
-        else:
-            try:
-                arguments = json.loads(item.get("arguments") or "{}")
-                output = await tool(**arguments)
-                self.logger.info(
-                    f"Tool result: {name} -> {output}", conversation_id=session.conv_id
-                )
-            except Exception as e:
-                self.logger.error(
-                    f"Tool '{name}' failed: {e}",
-                    conversation_id=session.conv_id,
-                    exc_info=True,
-                )
-                output = {"error": str(e)}
+        with self._tracer.start_as_current_span(
+            "openai_realtime.tool_call", context=self._parent_context(session)
+        ) as span:
+            span.set_attribute("conversation_id", session.conv_id or "unknown")
+            span.set_attribute("tool_name", name or "unknown")
+
+            self.logger.info(
+                f"Tool call: {name}({item.get('arguments')})", conversation_id=session.conv_id
+            )
+
+            output: object
+            if tool is None:
+                output = {"error": f"Unknown tool '{name}'"}
+                span.set_attribute("tool_error", str(output["error"]))
+            else:
+                try:
+                    arguments = json.loads(item.get("arguments") or "{}")
+                    output = await tool(**arguments)
+                    self.logger.info(
+                        f"Tool result: {name} -> {output}", conversation_id=session.conv_id
+                    )
+                except Exception as e:
+                    self.logger.error(
+                        f"Tool '{name}' failed: {e}",
+                        conversation_id=session.conv_id,
+                        exc_info=True,
+                    )
+                    output = {"error": str(e)}
+                    span.set_attribute("tool_error", str(e))
 
         await self._model_send(
             session,

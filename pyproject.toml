@@ -40,6 +40,10 @@ realtime = [
     # WebSocket client used by RealtimeVoiceChannel to connect to the OpenAI
     # Realtime API for the Media Streams (speech-to-speech) voice path.
     "websockets>=13.0,<16.1",
+    # Tracing for the realtime voice path (call/model latency spans).
+    "opentelemetry-api>=1.27.0,<2",
+    "opentelemetry-sdk>=1.27.0,<2",
+    "opentelemetry-exporter-otlp-proto-http>=1.27.0,<2",
 ]
 
 [dependency-groups]

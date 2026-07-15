@@ -557,6 +557,72 @@ class TestRealtimeBridge:
             {"role": "assistant", "text": "Hello!"},
         ]
 
+    @pytest.mark.asyncio
+    async def test_response_latency_span_opened_on_speech_stopped_closed_by_first_delta(
+        self,
+    ) -> None:
+        """The span meant to capture "caller stopped talking -> model's first
+        audio byte" opens on speech_stopped and is closed by the following
+        turn's first output_audio delta."""
+        from opentelemetry import trace
+        from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+        from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
+            InMemorySpanExporter,
+        )
+
+        from tac.channels.realtime.channel import _RealtimeCallSession
+        from tac.core.tracing import setup_tracing
+
+        setup_tracing()
+        exporter = InMemorySpanExporter()
+        trace.get_tracer_provider().add_span_processor(SimpleSpanProcessor(exporter))  # type: ignore[attr-defined]
+
+        channel = RealtimeVoiceChannel(TAC(get_test_config()), realtime_config())
+        twilio_ws = AsyncMock()
+        session = _RealtimeCallSession(twilio_ws)
+        session.stream_sid = "MZ9"
+        session.conv_id = "CA_latency"
+        session.model_ws = FakeModelWS(
+            inbound=[
+                {"type": "input_audio_buffer.speech_stopped"},
+                {"type": "response.output_audio.delta", "delta": "A", "item_id": "item_1"},
+            ]
+        )  # type: ignore[assignment]
+
+        await channel._pump_model_to_twilio(session)
+
+        assert session.pending_response_span is None
+        spans = [
+            s for s in exporter.get_finished_spans() if s.name == "openai_realtime.response_latency"
+        ]
+        assert len(spans) == 1
+        assert spans[0].attributes is not None
+        assert spans[0].attributes["conversation_id"] == "CA_latency"
+        assert spans[0].end_time is not None and spans[0].start_time is not None
+        assert spans[0].end_time >= spans[0].start_time
+
+    @pytest.mark.asyncio
+    async def test_orphaned_response_latency_span_closed_by_next_speech_started(self) -> None:
+        """If the caller speaks again before the previous turn ever got a
+        response (e.g. they gave up waiting), the stale span must be closed
+        out rather than left open forever."""
+        from tac.channels.realtime.channel import _RealtimeCallSession
+
+        channel = RealtimeVoiceChannel(TAC(get_test_config()), realtime_config())
+        twilio_ws = AsyncMock()
+        session = _RealtimeCallSession(twilio_ws)
+        session.stream_sid = "MZ9"
+        session.model_ws = FakeModelWS(
+            inbound=[
+                {"type": "input_audio_buffer.speech_stopped"},
+                {"type": "input_audio_buffer.speech_started"},
+            ]
+        )  # type: ignore[assignment]
+
+        await channel._pump_model_to_twilio(session)
+
+        assert session.pending_response_span is None
+
 
 # --- Tool calling ------------------------------------------------------------
 
@@ -708,6 +774,161 @@ class TestRealtimeToolCalling:
         assert len(outputs) == 1
         output = json.loads(outputs[0]["item"]["output"])
         assert "error" in output
+
+
+# --- Tracing -----------------------------------------------------------------
+
+
+class TestRealtimeTracing:
+    """Every span from one call should nest under a single root span/trace —
+    otherwise Langfuse (or any other OTel backend) shows them as unrelated
+    traces instead of one call with connect/tool_call/response_latency as
+    child steps."""
+
+    @pytest.mark.asyncio
+    async def test_full_call_spans_all_share_one_trace(self) -> None:
+        from opentelemetry import trace
+        from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+        from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
+            InMemorySpanExporter,
+        )
+
+        from tac.core.tracing import setup_tracing
+
+        setup_tracing()
+        exporter = InMemorySpanExporter()
+        trace.get_tracer_provider().add_span_processor(SimpleSpanProcessor(exporter))  # type: ignore[attr-defined]
+
+        channel = RealtimeVoiceChannel(
+            TAC(get_test_config()),
+            RealtimeVoiceChannelConfig(openai_api_key="sk-test-123", tools=[add]),
+        )
+        fake_model = FakeModelWS(
+            inbound=[
+                {"type": "input_audio_buffer.speech_stopped"},
+                {
+                    "type": "response.done",
+                    "response": {
+                        "output": [
+                            {
+                                "type": "function_call",
+                                "name": "add",
+                                "call_id": "call_trace",
+                                "arguments": json.dumps({"a": 1, "b": 2}),
+                            }
+                        ]
+                    },
+                },
+                {"type": "response.output_audio.delta", "delta": "A", "item_id": "item_1"},
+            ]
+        )
+
+        events = [
+            {"event": "start", "start": {"streamSid": "MZ1", "callSid": "CA_trace"}},
+            {"event": "stop"},
+        ]
+        call_count = 0
+
+        async def fake_receive_json() -> dict:
+            nonlocal call_count
+            event = events[call_count]
+            call_count += 1
+            if event["event"] == "stop":
+                await asyncio.sleep(0.01)
+            return event
+
+        twilio_ws = AsyncMock()
+        twilio_ws.receive_json = fake_receive_json
+
+        with patch(
+            "tac.channels.realtime.channel._ws_connect",
+            AsyncMock(return_value=fake_model),
+        ):
+            await channel.handle_websocket(twilio_ws)
+
+        spans = exporter.get_finished_spans()
+        by_name = {s.name: s for s in spans}
+        assert "twilio_media_stream.call" in by_name
+        assert "openai_realtime.connect" in by_name
+        assert "openai_realtime.tool_call" in by_name
+        assert "openai_realtime.response_latency" in by_name
+
+        root_trace_id = by_name["twilio_media_stream.call"].context.trace_id
+        for name, span in by_name.items():
+            assert span.context.trace_id == root_trace_id, f"{name} is not part of the call's trace"
+
+        tool_span = by_name["openai_realtime.tool_call"]
+        assert tool_span.attributes is not None
+        assert tool_span.attributes["tool_name"] == "add"
+        assert tool_span.parent is not None
+        assert tool_span.parent.span_id == by_name["twilio_media_stream.call"].context.span_id
+
+    @pytest.mark.asyncio
+    async def test_barge_in_span_records_truncation(self) -> None:
+        """A barge-in that actually interrupts a streaming reply produces a
+        span recording that it truncated the reply and how much had played."""
+        from opentelemetry import trace
+        from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+        from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
+            InMemorySpanExporter,
+        )
+
+        from tac.channels.realtime.channel import _RealtimeCallSession
+        from tac.core.tracing import setup_tracing
+
+        setup_tracing()
+        exporter = InMemorySpanExporter()
+        trace.get_tracer_provider().add_span_processor(SimpleSpanProcessor(exporter))  # type: ignore[attr-defined]
+
+        channel = RealtimeVoiceChannel(TAC(get_test_config()), realtime_config())
+        twilio_ws = AsyncMock()
+        session = _RealtimeCallSession(twilio_ws)
+        session.stream_sid = "MZ9"
+        session.conv_id = "CA_bargein"
+        # Reply started at 500ms, caller interrupts at 800ms -> 300ms played.
+        session.last_assistant_item = "item_1"
+        session.response_start_timestamp = 500
+        session.response_active = True
+        session.latest_media_timestamp = 800
+        session.model_ws = FakeModelWS(inbound=[{"type": "input_audio_buffer.speech_started"}])  # type: ignore[assignment]
+
+        await channel._pump_model_to_twilio(session)
+
+        spans = [s for s in exporter.get_finished_spans() if s.name == "openai_realtime.barge_in"]
+        assert len(spans) == 1
+        span = spans[0]
+        assert span.attributes is not None
+        assert span.attributes["conversation_id"] == "CA_bargein"
+        assert span.attributes["truncated"] is True
+        assert span.attributes["played_ms"] == 300
+
+    @pytest.mark.asyncio
+    async def test_no_barge_in_span_when_nothing_to_interrupt(self) -> None:
+        """speech_started with no assistant item playing is normal turn-taking,
+        not a barge-in — it shouldn't produce a barge_in span."""
+        from opentelemetry import trace
+        from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+        from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
+            InMemorySpanExporter,
+        )
+
+        from tac.channels.realtime.channel import _RealtimeCallSession
+        from tac.core.tracing import setup_tracing
+
+        setup_tracing()
+        exporter = InMemorySpanExporter()
+        trace.get_tracer_provider().add_span_processor(SimpleSpanProcessor(exporter))  # type: ignore[attr-defined]
+
+        channel = RealtimeVoiceChannel(TAC(get_test_config()), realtime_config())
+        twilio_ws = AsyncMock()
+        session = _RealtimeCallSession(twilio_ws)
+        session.stream_sid = "MZ9"
+        session.model_ws = FakeModelWS(inbound=[{"type": "input_audio_buffer.speech_started"}])  # type: ignore[assignment]
+
+        await channel._pump_model_to_twilio(session)
+
+        spans = [s for s in exporter.get_finished_spans() if s.name == "openai_realtime.barge_in"]
+        assert spans == []
 
 
 class TestRealtimeVoiceServer:
