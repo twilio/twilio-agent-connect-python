@@ -4,6 +4,8 @@ import os
 
 from pydantic import BaseModel, Field
 
+from tac.tools.base import TACTool
+
 # Twilio Media Streams delivers 8kHz G.711 u-law audio; the model must be told
 # to consume and produce that same format so no transcoding is needed. In the GA
 # Realtime API the format is an object with a MIME-style type — u-law is
@@ -49,15 +51,24 @@ class RealtimeVoiceChannelConfig(BaseModel):
         description="If set, the model speaks this greeting when the call connects "
         "(via response.create). Set to None to have it wait for the caller to speak first.",
     )
+    tools: list[TACTool] = Field(
+        default_factory=list,
+        description="TACTool functions the model can call mid-call. Sent as session.tools "
+        "in the initial session.update; calls are executed locally and their results "
+        "returned via conversation.item.create + response.create.",
+    )
 
-    model_config = {"extra": "forbid"}
+    model_config = {"extra": "forbid", "arbitrary_types_allowed": True}
 
     @classmethod
-    def from_env(cls) -> "RealtimeVoiceChannelConfig":
+    def from_env(cls, tools: list[TACTool] | None = None) -> "RealtimeVoiceChannelConfig":
         """Build config from environment variables.
 
         Reads ``OPENAI_API_KEY`` (required) plus optional
         ``OPENAI_REALTIME_MODEL`` / ``OPENAI_REALTIME_VOICE``.
+
+        Args:
+            tools: Optional TACTool functions the model can call mid-call.
         """
         api_key = os.environ.get("OPENAI_API_KEY")
         if not api_key:
@@ -68,4 +79,5 @@ class RealtimeVoiceChannelConfig(BaseModel):
             openai_api_key=api_key,
             model=os.environ.get("OPENAI_REALTIME_MODEL", DEFAULT_REALTIME_MODEL),
             voice=os.environ.get("OPENAI_REALTIME_VOICE", DEFAULT_REALTIME_VOICE),
+            tools=tools or [],
         )
