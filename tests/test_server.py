@@ -611,7 +611,10 @@ class TestTwiMLConnectAction:
         client = self._build_server(studio_handoff_flow_sid=flow_sid)
         resp = client.post(  # type: ignore[attr-defined]
             "/twiml",
-            headers={"X-Twilio-Signature": self._twiml_signature()},
+            headers={
+                "X-Twilio-Signature": self._twiml_signature(),
+                "content-type": "application/x-www-form-urlencoded",
+            },
         )
 
         assert resp.status_code == 200
@@ -628,7 +631,10 @@ class TestTwiMLConnectAction:
         client = self._build_server()  # no studio_handoff_flow_sid
         resp = client.post(  # type: ignore[attr-defined]
             "/twiml",
-            headers={"X-Twilio-Signature": self._twiml_signature()},
+            headers={
+                "X-Twilio-Signature": self._twiml_signature(),
+                "content-type": "application/x-www-form-urlencoded",
+            },
         )
 
         assert resp.status_code == 200

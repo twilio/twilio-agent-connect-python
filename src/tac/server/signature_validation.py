@@ -9,7 +9,7 @@ Requires: pip install tac[server]
 
 import logging
 from collections.abc import Awaitable, Callable, Mapping
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, urlsplit
 
 from fastapi import HTTPException, Request, WebSocket, WebSocketDisconnect
 from twilio.request_validator import RequestValidator
@@ -45,18 +45,21 @@ def validate_twilio_webhook(
 
     url = _build_url(request)
 
-    validator = RequestValidator(auth_token)
-
     # For JSON bodies (string), the raw body is passed so RequestValidator can verify
     # it against the bodySHA256 query param Twilio signs. For form-encoded bodies
     # (mapping), params are folded directly into the signature.
-    params = dict(body) if isinstance(body, Mapping) else body
-    try:
-        result: bool = validator.validate(url, params, signature)
-    except TypeError:
-        # String body without a bodySHA256 query param (not a genuine Twilio JSON
-        # webhook) — fail closed rather than error.
-        return False
+    if isinstance(body, Mapping):
+        params: str | dict[str, str] = dict(body)
+    else:
+        # A genuine Twilio JSON webhook always carries a bodySHA256 query param; without
+        # it RequestValidator can't hash the body, so fail closed rather than skip the
+        # body check. (RequestValidator also raises TypeError on a str body in this case.)
+        if "bodySHA256" not in parse_qs(urlsplit(url).query):
+            return False
+        params = body
+
+    validator = RequestValidator(auth_token)
+    result: bool = validator.validate(url, params, signature)
     return result
 
 
