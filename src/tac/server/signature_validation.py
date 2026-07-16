@@ -32,9 +32,9 @@ def validate_twilio_webhook(
         request: FastAPI Request object containing headers and URL info.
         auth_token: Twilio Auth Token used for signature validation.
         body: Request body - pass str for JSON bodies (SMS webhooks from Conversation Orchestrator,
-              where signature is computed with empty POST params), or pass a mapping
-              for form-encoded bodies (Voice webhooks, where params are included).
-              Accepts dict, FormData, or any Mapping[str, str].
+              where Twilio signs a ``bodySHA256`` query param and the raw body is hashed and
+              compared), or pass a mapping for form-encoded bodies (Voice webhooks, where params
+              are folded into the signature). Accepts dict, FormData, or any Mapping[str, str].
 
     Returns:
         True if signature is valid, False otherwise.
@@ -47,10 +47,16 @@ def validate_twilio_webhook(
 
     validator = RequestValidator(auth_token)
 
-    # For JSON bodies (string), Twilio signs with URL only (empty params).
-    # For form-encoded bodies (mapping), params are included in signature.
-    params = dict(body) if isinstance(body, Mapping) else {}
-    result: bool = validator.validate(url, params, signature)
+    # For JSON bodies (string), the raw body is passed so RequestValidator can verify
+    # it against the bodySHA256 query param Twilio signs. For form-encoded bodies
+    # (mapping), params are folded directly into the signature.
+    params = dict(body) if isinstance(body, Mapping) else body
+    try:
+        result: bool = validator.validate(url, params, signature)
+    except TypeError:
+        # String body without a bodySHA256 query param (not a genuine Twilio JSON
+        # webhook) — fail closed rather than error.
+        return False
     return result
 
 

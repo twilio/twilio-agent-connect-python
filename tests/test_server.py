@@ -1,5 +1,7 @@
 """Tests for TACFastAPIServer module."""
 
+from hashlib import sha256
+
 import pytest
 from twilio.request_validator import RequestValidator
 
@@ -26,6 +28,18 @@ def get_test_config() -> dict:
 def compute_signature(url: str, params: dict[str, str] | None = None) -> str:
     """Compute a valid Twilio signature for test requests."""
     return RequestValidator(AUTH_TOKEN).compute_signature(url, params or {})
+
+
+def sign_json_webhook(url: str, raw_body: bytes) -> tuple[str, str]:
+    """Sign a JSON webhook the way Twilio does: bodySHA256 query param over the raw body.
+
+    Returns ``(signed_url, signature)``. Post ``raw_body`` verbatim so the server's
+    body hash matches.
+    """
+    body_hash = sha256(raw_body).hexdigest()
+    sep = "&" if "?" in url else "?"
+    signed_url = f"{url}{sep}bodySHA256={body_hash}"
+    return signed_url, compute_signature(signed_url, {})
 
 
 class TestTACServerConfig:
@@ -257,14 +271,15 @@ class TestTACFastAPIServer:
             patch.object(sms, "process_webhook", new_callable=AsyncMock) as mock_sms,
             patch.object(chat, "process_webhook", new_callable=AsyncMock) as mock_chat,
         ):
-            url = "http://test/webhook"
-            signature = compute_signature(url)
+            raw_body = b'{"eventType": "COMMUNICATION_CREATED", "data": {}}'
+            signed_url, signature = sign_json_webhook("http://test/webhook", raw_body)
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
                 resp = await client.post(
-                    "/webhook",
-                    json={"eventType": "COMMUNICATION_CREATED", "data": {}},
+                    signed_url,
+                    content=raw_body,
                     headers={
+                        "content-type": "application/json",
                         "i-twilio-idempotency-token": "tok-123",
                         "X-Twilio-Signature": signature,
                     },
@@ -313,14 +328,15 @@ class TestTACFastAPIServer:
             ) as mock_sms,
             patch.object(chat, "process_webhook", new_callable=AsyncMock) as mock_chat,
         ):
-            url = "http://test/webhook"
-            signature = compute_signature(url)
+            raw_body = b'{"eventType": "COMMUNICATION_CREATED", "data": {}}'
+            signed_url, signature = sign_json_webhook("http://test/webhook", raw_body)
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
                 resp = await client.post(
-                    "/webhook",
-                    json={"eventType": "COMMUNICATION_CREATED", "data": {}},
+                    signed_url,
+                    content=raw_body,
                     headers={
+                        "content-type": "application/json",
                         "i-twilio-idempotency-token": "tok-456",
                         "X-Twilio-Signature": signature,
                     },
@@ -679,14 +695,17 @@ class TestSignatureValidation:
             messaging_channels=[sms],
         )
         with patch.object(sms, "process_webhook", new_callable=AsyncMock):
-            url = "http://test/webhook"
-            signature = compute_signature(url)
+            raw_body = b'{"eventType": "test"}'
+            signed_url, signature = sign_json_webhook("http://test/webhook", raw_body)
             transport = ASGITransport(app=server.app)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
                 resp = await client.post(
-                    "/webhook",
-                    json={"eventType": "test"},
-                    headers={"X-Twilio-Signature": signature},
+                    signed_url,
+                    content=raw_body,
+                    headers={
+                        "content-type": "application/json",
+                        "X-Twilio-Signature": signature,
+                    },
                 )
         assert resp.status_code == 200
 

@@ -1,5 +1,6 @@
 """Tests for Twilio webhook signature validation."""
 
+from hashlib import sha256
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -69,9 +70,60 @@ class TestValidateTwilioWebhook:
         assert validate_twilio_webhook(request, auth_token, body) is False
 
     def test_valid_string_body_signature(self) -> None:
-        """Test validation passes with correct signature for JSON/string body."""
+        """Test validation passes with correct signature for JSON/string body.
+
+        Mirrors the real Twilio JSON flow: Twilio signs a bodySHA256 query param and
+        the raw body is hashed and compared against it.
+        """
         auth_token = "test_auth_token"
         body_str = '{"event": "onMessageAdded", "conversationSid": "CH123"}'
+
+        validator = RequestValidator(auth_token)
+        query = f"bodySHA256={sha256(body_str.encode()).hexdigest()}"
+        url = f"https://example.com/webhook?{query}"
+        signature = validator.compute_signature(url, {})
+
+        request = MagicMock()
+        request.headers = {
+            "X-Twilio-Signature": signature,
+            "X-Forwarded-Proto": "https",
+            "X-Forwarded-Host": "example.com",
+        }
+        request.url.path = "/webhook"
+        request.url.query = query
+
+        assert validate_twilio_webhook(request, auth_token, body_str) is True
+
+    def test_forged_json_body_rejected(self) -> None:
+        """Regression test (SECOPS-25406): a captured signature must not accept a forged body.
+
+        Twilio signs the genuine body via bodySHA256. Replaying the signed URL/signature
+        with a different body must fail the body-hash check.
+        """
+        auth_token = "test_auth_token"
+        genuine_body = '{"event": "onMessageAdded", "conversationSid": "CH123"}'
+        forged_body = '{"event": "onMessageAdded", "conversationSid": "CHforged"}'
+
+        validator = RequestValidator(auth_token)
+        query = f"bodySHA256={sha256(genuine_body.encode()).hexdigest()}"
+        url = f"https://example.com/webhook?{query}"
+        signature = validator.compute_signature(url, {})
+
+        request = MagicMock()
+        request.headers = {
+            "X-Twilio-Signature": signature,
+            "X-Forwarded-Proto": "https",
+            "X-Forwarded-Host": "example.com",
+        }
+        request.url.path = "/webhook"
+        request.url.query = query
+
+        assert validate_twilio_webhook(request, auth_token, forged_body) is False
+
+    def test_string_body_without_bodysha256_returns_false(self) -> None:
+        """Test a string body with no bodySHA256 query param fails closed (no exception)."""
+        auth_token = "test_auth_token"
+        body_str = '{"event": "onMessageAdded"}'
 
         validator = RequestValidator(auth_token)
         url = "https://example.com/webhook"
@@ -86,7 +138,7 @@ class TestValidateTwilioWebhook:
         request.url.path = "/webhook"
         request.url.query = ""
 
-        assert validate_twilio_webhook(request, auth_token, body_str) is True
+        assert validate_twilio_webhook(request, auth_token, body_str) is False
 
     def test_invalid_string_body_signature(self) -> None:
         """Test validation fails with incorrect signature for JSON/string body."""
@@ -259,7 +311,9 @@ class TestBuildHttpSignatureDependency:
     @pytest.mark.asyncio
     async def test_valid_json_signature_passes(self) -> None:
         auth_token = "test_token"
-        url = "http://testserver/webhook"
+        raw_body = b'{"event": "test"}'
+        query = f"bodySHA256={sha256(raw_body).hexdigest()}"
+        url = f"http://testserver/webhook?{query}"
         validator = RequestValidator(auth_token)
         signature = validator.compute_signature(url, {})
 
@@ -268,10 +322,10 @@ class TestBuildHttpSignatureDependency:
         request = AsyncMock()
         request.headers = {"X-Twilio-Signature": signature, "content-type": "application/json"}
         request.url.path = "/webhook"
-        request.url.query = ""
+        request.url.query = query
         request.url.scheme = "http"
         request.url.netloc = "testserver"
-        request.body.return_value = b'{"event": "test"}'
+        request.body.return_value = raw_body
 
         await dep(request)
 
