@@ -257,9 +257,19 @@ class MessagingChannel(BaseChannel):
         if session.ai_agent_info is None or session.author_info is None:
             resolved = await self._reconcile_participants(conv_id)
             if resolved is None:
-                self.logger.warning(
-                    "Reconciliation failed; skipping callback for this inbound",
+                channel = self.get_channel_name()
+                self.logger.error(
+                    "Reconciliation failed; dropping inbound message",
                     conversation_id=conv_id,
+                    channel=channel,
+                )
+                await self.tac.trigger_error(
+                    RuntimeError("Participant reconciliation failed; inbound message dropped"),
+                    {
+                        "conversation_id": conv_id,
+                        "channel": channel,
+                        "dropped_inbound": True,
+                    },
                 )
                 return
 

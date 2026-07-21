@@ -164,6 +164,23 @@ TAC simplifies building AI agents by handling the integration between Twilio's c
 4. **Callback Invoked**: Your `on_message_ready` callback receives user message, context, and optional memory response
 5. **Response Handling**: Your callback returns a response string that TAC routes to the appropriate channel
 
+### Callbacks
+
+Register callbacks on the `TAC` instance to hook into the conversation lifecycle:
+
+- `on_message_ready(callback)`: Invoked when an inbound message is ready. Return a string for TAC to auto-send, or `None` to handle sending yourself.
+- `on_interrupt(callback)`: Invoked when a voice caller interrupts.
+- `on_conversation_ended(callback)`: Invoked when a conversation ends.
+- `on_error(callback)`: Invoked when TAC encounters a recoverable error that would otherwise be invisible — for example, an inbound message dropped because participant reconciliation failed. The callback receives `(error, context)`, where `context` may include `conversation_id`, `channel`, and `dropped_inbound`. Optional; without it, such errors are only logged.
+
+```python
+def handle_error(error: Exception, context: dict) -> None:
+    if context.get("dropped_inbound"):
+        alert(f"Dropped inbound on {context.get('conversation_id')}: {error}")
+
+tac.on_error(handle_error)
+```
+
 For detailed architecture and advanced usage, see [CLAUDE.md](https://github.com/twilio/twilio-agent-connect-python/blob/main/CLAUDE.md).
 
 ## Learn More

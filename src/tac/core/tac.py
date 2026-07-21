@@ -124,6 +124,12 @@ class TAC:
             | None
         ) = None
 
+        self._error_callback: (
+            Callable[[Exception, dict[str, Any]], None]
+            | Callable[[Exception, dict[str, Any]], Awaitable[None]]
+            | None
+        ) = None
+
     def is_orchestrator_enabled(self) -> bool:
         """True if TAC is configured with Conversation Orchestrator (not relay-only mode)."""
         return self.conversation_orchestrator_client is not None
@@ -324,6 +330,42 @@ class TAC:
         """
         self._conversation_ended_callback = callback
 
+    def on_error(
+        self,
+        callback: (
+            Callable[[Exception, dict[str, Any]], None]
+            | Callable[[Exception, dict[str, Any]], Awaitable[None]]
+        ),
+    ) -> None:
+        """Register callback invoked when TAC encounters a recoverable error.
+
+        Use this to surface failures that TAC handles internally but that would
+        otherwise be invisible to your application — for example, an inbound
+        message that is dropped because participant reconciliation failed
+        (Conversation Orchestrator unreachable, a participant-promotion conflict,
+        or no resolvable customer). Without a handler these are only logged;
+        registering ``on_error`` lets you alert, retry, or reconcile.
+
+        The callback receives the exception and a context dict with details such
+        as ``conversation_id``, ``channel``, and ``dropped_inbound`` (True when an
+        inbound message was discarded). Keys present depend on the error site, so
+        read them defensively.
+
+        Example:
+            ```python
+            def handle_error(error: Exception, context: dict) -> None:
+                if context.get("dropped_inbound"):
+                    alert(f"Dropped inbound on {context.get('conversation_id')}: {error}")
+
+
+            tac.on_error(handle_error)
+            ```
+
+        Args:
+            callback: Function to call with (error, context). Supports sync and async.
+        """
+        self._error_callback = callback
+
     def register_partner_connector(
         self,
         connector: PartnerConnector,
@@ -433,3 +475,32 @@ class TAC:
             result = self._conversation_ended_callback(conversation_context)
             if inspect.isawaitable(result):
                 await result
+
+    async def trigger_error(
+        self,
+        error: Exception,
+        context: dict[str, Any],
+    ) -> None:
+        """Trigger the registered error callback.
+
+        No-op when no handler is registered, so callers can invoke it
+        unconditionally. The handler is invoked defensively: an exception
+        raised by the handler itself is logged and swallowed so error
+        reporting never breaks the caller's flow.
+
+        Args:
+            error: The exception that occurred.
+            context: Details about the error site (e.g. ``conversation_id``,
+                ``channel``, ``dropped_inbound``).
+        """
+        if self._error_callback is None:
+            return
+        try:
+            result = self._error_callback(error, context)
+            if inspect.isawaitable(result):
+                await result
+        except Exception:
+            self.logger.error(
+                "on_error callback raised an exception",
+                exc_info=True,
+            )
