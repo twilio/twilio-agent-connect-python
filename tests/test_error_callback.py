@@ -71,6 +71,23 @@ class TestErrorCallbackRegistration:
         # Must not raise.
         await tac.trigger_error(RuntimeError("boom"), {"conversation_id": "CH1"})
 
+    @pytest.mark.asyncio
+    async def test_handler_exception_is_swallowed_and_logged(self) -> None:
+        """A handler that raises must not propagate; the failure is logged instead."""
+        tac = TAC(get_test_config())
+
+        def bad_handler(error: Exception, context: dict[str, Any]) -> None:
+            raise ValueError("handler blew up")
+
+        tac.on_error(bad_handler)
+
+        with patch.object(tac.logger, "error") as mock_error:
+            # Must not raise despite the handler raising.
+            await tac.trigger_error(RuntimeError("boom"), {"conversation_id": "CH1"})
+
+        mock_error.assert_called_once()
+        assert "on_error callback raised an exception" in mock_error.call_args.args[0]
+
 
 class TestReconcileFailureRoutesToOnError:
     """A reconcile failure must fire on_error and NOT the message-ready callback."""

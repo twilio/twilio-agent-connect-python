@@ -499,6 +499,8 @@ class TAC:
             result = self._error_callback(error, context)
             if inspect.isawaitable(result):
                 await result
+        except asyncio.CancelledError:
+            raise
         except Exception:
             self.logger.error(
                 "on_error callback raised an exception",
