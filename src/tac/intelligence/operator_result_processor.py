@@ -311,7 +311,15 @@ class OperatorResultProcessor:
         # Check if operator matches the configured summary SID.
         # Observation auto-creation was removed, so observation_operator_sid is
         # no longer dispatched here (see ConversationIntelligenceConfig).
-        if self.config.summary_operator_sid and operator_id == self.config.summary_operator_sid:
+        if self.config.summary_operator_sid is None:
+            # No summary operator configured - nothing to process
+            self.logger.debug("Skipping operator - summary operator SID not configured")
+            return OperatorProcessingResult(
+                success=True,
+                skipped=True,
+                skip_reason="Summary operator SID not configured",
+            )
+        elif operator_id == self.config.summary_operator_sid:
             # Process as summary (SID match)
             return await self._process_summary_event(
                 event=event,
@@ -320,7 +328,7 @@ class OperatorResultProcessor:
                 profile_ids=profile_ids,
             )
         else:
-            # SID is not the configured summary operator - skip
+            # Configured summary SID doesn't match this operator - skip
             self.logger.debug(
                 f"Skipping operator - SID {operator_id} doesn't match "
                 f"summary ({self.config.summary_operator_sid})"

@@ -304,7 +304,7 @@ class MemoryClient(BaseAPIClient):
 
         Args:
             profile_id: Profile ID to associate observation with
-            content: Observation content (the summary text or extracted fact)
+            content: Observation content (an extracted fact or note about the profile)
             source: Source system identifier (default: "conversation-intelligence")
             conversation_ids: List of conversation IDs this observation relates to
             occurred_at: Timestamp when observation occurred (ISO 8601 format).
@@ -325,7 +325,9 @@ class MemoryClient(BaseAPIClient):
         }
         if conversation_ids:
             observation["conversationIds"] = conversation_ids
-        observation["occurredAt"] = occurred_at or datetime.now(timezone.utc).isoformat()
+        if occurred_at is None:
+            occurred_at = datetime.now(timezone.utc).isoformat()
+        observation["occurredAt"] = occurred_at
 
         payload: dict[str, Any] = {"observations": [observation]}
 

@@ -462,6 +462,22 @@ class TestOperatorResultProcessor:
         assert "Operator SID mismatch" in result.skip_reason
 
     @pytest.mark.asyncio
+    async def test_process_event_skips_when_summary_operator_not_configured(
+        self, mock_memory_client
+    ):
+        """Test skip reason when no summary operator SID is configured."""
+        from tac.core.config import ConversationIntelligenceConfig
+
+        config = ConversationIntelligenceConfig(configuration_id=VALID_CONFIG_ID)
+        processor = OperatorResultProcessor(mock_memory_client, config)
+        payload = make_valid_event()
+        result = await processor.process_event(payload)
+
+        assert result.success is True
+        assert result.skipped is True
+        assert "Summary operator SID not configured" in result.skip_reason
+
+    @pytest.mark.asyncio
     async def test_process_event_multiple_customer_profiles(self, processor, mock_memory_client):
         """Test processing with multiple CUSTOMER profiles (summary path)."""
         second_profile_id = "mem_profile_11234567890123456789abcdef"

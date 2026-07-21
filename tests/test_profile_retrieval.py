@@ -697,3 +697,32 @@ class TestCreateObservation:
         from datetime import datetime
 
         datetime.fromisoformat(observation["occurredAt"])
+
+    @pytest.mark.asyncio
+    async def test_create_observation_preserves_falsy_occurred_at(self) -> None:
+        """Only default occurred_at when it is None, not for other falsy values."""
+        client = MemoryClient(
+            store_id="mem_store_01abc",
+            api_key="SK123",
+            api_secret="secret",
+        )
+
+        mock_response = Mock()
+        mock_response.json.return_value = {"message": "accepted"}
+        mock_response.raise_for_status = Mock()
+
+        mock_http = AsyncMock()
+        mock_http.post = AsyncMock(return_value=mock_response)
+
+        with patch("httpx.AsyncClient") as mock_client_class:
+            mock_client_class.return_value.__aenter__.return_value = mock_http
+
+            await client.create_observation(
+                profile_id="mem_profile_01canonical",
+                content="Customer prefers email",
+                occurred_at="",
+            )
+
+        _, kwargs = mock_http.post.call_args
+        observation = kwargs["json"]["observations"][0]
+        assert observation["occurredAt"] == ""
