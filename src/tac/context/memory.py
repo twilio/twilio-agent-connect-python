@@ -153,7 +153,13 @@ class MemoryClient(BaseAPIClient):
 
     def _parse_items(self, items: Any, model: type[_ItemModel]) -> list[_ItemModel]:
         """Validate a list of items into `model`, skipping invalid entries."""
-        if not items:
+        if items is None:
+            return []
+        if not isinstance(items, list):
+            self.logger.warning(
+                f"Expected a list of Conversation Memory {model.__name__} but received "
+                f"{type(items).__name__}; returning empty list"
+            )
             return []
         parsed: list[_ItemModel] = []
         for item in items:

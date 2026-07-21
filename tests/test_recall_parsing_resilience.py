@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 
 from tac.context.memory import MemoryClient
+from tac.models.memory import MemoryRetrievalResponse
 
 
 def _make_client() -> MemoryClient:
@@ -53,7 +54,7 @@ def _valid_communication(comm_id: str) -> dict:
     }
 
 
-async def _call_retrieve(recall_payload: dict) -> object:
+async def _call_retrieve(recall_payload: dict) -> MemoryRetrievalResponse:
     client = _make_client()
 
     mock_response = Mock()
@@ -63,8 +64,11 @@ async def _call_retrieve(recall_payload: dict) -> object:
     mock_http = AsyncMock()
     mock_http.post = AsyncMock(return_value=mock_response)
 
-    with patch("httpx.AsyncClient") as mock_client_class:
-        mock_client_class.return_value.__aenter__.return_value = mock_http
+    mock_client = Mock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_http)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
+
+    with patch("httpx.AsyncClient", return_value=mock_client):
         return await client.retrieve_memory(profile_id="mem_profile_01abc")
 
 
@@ -128,3 +132,21 @@ class TestRecallParsingResilience:
             "conv_communication_1",
             "conv_communication_2",
         ]
+
+    @pytest.mark.asyncio
+    async def test_invalid_meta_falls_back_to_defaults(self) -> None:
+        payload = {
+            "observations": [_valid_observation("mem_observation_1")],
+            "summaries": [_valid_summary("mem_summary_1")],
+            "communications": [_valid_communication("conv_communication_1")],
+            "meta": {"queryTime": "not-a-number"},  # invalid: queryTime must be an int
+        }
+
+        result = await _call_retrieve(payload)
+
+        # Valid items still parse.
+        assert [o.id for o in result.observations] == ["mem_observation_1"]
+        assert [s.id for s in result.summaries] == ["mem_summary_1"]
+        assert [c.id for c in result.communications] == ["conv_communication_1"]
+        # Invalid meta is dropped and falls back to defaults.
+        assert result.meta.query_time is None
