@@ -619,3 +619,81 @@ class TestCreateProfile:
 
             with pytest.raises(httpx.HTTPError, match="boom"):
                 await client.create_profile(traits={"Contact": {"phone": "+1"}})
+
+
+class TestCreateObservation:
+    """HTTP-level tests for MemoryClient.create_observation."""
+
+    @pytest.mark.asyncio
+    async def test_create_observation_wraps_body_in_observations_array(self) -> None:
+        client = MemoryClient(
+            store_id="mem_store_01abc",
+            api_key="SK123",
+            api_secret="secret",
+        )
+
+        mock_response = Mock()
+        mock_response.json.return_value = {"message": "Observations creation accepted"}
+        mock_response.raise_for_status = Mock()
+
+        mock_http = AsyncMock()
+        mock_http.post = AsyncMock(return_value=mock_response)
+
+        with patch("httpx.AsyncClient") as mock_client_class:
+            mock_client_class.return_value.__aenter__.return_value = mock_http
+
+            await client.create_observation(
+                profile_id="mem_profile_01canonical",
+                content="Customer prefers email",
+                conversation_ids=["conv_1"],
+                occurred_at="2025-01-15T10:30:45+00:00",
+            )
+
+        mock_http.post.assert_called_once_with(
+            "https://memory.twilio.com/v1/Stores/mem_store_01abc"
+            "/Profiles/mem_profile_01canonical/Observations",
+            json={
+                "observations": [
+                    {
+                        "content": "Customer prefers email",
+                        "source": "conversation-intelligence",
+                        "conversationIds": ["conv_1"],
+                        "occurredAt": "2025-01-15T10:30:45+00:00",
+                    }
+                ]
+            },
+        )
+
+    @pytest.mark.asyncio
+    async def test_create_observation_defaults_occurred_at(self) -> None:
+        client = MemoryClient(
+            store_id="mem_store_01abc",
+            api_key="SK123",
+            api_secret="secret",
+        )
+
+        mock_response = Mock()
+        mock_response.json.return_value = {"message": "accepted"}
+        mock_response.raise_for_status = Mock()
+
+        mock_http = AsyncMock()
+        mock_http.post = AsyncMock(return_value=mock_response)
+
+        with patch("httpx.AsyncClient") as mock_client_class:
+            mock_client_class.return_value.__aenter__.return_value = mock_http
+
+            await client.create_observation(
+                profile_id="mem_profile_01canonical",
+                content="Customer prefers email",
+            )
+
+        _, kwargs = mock_http.post.call_args
+        body = kwargs["json"]
+        assert "observations" in body
+        assert len(body["observations"]) == 1
+        observation = body["observations"][0]
+        assert observation["occurredAt"]  # defaulted to current time
+        # Valid ISO 8601 timestamp
+        from datetime import datetime
+
+        datetime.fromisoformat(observation["occurredAt"])
