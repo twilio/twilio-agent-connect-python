@@ -19,7 +19,10 @@ class ConversationIntelligenceConfig(BaseModel):
     )
     observation_operator_sid: str | None = Field(
         default=None,
-        description="Operator SID for observation extraction (e.g., LY...)",
+        description=(
+            "Deprecated and ignored. Observation auto-creation was removed, so this "
+            "field no longer has any effect. Retained for backward compatibility."
+        ),
     )
     summary_operator_sid: str | None = Field(
         default=None,
