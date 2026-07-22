@@ -9,9 +9,6 @@ on:
         description: "Version to publish (e.g. 2.1.0). Defaults to pyproject version."
         required: false
 
-env:
-  ARTIFACTORY_URL: ${{ vars.ARTIFACTORY_URL }}
-
 # Serialize doc deployments so concurrent releases don't clobber gh-pages.
 concurrency:
   group: docs-deploy
@@ -30,7 +27,9 @@ jobs:
         with:
           fetch-depth: 0 # mike needs full history of the gh-pages branch
       - name: Authenticate with Artifactory
-        uses: ./.github/actions/artifactory-oidc
+        uses: twilio/sdk-actions/artifactory-oidc@26160226df57705a4b9ff2a4394513fd198b67c5 # pending sdk-actions#5; repin to release tag once merged
+        with:
+          ecosystem: python
       - uses: astral-sh/setup-uv@0c5e2b8115b80b4c7c5ddf6ffdd634974642d182 # v5
         with:
           version: "0.9.26"
