@@ -18,9 +18,7 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
 
       - name: Scan uv.lock + clean-room public install
-        uses: twilio/sdk-actions/lockfile-hygiene@452a53191213df64d95a396d7f0c20244fde75ef # pending sdk-actions#6; repin to release tag once merged
-        with:
-          package-manager: uv
+        uses: twilio/sdk-actions/uv-lockfile-hygiene@32bfbd2fdbd5c5da2a52280b23e381568dbfc995 # pending sdk-actions#7; repin to release tag once merged
 
   lint:
     name: Linting
@@ -30,7 +28,7 @@ jobs:
 
       - name: Authenticate with Artifactory
         if: ${{ !github.event.pull_request.head.repo.fork }}
-        uses: twilio/sdk-actions/artifactory-oidc@26160226df57705a4b9ff2a4394513fd198b67c5 # pending sdk-actions#5; repin to release tag once merged
+        uses: twilio/sdk-actions/artifactory-oidc@32bfbd2fdbd5c5da2a52280b23e381568dbfc995 # pending sdk-actions#7; repin to release tag once merged
         with:
           ecosystem: python
 
@@ -78,7 +76,7 @@ jobs:
 
       - name: Authenticate with Artifactory
         if: ${{ !github.event.pull_request.head.repo.fork }}
-        uses: twilio/sdk-actions/artifactory-oidc@26160226df57705a4b9ff2a4394513fd198b67c5 # pending sdk-actions#5; repin to release tag once merged
+        uses: twilio/sdk-actions/artifactory-oidc@32bfbd2fdbd5c5da2a52280b23e381568dbfc995 # pending sdk-actions#7; repin to release tag once merged
         with:
           ecosystem: python
 
@@ -123,7 +121,7 @@ jobs:
 
       - name: Authenticate with Artifactory
         if: ${{ !github.event.pull_request.head.repo.fork }}
-        uses: twilio/sdk-actions/artifactory-oidc@26160226df57705a4b9ff2a4394513fd198b67c5 # pending sdk-actions#5; repin to release tag once merged
+        uses: twilio/sdk-actions/artifactory-oidc@32bfbd2fdbd5c5da2a52280b23e381568dbfc995 # pending sdk-actions#7; repin to release tag once merged
         with:
           ecosystem: python
 
@@ -156,7 +154,7 @@ jobs:
 
       - name: Authenticate with Artifactory
         if: ${{ !github.event.pull_request.head.repo.fork }}
-        uses: twilio/sdk-actions/artifactory-oidc@26160226df57705a4b9ff2a4394513fd198b67c5 # pending sdk-actions#5; repin to release tag once merged
+        uses: twilio/sdk-actions/artifactory-oidc@32bfbd2fdbd5c5da2a52280b23e381568dbfc995 # pending sdk-actions#7; repin to release tag once merged
         with:
           ecosystem: python
 
