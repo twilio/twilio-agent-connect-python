@@ -132,6 +132,57 @@ class TestVoiceUrlConfigValidationAtStartup:
         TACFastAPIServer(tac=tac)  # no raise
 
 
+class TestChannelTypeValidationAtStartup:
+    """TACFastAPIServer fails fast at construction if a channel is the wrong
+    type — e.g. a None (an unconfigured connector channel) slipping into
+    messaging_channels — instead of an opaque AttributeError during dispatch."""
+
+    def test_none_in_messaging_channels_raises(self) -> None:
+        from tac.channels import SMSChannel
+        from tac.server import TACFastAPIServer
+
+        tac = TAC(get_test_config())
+        with pytest.raises(TypeError, match="MessagingChannel"):
+            TACFastAPIServer(tac=tac, messaging_channels=[SMSChannel(tac), None])
+
+    def test_wrong_type_in_messaging_channels_raises(self) -> None:
+        from tac.server import TACFastAPIServer
+
+        tac = TAC(get_test_config())
+        with pytest.raises(TypeError, match="MessagingChannel"):
+            TACFastAPIServer(tac=tac, messaging_channels=["not a channel"])
+
+    def test_voice_channel_in_messaging_channels_raises(self) -> None:
+        """A VoiceChannel is not a MessagingChannel — passing it in the
+        messaging list is a mistake and is rejected."""
+        from tac.channels.voice import VoiceChannel
+        from tac.server import TACFastAPIServer
+
+        tac = TAC(get_test_config())
+        with pytest.raises(TypeError, match="MessagingChannel"):
+            TACFastAPIServer(tac=tac, messaging_channels=[VoiceChannel(tac)])
+
+    def test_wrong_type_voice_channel_raises(self) -> None:
+        from tac.channels import SMSChannel
+        from tac.server import TACFastAPIServer
+
+        tac = TAC(get_test_config())
+        with pytest.raises(TypeError, match="VoiceChannel"):
+            TACFastAPIServer(tac=tac, voice_channel=SMSChannel(tac))
+
+    def test_valid_channels_pass(self) -> None:
+        from tac.channels import ChatChannel, SMSChannel
+        from tac.channels.voice import VoiceChannel
+        from tac.server import TACFastAPIServer
+
+        tac = TAC(get_test_config())
+        TACFastAPIServer(
+            tac=tac,
+            voice_channel=VoiceChannel(tac),
+            messaging_channels=[SMSChannel(tac), ChatChannel(tac)],
+        )  # no raise
+
+
 class TestWebSocketDisconnectError:
     """Test WebSocketDisconnectError."""
 
