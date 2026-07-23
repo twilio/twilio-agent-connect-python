@@ -27,7 +27,7 @@ jobs:
         with:
           fetch-depth: 0 # mike needs full history of the gh-pages branch
       - name: Authenticate with Artifactory
-        uses: twilio/sdk-actions/artifactory-oidc@32bfbd2fdbd5c5da2a52280b23e381568dbfc995 # pending sdk-actions#7; repin to release tag once merged
+        uses: twilio/sdk-actions/artifactory-oidc@7f2b699cccbe5ad019cd01a6aa72d8ced6e43775 # pending sdk-actions#7; repin to release tag once merged
         with:
           ecosystem: python
       - uses: astral-sh/setup-uv@0c5e2b8115b80b4c7c5ddf6ffdd634974642d182 # v5
