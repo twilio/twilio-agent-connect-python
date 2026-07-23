@@ -11,6 +11,17 @@ permissions:
   contents: read
 
 jobs:
+  lockfile-hygiene:
+    name: Lockfile Hygiene
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || 'ubuntu-x64' }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+
+      - name: Scan uv.lock + clean-room public install
+        uses: twilio/sdk-actions/lockfile-hygiene@452a53191213df64d95a396d7f0c20244fde75ef # pending sdk-actions#6; repin to release tag once merged
+        with:
+          package-manager: uv
+
   lint:
     name: Linting
     runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || 'ubuntu-x64' }}
@@ -179,13 +190,14 @@ jobs:
 
   all-checks:
     name: All Checks Passed
-    needs: [lint, type-check, test, build]
+    needs: [lockfile-hygiene, lint, type-check, test, build]
     runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || 'ubuntu-x64' }}
     if: always()
     steps:
       - name: Check all job statuses
         run: |
-          if [ "${{ needs.lint.result }}" != "success" ] || \
+          if [ "${{ needs['lockfile-hygiene'].result }}" != "success" ] || \
+             [ "${{ needs.lint.result }}" != "success" ] || \
              [ "${{ needs['type-check'].result }}" != "success" ] || \
              [ "${{ needs.test.result }}" != "success" ] || \
              [ "${{ needs.build.result }}" != "success" ]; then
