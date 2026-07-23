@@ -641,6 +641,141 @@ class TestTwiMLConnectAction:
         assert 'action="https://test.ngrok.io/conversation-relay-callback"' in resp.text
 
 
+class TestConversationRelayCallback:
+    """Test the /conversation-relay-callback route."""
+
+    def _build_server_and_channel(self):  # type: ignore[no-untyped-def]
+        from tac.channels.voice import VoiceChannel
+        from tac.server import TACFastAPIServer
+
+        tac = TAC(get_test_config())
+        vc = VoiceChannel(tac)
+        server = TACFastAPIServer(
+            tac=tac,
+            config=TACServerConfig(public_domain="test.ngrok.io"),
+            voice_channel=vc,
+        )
+        return server.app, vc
+
+    @pytest.mark.asyncio
+    async def test_callback_without_handoff_returns_200(self) -> None:
+        """Callback with no HandoffData returns 200 plain text and calls the channel handler."""
+        from unittest.mock import AsyncMock, patch
+
+        from httpx import ASGITransport, AsyncClient
+
+        app, vc = self._build_server_and_channel()
+
+        with patch.object(vc, "handle_conversation_relay_callback", new_callable=AsyncMock) as mock:
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                resp = await client.post(
+                    "/conversation-relay-callback",
+                    data={"CallSid": "CA123", "AccountSid": "ACtest123", "CallStatus": "completed"},
+                )
+
+        assert resp.status_code == 200
+        assert resp.headers["content-type"].startswith("text/plain")
+        mock.assert_called_once_with(
+            {"CallSid": "CA123", "AccountSid": "ACtest123", "CallStatus": "completed"}
+        )
+
+    @pytest.mark.asyncio
+    async def test_callback_with_handoff_but_no_workflow_sid_returns_200(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """HandoffData present but no TWILIO_TASKROUTER_WORKFLOW_SID → plain 200, no TwiML."""
+        from unittest.mock import AsyncMock, patch
+
+        from httpx import ASGITransport, AsyncClient
+
+        monkeypatch.delenv("TWILIO_TASKROUTER_WORKFLOW_SID", raising=False)
+
+        app, vc = self._build_server_and_channel()
+
+        with patch.object(vc, "handle_conversation_relay_callback", new_callable=AsyncMock):
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                resp = await client.post(
+                    "/conversation-relay-callback",
+                    data={
+                        "CallSid": "CA123",
+                        "AccountSid": "ACtest123",
+                        "CallStatus": "completed",
+                        "HandoffData": '{"someKey": "someValue"}',
+                    },
+                )
+
+        assert resp.status_code == 200
+        assert resp.headers["content-type"].startswith("text/plain")
+        assert "<Enqueue" not in resp.text
+
+    @pytest.mark.asyncio
+    async def test_callback_with_handoff_and_workflow_sid_returns_enqueue_twiml(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """HandoffData + TWILIO_TASKROUTER_WORKFLOW_SID → TwiML <Enqueue> response."""
+        from unittest.mock import AsyncMock, patch
+
+        from httpx import ASGITransport, AsyncClient
+
+        monkeypatch.setenv("TWILIO_TASKROUTER_WORKFLOW_SID", "WF123")
+
+        app, vc = self._build_server_and_channel()
+
+        handoff_data = '{"conversationId": "CH_test", "profileId": "PR_test"}'
+
+        with patch.object(vc, "handle_conversation_relay_callback", new_callable=AsyncMock):
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                resp = await client.post(
+                    "/conversation-relay-callback",
+                    data={
+                        "CallSid": "CA123",
+                        "AccountSid": "ACtest123",
+                        "CallStatus": "completed",
+                        "HandoffData": handoff_data,
+                    },
+                )
+
+        assert resp.status_code == 200
+        assert resp.headers["content-type"].startswith("application/xml")
+        assert '<Enqueue workflowSid="WF123">' in resp.text
+
+    @pytest.mark.asyncio
+    async def test_callback_enqueue_twiml_wraps_handoff_data_in_task(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """<Task> element contains {\"handoffData\": <original HandoffData value>}."""
+        import json
+        from unittest.mock import AsyncMock, patch
+
+        from httpx import ASGITransport, AsyncClient
+
+        monkeypatch.setenv("TWILIO_TASKROUTER_WORKFLOW_SID", "WF456")
+
+        app, vc = self._build_server_and_channel()
+
+        handoff_data = '{"conversationId": "CH_abc", "profileId": "PR_xyz"}'
+
+        with patch.object(vc, "handle_conversation_relay_callback", new_callable=AsyncMock):
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                resp = await client.post(
+                    "/conversation-relay-callback",
+                    data={
+                        "CallSid": "CA456",
+                        "AccountSid": "ACtest123",
+                        "CallStatus": "completed",
+                        "HandoffData": handoff_data,
+                    },
+                )
+
+        assert resp.status_code == 200
+        expected_task = json.dumps({"handoffData": handoff_data})
+        assert f"<Task>{expected_task}</Task>" in resp.text
+
+
 class TestSignatureValidation:
     """Test that webhook signature validation is enforced on all TAC routes."""
 

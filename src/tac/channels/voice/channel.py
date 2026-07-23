@@ -6,6 +6,7 @@ from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from typing import Literal
     from twilio.rest import Client
 
 from pydantic import ValidationError
@@ -141,6 +142,52 @@ class VoiceChannel(BaseChannel):
         if setup_msg.direction and setup_msg.direction.upper() == "OUTBOUND":
             return setup_msg.to_number
         return setup_msg.from_number
+
+    async def _fix_outbound_participant_roles(
+        self,
+        conv_id: str,
+        participants: list[Any],
+        agent_phone: str,
+    ) -> list[Any]:
+        """Correct participant roles for outbound calls.
+
+        ConversationRelay assigns participant types based on call leg direction,
+        which inverts CUSTOMER/AI_AGENT for outbound calls (the agent's number
+        becomes CUSTOMER). Fix by comparing each participant's VOICE address to
+        the agent's phone number and updating any mismatched types via CO API.
+        """
+        co_client = self.tac.conversation_orchestrator_client
+        if co_client is None:
+            return participants
+        fixed = []
+        for p in participants:
+            voice_addr = next(
+                (a.address for a in (p.addresses or []) if a.channel == "VOICE"),
+                None,
+            )
+            if voice_addr is None:
+                fixed.append(p)
+                continue
+            expected_type: Literal["AI_AGENT", "CUSTOMER"] = (
+                "AI_AGENT" if voice_addr == agent_phone else "CUSTOMER"
+            )
+            if p.type != expected_type:
+                self.logger.debug(
+                    "Fixing participant role for outbound call",
+                    participant_id=p.id,
+                    from_type=p.type,
+                    to_type=expected_type,
+                )
+                updated = await co_client.update_participant(
+                    conversation_id=conv_id,
+                    participant_id=p.id,
+                    participant_type=expected_type,
+                    addresses=p.addresses or [],
+                )
+                fixed.append(updated)
+            else:
+                fixed.append(p)
+        return fixed
 
     def _get_twilio_client(self) -> Client:
         if self._twilio_client is None:
@@ -392,6 +439,13 @@ class VoiceChannel(BaseChannel):
         conv_id = conversation.id
 
         participants = await conversation_orchestrator_client.list_participants(conv_id)
+
+        if setup_msg.direction and setup_msg.direction.upper() == "OUTBOUND-API":
+            agent_phone = setup_msg.from_number
+            if agent_phone:
+                participants = await self._fix_outbound_participant_roles(
+                    conv_id, participants, agent_phone
+                )
 
         customer_participant = next(
             (p for p in participants if p.type == "CUSTOMER"),

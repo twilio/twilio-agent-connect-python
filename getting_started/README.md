@@ -132,6 +132,24 @@ See `examples/.env.example` for all available configuration options. Key variabl
 - `TWILIO_WHATSAPP_NUMBER`: WhatsApp-enabled phone number in format `whatsapp:+1234567890` (required for `features/whatsapp.py`)
 - `TWILIO_CONVERSATIONS_SERVICE_SID`: Conversations Service SID (required for Chat channel examples)
 
+## Make an outbound call
+```python
+from tac import TAC, TACConfig
+
+tac = TAC(config=TACConfig.from_env())
+voice_channel = VoiceChannel(tac, config=VoiceChannelConfig(memory_mode="always"))
+
+tac_voice_domain = os.getenv("TAC_SERVER_DOMAIN", "")
+
+opts = InitiateVoiceConversationOptions(
+    to="+4498767667",
+    websocket_url=f"wss://{tac_voice_domain}/ws",
+    welcome_greeting="Hello",
+    action_url=f"https://{tac_voice_domain}/conversation-relay-callback",
+)                   
+voice_channel.initiate_outbound_conversation(opts)
+```
+
 ## Next Steps
 
 - Start with `examples/overview.py` to learn the core memory injection pattern

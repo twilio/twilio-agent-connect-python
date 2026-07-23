@@ -2231,6 +2231,249 @@ class TestConversationInitializationFlow:
         )
         co_client.list_participants.assert_called_once_with("CH_reuse_test")
 
+    # --- _fix_outbound_participant_roles unit tests ---
+    @pytest.mark.asyncio
+    async def test_fix_outbound_roles_skips_correct_types(self) -> None:
+        """Participants already correctly typed are returned unchanged without any API call."""
+        from tac.models.conversation import ParticipantAddress, ParticipantResponse
+
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+        co_client = tac.conversation_orchestrator_client
+        co_client.update_participant = AsyncMock()
+
+        agent_phone = "+15551234567"
+        agent_participant = ParticipantResponse(
+            id="PA_agent",
+            conversation_id="CH_test",
+            account_id="ACtest123",
+            name="Agent",
+            type="AI_AGENT",  # already correct
+            addresses=[ParticipantAddress(channel="VOICE", address=agent_phone)],
+        )
+        customer_participant = ParticipantResponse(
+            id="PA_customer",
+            conversation_id="CH_test",
+            account_id="ACtest123",
+            name="Customer",
+            type="CUSTOMER",  # already correct
+            addresses=[ParticipantAddress(channel="VOICE", address="+15559876543")],
+        )
+        result = await channel._fix_outbound_participant_roles(
+            "CH_test", [agent_participant, customer_participant], agent_phone
+        )
+        co_client.update_participant.assert_not_called()
+        assert result == [agent_participant, customer_participant]
+
+    @pytest.mark.asyncio
+    async def test_fix_outbound_roles_skips_participant_without_voice_address(self) -> None:
+        """Participants with no VOICE-channel address are passed through untouched."""
+        from tac.models.conversation import ParticipantAddress, ParticipantResponse
+
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+        co_client = tac.conversation_orchestrator_client
+        co_client.update_participant = AsyncMock()
+
+        no_voice = ParticipantResponse(
+            id="PA_no_voice",
+            conversation_id="CH_test",
+            account_id="ACtest123",
+            name="SMS Only",
+            type="CUSTOMER",
+            addresses=[ParticipantAddress(channel="SMS", address="+15551234567")],
+        )
+        no_addresses = ParticipantResponse(
+            id="PA_no_addr",
+            conversation_id="CH_test",
+            account_id="ACtest123",
+            name="No Addresses",
+            type="CUSTOMER",
+            addresses=[],
+        )
+
+        result = await channel._fix_outbound_participant_roles(
+            "CH_test", [no_voice, no_addresses], "+15551234567"
+        )
+        co_client.update_participant.assert_not_called()
+        assert result == [no_voice, no_addresses]
+
+    @pytest.mark.asyncio
+    async def test_fix_outbound_roles_returns_unchanged_when_no_co_client(self) -> None:
+        """Returns participants unmodified when conversation_orchestrator_client is None."""
+        from tac.models.conversation import ParticipantAddress, ParticipantResponse
+
+        config = get_test_config()
+        del config["conversation_configuration_id"]
+        tac = TAC(config)
+        channel = VoiceChannel(tac)
+
+        assert tac.conversation_orchestrator_client is None
+
+        participants = [
+            ParticipantResponse(
+                id="PA_test",
+                conversation_id="CH_test",
+                account_id="ACtest123",
+                name="Test",
+                type="CUSTOMER",
+                addresses=[ParticipantAddress(channel="VOICE", address="+15551234567")],
+            )
+        ]
+        result = await channel._fix_outbound_participant_roles(
+            "CH_test", participants, "+15551234567"
+        )
+        assert result is participants
+
+    # --- integration tests through handle_websocket ---
+
+    @pytest.mark.asyncio
+    async def test_outbound_api_call_fixes_participant_roles_via_websocket(self) -> None:
+        """Outbound-API setup triggers role correction; callback receives fixed conversation."""
+        from tac.channels.websocket_protocol import WebSocketDisconnectError
+        from tac.models.conversation import ParticipantAddress, ParticipantResponse
+
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+
+        initialized_conversations: list[str] = []
+
+        async def on_message(user_message, context, memory_response):
+            initialized_conversations.append(context.conversation_id)
+
+        tac.on_message_ready(on_message)
+
+        mock_conversation = ConversationResponse(
+            id="CH_outbound_test",
+            accountId="ACtest123",
+            configuration_id="conv_configuration_test123",
+            status="ACTIVE",
+        )
+        co_client = tac.conversation_orchestrator_client
+        co_client.list_conversations = AsyncMock(return_value=[mock_conversation])
+
+        agent_phone = "+15551234567"  # matches phone_number in get_test_config()
+        # Inverted participants as ConversationRelay produces for outbound-API calls
+        agent_participant = ParticipantResponse(
+            id="PA_agent",
+            conversation_id="CH_outbound_test",
+            account_id="ACtest123",
+            name="Agent",
+            type="CUSTOMER",  # inverted
+            addresses=[ParticipantAddress(channel="VOICE", address=agent_phone)],
+        )
+        customer_participant = ParticipantResponse(
+            id="PA_customer",
+            conversation_id="CH_outbound_test",
+            account_id="ACtest123",
+            name="Customer",
+            type="AI_AGENT",  # inverted
+            addresses=[ParticipantAddress(channel="VOICE", address="+15559876543")],
+        )
+        fixed_agent = ParticipantResponse(
+            id="PA_agent",
+            conversation_id="CH_outbound_test",
+            account_id="ACtest123",
+            name="Agent",
+            type="AI_AGENT",
+            addresses=[ParticipantAddress(channel="VOICE", address=agent_phone)],
+        )
+        fixed_customer = ParticipantResponse(
+            id="PA_customer",
+            conversation_id="CH_outbound_test",
+            account_id="ACtest123",
+            name="Customer",
+            type="CUSTOMER",
+            addresses=[ParticipantAddress(channel="VOICE", address="+15559876543")],
+        )
+        co_client.list_participants = AsyncMock(
+            return_value=[agent_participant, customer_participant]
+        )
+
+        async def fix_side_effect(**kwargs):
+            return fixed_agent if kwargs["participant_id"] == "PA_agent" else fixed_customer
+
+        co_client.update_participant = AsyncMock(side_effect=fix_side_effect)
+
+        mock_websocket = AsyncMock()
+        # direction lowercase to confirm .upper() comparison works
+        setup_data = {
+            "type": "setup",
+            "callSid": "CA_outbound_test",
+            "from": agent_phone,
+            "direction": "outbound-api",
+        }
+        prompt_data = {"type": "prompt", "voicePrompt": "Hello"}
+        mock_websocket.receive_json = AsyncMock(
+            side_effect=[setup_data, prompt_data, WebSocketDisconnectError()]
+        )
+
+        await channel.handle_websocket(mock_websocket)
+
+        assert initialized_conversations == ["CH_outbound_test"]
+        assert co_client.update_participant.call_count == 2
+        co_client.update_participant.assert_any_call(
+            conversation_id="CH_outbound_test",
+            participant_id="PA_agent",
+            participant_type="AI_AGENT",
+            addresses=agent_participant.addresses,
+        )
+        co_client.update_participant.assert_any_call(
+            conversation_id="CH_outbound_test",
+            participant_id="PA_customer",
+            participant_type="CUSTOMER",
+            addresses=customer_participant.addresses,
+        )
+
+    @pytest.mark.asyncio
+    async def test_inbound_call_does_not_fix_participant_roles(self) -> None:
+        """Inbound calls skip role correction entirely — update_participant is never called."""
+        from tac.channels.websocket_protocol import WebSocketDisconnectError
+        from tac.models.conversation import ParticipantAddress, ParticipantResponse
+
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+
+        tac.on_message_ready(AsyncMock())
+
+        mock_conversation = ConversationResponse(
+            id="CH_inbound_test",
+            accountId="ACtest123",
+            configuration_id="conv_configuration_test123",
+            status="ACTIVE",
+        )
+        co_client = tac.conversation_orchestrator_client
+        co_client.list_conversations = AsyncMock(return_value=[mock_conversation])
+        co_client.list_participants = AsyncMock(
+            return_value=[
+                ParticipantResponse(
+                    id="PA_customer",
+                    conversation_id="CH_inbound_test",
+                    account_id="ACtest123",
+                    name="Customer",
+                    type="CUSTOMER",
+                    addresses=[ParticipantAddress(channel="VOICE", address="+15559876543")],
+                )
+            ]
+        )
+        co_client.update_participant = AsyncMock()
+
+        mock_websocket = AsyncMock()
+        setup_data = {
+            "type": "setup",
+            "callSid": "CA_inbound_test",
+            "from": "+15559876543",
+            # no direction field — inbound
+        }
+        prompt_data = {"type": "prompt", "voicePrompt": "Hello"}
+        mock_websocket.receive_json = AsyncMock(
+            side_effect=[setup_data, prompt_data, WebSocketDisconnectError()]
+        )
+
+        await channel.handle_websocket(mock_websocket)
+
+        co_client.update_participant.assert_not_called()
+
 
 class TestSessionManagerDefaults:
     """Test session_manager default behavior in VoiceChannelConfig."""
