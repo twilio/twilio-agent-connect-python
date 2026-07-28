@@ -18,7 +18,7 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
 
       - name: Scan uv.lock + clean-room public install
-        uses: twilio/sdk-actions/uv-lockfile-hygiene@23b656b843d2a3461cf38e4fd466c07a822d5fc0 # sdk-actions#7 (merged to main); repin to a release tag when one is cut
+        uses: twilio/sdk-actions/uv-lockfile-hygiene@26f95a54e57993c1bf3b26bec2905f395814c23a # v1.0.0
 
   lint:
     name: Linting
@@ -28,7 +28,7 @@ jobs:
 
       - name: Authenticate with Artifactory
         if: ${{ !github.event.pull_request.head.repo.fork }}
-        uses: twilio/sdk-actions/artifactory-oidc@23b656b843d2a3461cf38e4fd466c07a822d5fc0 # sdk-actions#7 (merged to main); repin to a release tag when one is cut
+        uses: twilio/sdk-actions/artifactory-oidc@26f95a54e57993c1bf3b26bec2905f395814c23a # v1.0.0
         with:
           ecosystem: python
 
@@ -76,7 +76,7 @@ jobs:
 
       - name: Authenticate with Artifactory
         if: ${{ !github.event.pull_request.head.repo.fork }}
-        uses: twilio/sdk-actions/artifactory-oidc@23b656b843d2a3461cf38e4fd466c07a822d5fc0 # sdk-actions#7 (merged to main); repin to a release tag when one is cut
+        uses: twilio/sdk-actions/artifactory-oidc@26f95a54e57993c1bf3b26bec2905f395814c23a # v1.0.0
         with:
           ecosystem: python
 
@@ -121,7 +121,7 @@ jobs:
 
       - name: Authenticate with Artifactory
         if: ${{ !github.event.pull_request.head.repo.fork }}
-        uses: twilio/sdk-actions/artifactory-oidc@23b656b843d2a3461cf38e4fd466c07a822d5fc0 # sdk-actions#7 (merged to main); repin to a release tag when one is cut
+        uses: twilio/sdk-actions/artifactory-oidc@26f95a54e57993c1bf3b26bec2905f395814c23a # v1.0.0
         with:
           ecosystem: python
 
@@ -154,7 +154,7 @@ jobs:
 
       - name: Authenticate with Artifactory
         if: ${{ !github.event.pull_request.head.repo.fork }}
-        uses: twilio/sdk-actions/artifactory-oidc@23b656b843d2a3461cf38e4fd466c07a822d5fc0 # sdk-actions#7 (merged to main); repin to a release tag when one is cut
+        uses: twilio/sdk-actions/artifactory-oidc@26f95a54e57993c1bf3b26bec2905f395814c23a # v1.0.0
         with:
           ecosystem: python
 
