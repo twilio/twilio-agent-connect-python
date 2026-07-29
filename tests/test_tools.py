@@ -476,7 +476,7 @@ class TestMemoryTools:
         mock_memory_client = MagicMock(spec=MemoryClient)
 
         session = ConversationSession(
-            profile_id="prof_123", conversation_id="conv_123", channel="sms"
+            profile_id="prof_123", conversation_id="conv_123", channel="SMS"
         )
 
         tool = create_memory_tool(mock_memory_client, session)
@@ -489,7 +489,7 @@ class TestMemoryTools:
         mock_memory_client = MagicMock(spec=MemoryClient)
 
         session = ConversationSession(
-            profile_id="prof_123", conversation_id="conv_123", channel="sms"
+            profile_id="prof_123", conversation_id="conv_123", channel="SMS"
         )
 
         memory_tool = create_memory_tool(mock_memory_client, session)
@@ -512,7 +512,7 @@ class TestMemoryTools:
         mock_memory_client.retrieve_memory = MagicMock(side_effect=mock_retrieve)
 
         session = ConversationSession(
-            profile_id="prof_123", conversation_id="conv_123", channel="sms"
+            profile_id="prof_123", conversation_id="conv_123", channel="SMS"
         )
 
         memory_tool = create_memory_tool(mock_memory_client, session)
@@ -537,8 +537,8 @@ class TestMemoryTools:
         mock_client1 = MagicMock(spec=MemoryClient)
         mock_client2 = MagicMock(spec=MemoryClient)
 
-        session1 = ConversationSession(profile_id="prof_1", conversation_id="conv_1", channel="sms")
-        session2 = ConversationSession(profile_id="prof_2", conversation_id="conv_2", channel="sms")
+        session1 = ConversationSession(profile_id="prof_1", conversation_id="conv_1", channel="SMS")
+        session2 = ConversationSession(profile_id="prof_2", conversation_id="conv_2", channel="SMS")
 
         tool1 = create_memory_tool(mock_client1, session1)
         tool2 = create_memory_tool(mock_client2, session2)
@@ -566,7 +566,7 @@ class TestMemoryTools:
         mock_memory_client.retrieve_memory = MagicMock(side_effect=mock_retrieve)
 
         session = ConversationSession(
-            profile_id="prof_123", conversation_id="conv_123", channel="sms"
+            profile_id="prof_123", conversation_id="conv_123", channel="SMS"
         )
 
         memory_tool = create_memory_tool(mock_memory_client, session)

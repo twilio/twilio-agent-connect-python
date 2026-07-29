@@ -43,7 +43,7 @@ def sample_context() -> ConversationSession:
     return ConversationSession(
         conversation_id="conv1",
         profile_id="profile1",
-        channel="sms",
+        channel="SMS",
         profile=profile,
         phone_number="+1234567890",
     )

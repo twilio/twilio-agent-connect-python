@@ -66,9 +66,6 @@ class SMSChannel(MessagingChannel):
             )
 
     def get_channel_name(self) -> str:
-        return "sms"
-
-    def get_channel_type_upper(self) -> str:
         return "SMS"
 
     def is_default_agent_address(self, author_address: str) -> bool:

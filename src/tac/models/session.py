@@ -34,7 +34,7 @@ class ConversationSession(BaseModel):
     profile_id: str | None = Field(
         None, description="Profile ID associated with conversation (optional)"
     )
-    channel: str = Field(..., description="Channel type (e.g., 'sms', 'voice')")
+    channel: str = Field(..., description="Channel type (e.g., 'SMS', 'VOICE')")
     started_at: datetime = Field(
         default_factory=datetime.now,
         description="When the conversation session was started",

@@ -65,9 +65,6 @@ class ChatChannel(MessagingChannel):
         self.agent_address = config.agent_address
 
     def get_channel_name(self) -> str:
-        return "chat"
-
-    def get_channel_type_upper(self) -> str:
         return "CHAT"
 
     def is_default_agent_address(self, author_address: str) -> bool:

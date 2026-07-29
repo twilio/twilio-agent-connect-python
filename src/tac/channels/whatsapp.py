@@ -69,9 +69,6 @@ class WhatsAppChannel(MessagingChannel):
             )
 
     def get_channel_name(self) -> str:
-        return "whatsapp"
-
-    def get_channel_type_upper(self) -> str:
         return "WHATSAPP"
 
     def is_default_agent_address(self, author_address: str) -> bool:

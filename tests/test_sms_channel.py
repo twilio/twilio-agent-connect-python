@@ -212,7 +212,7 @@ class TestSMSChannel:
         assert captured_context.conversation_id == "CH123456"
         # No profile_id since message auto-initialized without participant.added event
         assert captured_context.profile_id is None
-        assert captured_context.channel == "sms"
+        assert captured_context.channel == "SMS"
 
     @pytest.mark.asyncio
     async def test_process_message_with_existing_conversation(self) -> None:
@@ -327,7 +327,7 @@ class TestSMSChannel:
 
         channel._conversations["CH123456"] = ConversationSession(
             conversation_id="CH123456",
-            channel="sms",
+            channel="SMS",
             profile_id="profile_test_123",
         )
 
@@ -348,7 +348,7 @@ class TestSMSChannel:
         # Session is pre-populated as if reconcile (or outbound initiation) ran.
         channel._conversations["CH123456"] = ConversationSession(
             conversation_id="CH123456",
-            channel="sms",
+            channel="SMS",
             author_info=AuthorInfo(address="+12345678901", participant_id="PA_CUSTOMER"),
             ai_agent_info=AuthorInfo(address="+15551234567", participant_id="PA_AGENT"),
         )
@@ -388,7 +388,7 @@ class TestSMSChannel:
         # (as inbound ingestion + reconcile would).
         channel._conversations["CH_WITH_CH_ID"] = ConversationSession(
             conversation_id="CH_WITH_CH_ID",
-            channel="sms",
+            channel="SMS",
             author_info=AuthorInfo(address="+12345678901", participant_id="PA_CUSTOMER"),
             ai_agent_info=AuthorInfo(address="+15551234567", participant_id="PA_AGENT"),
             metadata={"channel_id": "SMabcdef"},
@@ -411,10 +411,10 @@ class TestSMSChannel:
         channel = SMSChannel(tac)
 
         channel._conversations["CH111"] = ConversationSession(
-            conversation_id="CH111", channel="sms", profile_id="PR111"
+            conversation_id="CH111", channel="SMS", profile_id="PR111"
         )
         channel._conversations["CH222"] = ConversationSession(
-            conversation_id="CH222", channel="sms", profile_id="PR222"
+            conversation_id="CH222", channel="SMS", profile_id="PR222"
         )
 
         # Verify both conversations tracked.
@@ -458,7 +458,7 @@ class TestSMSChannel:
         tac.on_conversation_ended(handler)
 
         channel._conversations["CH_CB1"] = ConversationSession(
-            conversation_id="CH_CB1", channel="sms", profile_id="prof_cb1"
+            conversation_id="CH_CB1", channel="SMS", profile_id="prof_cb1"
         )
 
         # Close conversation
@@ -469,7 +469,7 @@ class TestSMSChannel:
         assert len(captured) == 1
         assert captured[0].conversation_id == "CH_CB1"
         assert captured[0].profile_id == "prof_cb1"
-        assert captured[0].channel == "sms"
+        assert captured[0].channel == "SMS"
 
     @pytest.mark.asyncio
     async def test_conversation_ended_callback_error_does_not_prevent_cleanup(self) -> None:
@@ -483,7 +483,7 @@ class TestSMSChannel:
         tac.on_conversation_ended(bad_handler)
 
         channel._conversations["CH_CB2"] = ConversationSession(
-            conversation_id="CH_CB2", channel="sms", profile_id="prof_cb2"
+            conversation_id="CH_CB2", channel="SMS", profile_id="prof_cb2"
         )
         await channel.process_webhook(
             create_conversation_updated_webhook("CH_CB2", "CLOSED", "2025-11-18T00:10:00.000Z")
@@ -505,7 +505,7 @@ class TestSMSChannel:
         tac.on_conversation_ended(async_handler)
 
         channel._conversations["CH_ASYNC1"] = ConversationSession(
-            conversation_id="CH_ASYNC1", channel="sms", profile_id="prof_async1"
+            conversation_id="CH_ASYNC1", channel="SMS", profile_id="prof_async1"
         )
         await channel.process_webhook(
             create_conversation_updated_webhook("CH_ASYNC1", "CLOSED", "2025-11-18T00:10:00.000Z")
@@ -513,7 +513,7 @@ class TestSMSChannel:
 
         assert len(captured) == 1
         assert captured[0].conversation_id == "CH_ASYNC1"
-        assert captured[0].channel == "sms"
+        assert captured[0].channel == "SMS"
 
     @pytest.mark.asyncio
     async def test_conversation_ended_no_callback_registered(self) -> None:
@@ -523,7 +523,7 @@ class TestSMSChannel:
 
         # No callback registered — should not raise
         channel._conversations["CH_NOCB"] = ConversationSession(
-            conversation_id="CH_NOCB", channel="sms", profile_id="prof_nocb"
+            conversation_id="CH_NOCB", channel="SMS", profile_id="prof_nocb"
         )
         await channel.process_webhook(
             create_conversation_updated_webhook("CH_NOCB", "CLOSED", "2025-11-18T00:10:00.000Z")
@@ -541,7 +541,7 @@ class TestSMSChannel:
         # ai_agent_info is set, but author_info is missing — misuse.
         channel._conversations["CH123456"] = ConversationSession(
             conversation_id="CH123456",
-            channel="sms",
+            channel="SMS",
             ai_agent_info=AuthorInfo(address="+15551234567", participant_id="PA_AGENT"),
         )
 
