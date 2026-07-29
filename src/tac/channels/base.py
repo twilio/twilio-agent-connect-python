@@ -153,7 +153,7 @@ class BaseChannel(ABC):
             author_channel = author.get("channel")
             if not author_channel:
                 return False
-            return author_channel == self.get_channel_name()
+            return bool(author_channel == self.get_channel_name())
 
         if event_type == "CONVERSATION_UPDATED":
             if not isinstance(event_data, dict):
