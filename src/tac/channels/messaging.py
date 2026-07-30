@@ -192,11 +192,14 @@ class MessagingChannel(BaseChannel):
 
         Args:
             conversation_id: Conversation ID to send response to
-            response: Message content (must be a string)
+            response: Message content. Must be ``str`` — messaging channels send a
+                single complete message via the Conversation Orchestrator Send API
+                and do not support streaming (unlike the Voice channel).
             role: Optional message role (unused by messaging channels)
 
         Raises:
-            TypeError: If response is not a string
+            TypeError: If response is not a string (e.g. an async generator is
+                passed, since messaging channels don't support streaming)
             RuntimeError: If the session or participant ids are missing
         """
         channel_name = self.get_channel_name()
