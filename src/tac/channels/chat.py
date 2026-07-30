@@ -1,24 +1,17 @@
 """Chat Channel implementation for TAC."""
 
-from collections.abc import AsyncGenerator
 from typing import Any
 
 from pydantic import Field
 
 from tac import TAC
 from tac.channels.messaging import MessagingChannel, MessagingChannelConfig
-from tac.models.conversation import (
-    ActionChannelSettings,
-    ActionParticipantRef,
-    ActionTextContent,
-    ParticipantAddress,
-    SendMessageActionPayload,
-    SendMessageActionRequest,
-)
+from tac.models.conversation import ActionChannelSettings, ParticipantAddress
 from tac.models.outbound import (
     InitiateChatConversationOptions,
     InitiateConversationResult,
 )
+from tac.models.session import ConversationSession
 
 
 class ChatChannelConfig(MessagingChannelConfig):
@@ -79,96 +72,21 @@ class ChatChannel(MessagingChannel):
             channel_id=channel_id if isinstance(channel_id, str) else None,
         )
 
-    async def send_response(
-        self,
-        conversation_id: str,
-        response: str | AsyncGenerator[str | dict[str, Any], None],
-        role: str | None = None,
-    ) -> None:
-        """Send chat response using the Conversation Orchestrator Send API.
-
-        Reads the agent and customer participant ids stashed on the session
-        by inbound reconciliation or outbound initiation. Missing ids are a
-        misuse — send_response is only expected to be called after an inbound
-        webhook (COMMUNICATION_CREATED → reconcile) or after
-        `initiate_outbound_conversation`, both of which populate the session.
-
-        Args:
-            conversation_id: Conversation ID to send response to
-            response: Message content (must be string for Chat)
-            role: Optional message role (not used in Chat channel)
-
-        Raises:
-            TypeError: If response is not a string
-            RuntimeError: If the session, channel_id, or participant ids are missing
-        """
-        if not isinstance(response, str):
-            raise TypeError("Chat channel only supports string responses")
-
-        session = self._conversations.get(conversation_id)
-        if session is None or not session.author_info or not session.ai_agent_info:
-            raise RuntimeError(
-                f"Unable to send chat message: send_response called without a "
-                f"reconciled session for conversation {conversation_id}. Wait for "
-                "an inbound webhook or call initiate_outbound_conversation first."
-            )
-
-        customer_participant_id = session.author_info.participant_id
-        agent_participant_id = session.ai_agent_info.participant_id
-        if not customer_participant_id or not agent_participant_id:
-            raise RuntimeError(
-                f"Unable to send chat message: session for conversation "
-                f"{conversation_id} is missing participant ids."
-            )
-
+    def _build_channel_settings(
+        self, conversation_id: str, session: ConversationSession
+    ) -> ActionChannelSettings:
         # channelId (Chat Channel SID) is required for CHAT delivery — the V1
         # Chat backend uses it to pick the destination thread. Inbound webhooks
         # always populate it, so a missing value here is a misuse.
-        chat_channel_sid = session.metadata.get("channel_id")
-        if not chat_channel_sid or not isinstance(chat_channel_sid, str):
+        channel_id = session.metadata.get("channel_id")
+        if not channel_id or not isinstance(channel_id, str):
             raise RuntimeError(
                 "Missing required session.metadata['channel_id'] for chat send_response; "
                 "this is normally populated by an inbound webhook. Ensure an inbound "
                 "message has been processed before calling send_response, or set "
                 "session.metadata['channel_id'] explicitly in advanced usage."
             )
-
-        channel_settings = ActionChannelSettings(channel_id=chat_channel_sid)
-
-        try:
-            action_request = SendMessageActionRequest(
-                payload=SendMessageActionPayload(
-                    from_=ActionParticipantRef(
-                        channel="CHAT",
-                        participant_id=agent_participant_id,
-                    ),
-                    to=[
-                        ActionParticipantRef(
-                            channel="CHAT",
-                            participant_id=customer_participant_id,
-                        )
-                    ],
-                    content=ActionTextContent(text=response),
-                    channel_settings=channel_settings,
-                ),
-            )
-
-            await self.conversation_orchestrator_client.create_action(
-                conversation_id, action_request
-            )
-
-            self.logger.info(
-                "Sent chat response via Actions API",
-                conversation_id=conversation_id,
-                channel_id=chat_channel_sid,
-            )
-        except Exception as e:
-            self.logger.error(
-                "Failed to create action",
-                conversation_id=conversation_id,
-                error=str(e),
-                exc_info=True,
-            )
+        return ActionChannelSettings(channel_id=channel_id)
 
     async def initiate_outbound_conversation(
         self,
