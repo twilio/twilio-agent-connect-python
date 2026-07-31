@@ -17,13 +17,6 @@ class ConversationIntelligenceConfig(BaseModel):
     configuration_id: str = Field(
         description="Conversation Intelligence Configuration ID",
     )
-    observation_operator_sid: str | None = Field(
-        default=None,
-        description=(
-            "Deprecated and ignored. Observation auto-creation was removed, so this "
-            "field no longer has any effect. Retained for backward compatibility."
-        ),
-    )
     summary_operator_sid: str | None = Field(
         default=None,
         description="Operator SID for summary extraction (e.g., LY...)",
@@ -33,7 +26,6 @@ class ConversationIntelligenceConfig(BaseModel):
         json_schema_extra={
             "example": {
                 "configuration_id": "your_ci_configuration_id",
-                "observation_operator_sid": "LY00000000000000000000000000000001",
                 "summary_operator_sid": "LY00000000000000000000000000000002",
             }
         },
@@ -49,9 +41,6 @@ class ConversationIntelligenceConfig(BaseModel):
 
         return cls(
             configuration_id=configuration_id,
-            observation_operator_sid=os.environ.get(
-                "CONVERSATION_INTELLIGENCE_OBSERVATION_OPERATOR_SID"
-            ),
             summary_operator_sid=os.environ.get("CONVERSATION_INTELLIGENCE_SUMMARY_OPERATOR_SID"),
         )
 
@@ -346,7 +335,6 @@ class TACConfig(BaseModel):
                 },
                 "conversation_intelligence_config": {
                     "configuration_id": "GAxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-                    "observation_operator_sid": "LYxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
                     "summary_operator_sid": "LYyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
                 },
             }
@@ -401,8 +389,6 @@ class TACConfig(BaseModel):
 
         - `CONVERSATION_INTELLIGENCE_CONFIGURATION_ID`: CI Service configuration ID
           for webhook filtering
-        - `CONVERSATION_INTELLIGENCE_OBSERVATION_OPERATOR_SID`: Operator SID for
-          observation extraction
         - `CONVERSATION_INTELLIGENCE_SUMMARY_OPERATOR_SID`: Operator SID for summary
           extraction
         """

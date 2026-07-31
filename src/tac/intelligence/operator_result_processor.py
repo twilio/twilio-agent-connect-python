@@ -130,9 +130,6 @@ class OperatorResultProcessor:
     This processor handles incoming CI webhook payloads, validates them,
     and creates conversation summaries in Conversation Memory based on the event type.
 
-    Observation auto-creation was removed; ``observation_operator_sid`` is accepted
-    but ignored.
-
     Events are filtered by:
     - Configuration ID matching the provided config
     - Operator SID matching the summary operator SID in config
@@ -309,8 +306,6 @@ class OperatorResultProcessor:
         operator_id = operator_result.operator.id if operator_result.operator else None
 
         # Check if operator matches the configured summary SID.
-        # Observation auto-creation was removed, so observation_operator_sid is
-        # no longer dispatched here (see ConversationIntelligenceConfig).
         if self.config.summary_operator_sid is None:
             # No summary operator configured - nothing to process
             self.logger.debug("Skipping operator - summary operator SID not configured")

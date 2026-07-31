@@ -32,7 +32,7 @@ VALID_STORE_ID = "mem_store_01234567890123456789abcdef"
 VALID_PROFILE_ID = "mem_profile_01234567890123456789abcdef"
 VALID_CONV_ID = "conv_conversation_01234567890123456789abcdef"
 VALID_CONFIG_ID = "GA00000000000000000000000000000000"
-VALID_OBSERVATION_OPERATOR_SID = "LY00000000000000000000000000000001"
+VALID_NON_SUMMARY_OPERATOR_SID = "LY00000000000000000000000000000001"
 VALID_SUMMARY_OPERATOR_SID = "LY00000000000000000000000000000002"
 
 
@@ -43,7 +43,7 @@ def make_valid_event(
     conversation_id: str = VALID_CONV_ID,
     memory_store_id: str = VALID_STORE_ID,
     configuration_id: str = VALID_CONFIG_ID,
-    operator_id: str = VALID_OBSERVATION_OPERATOR_SID,
+    operator_id: str = VALID_NON_SUMMARY_OPERATOR_SID,
     result: Any = None,
 ) -> dict[str, Any]:
     """Create a valid webhook event payload for testing.
@@ -94,7 +94,7 @@ def make_valid_event(
 
 def make_operator_result(
     operator_friendly_name: str = "Observation Extractor",
-    operator_id: str = VALID_OBSERVATION_OPERATOR_SID,
+    operator_id: str = VALID_NON_SUMMARY_OPERATOR_SID,
     profile_id: str = VALID_PROFILE_ID,
     result: Any = None,
 ) -> dict[str, Any]:
@@ -388,7 +388,6 @@ class TestOperatorResultProcessor:
 
         return ConversationIntelligenceConfig(
             configuration_id=VALID_CONFIG_ID,
-            observation_operator_sid=VALID_OBSERVATION_OPERATOR_SID,
             summary_operator_sid=VALID_SUMMARY_OPERATOR_SID,
         )
 
