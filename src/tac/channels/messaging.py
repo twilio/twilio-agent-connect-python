@@ -64,10 +64,9 @@ class MessagingChannel(BaseChannel):
 
     Subclasses must implement:
     - is_default_agent_address(): Fast-path check for the channel's default agent address
-    - get_channel_type_upper(): Return uppercase channel type ("SMS", "RCS", "WHATSAPP", "CHAT")
     - get_agent_address(conversation_id): Return the agent's ParticipantAddress for a conversation
     - send_response(): Send messages back through the channel
-    - get_channel_name(): Return lowercase channel name ("sms", "rcs", "whatsapp", "chat")
+    - get_channel_name(): Return channel name ("SMS", "RCS", "WHATSAPP", "CHAT")
 
     Subclass class attributes:
     - reconcile_customer_type: If True, reconciliation will also promote a
@@ -147,15 +146,6 @@ class MessagingChannel(BaseChannel):
                 )
 
         return False
-
-    @abstractmethod
-    def get_channel_type_upper(self) -> str:
-        """Return the uppercase channel type for webhook filtering.
-
-        Returns:
-            Channel type string (e.g., "SMS", "CHAT")
-        """
-        pass
 
     @abstractmethod
     def get_agent_address(self, conversation_id: str) -> ParticipantAddress:
@@ -335,7 +325,7 @@ class MessagingChannel(BaseChannel):
 
         Subclasses call this with channel-specific address kwargs and settings.
         """
-        channel_type = self.get_channel_type_upper()
+        channel_type = self.get_channel_name()
         conversation_id: str | None = None
         reused = False
 

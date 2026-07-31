@@ -61,10 +61,10 @@ def create_dashboard_router(
 
     def _resolve_channel(conv_id: str) -> str:
         if get_sms_sessions and conv_id in get_sms_sessions():
-            return "sms"
+            return "SMS"
         if get_voice_sessions and conv_id in get_voice_sessions():
-            return "voice"
-        return "chat"
+            return "VOICE"
+        return "CHAT"
 
     def _get_display_messages(conv_id: str) -> list[dict[str, str]]:
         """Get user/assistant messages for display."""

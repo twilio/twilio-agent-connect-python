@@ -118,7 +118,7 @@ def whatsapp_channel(mock_tac: TAC) -> WhatsAppChannel:
 async def test_whatsapp_channel_initialization(mock_tac: TAC) -> None:
     """Test WhatsApp channel initialization succeeds with whatsapp_number in TAC config."""
     channel = WhatsAppChannel(mock_tac)
-    assert channel.get_channel_name() == "whatsapp"
+    assert channel.get_channel_name() == "WHATSAPP"
 
 
 @pytest.mark.asyncio
@@ -126,8 +126,7 @@ async def test_whatsapp_channel_initialization_with_config(mock_tac: TAC) -> Non
     """Test WhatsApp channel initialization with explicit config."""
     config = WhatsAppChannelConfig()
     channel = WhatsAppChannel(mock_tac, config=config)
-    assert channel.get_channel_name() == "whatsapp"
-    assert channel.get_channel_type_upper() == "WHATSAPP"
+    assert channel.get_channel_name() == "WHATSAPP"
 
 
 @pytest.mark.asyncio

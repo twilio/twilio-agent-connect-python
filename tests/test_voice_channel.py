@@ -50,7 +50,7 @@ class TestVoiceChannel:
         tac = TAC(get_test_config())
         channel = VoiceChannel(tac)
 
-        assert channel.get_channel_name() == "voice"
+        assert channel.get_channel_name() == "VOICE"
 
     @pytest.mark.asyncio
     async def test_handle_prompt_message_without_memory_retrieval(self) -> None:
@@ -472,7 +472,7 @@ class TestVoiceChannel:
         assert captured_context is not None
         assert captured_context.conversation_id == "CALL123"
         assert captured_context.profile_id == "profile_test"
-        assert captured_context.channel == "voice"
+        assert captured_context.channel == "VOICE"
         # Voice channel doesn't fetch memory, so it should be None
         assert captured_memories is None
         assert captured_user_message == "Test message"
@@ -1018,7 +1018,7 @@ class TestVoiceChannel:
         # Callback should be triggered
         assert len(captured) == 1
         assert captured[0].conversation_id == "CALL_ASYNC1"
-        assert captured[0].channel == "voice"
+        assert captured[0].channel == "VOICE"
         # Conversation should be removed
         assert "CALL_ASYNC1" not in channel._conversations
 

@@ -74,7 +74,7 @@ class TestRelayOnlyMode:
         session = ConversationSession(
             conversation_id="CA_relay_only",
             profile_id=None,
-            channel="voice",
+            channel="VOICE",
         )
 
         response = await tac.retrieve_memory(session)

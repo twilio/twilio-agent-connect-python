@@ -127,7 +127,7 @@ class TestCreateStudioHandoffTool:
     def test_returns_tac_tool(self) -> None:
         """Test that create_studio_handoff_tool returns a TACTool."""
         tac = TAC(get_test_config())
-        session = ConversationSession(conversation_id="conv_123", channel="voice")
+        session = ConversationSession(conversation_id="conv_123", channel="VOICE")
 
         tool = create_studio_handoff_tool(tac, session)
         assert isinstance(tool, TACTool)
@@ -135,7 +135,7 @@ class TestCreateStudioHandoffTool:
     def test_tool_name_is_handoff(self) -> None:
         """Test that the tool is named 'handoff'."""
         tac = TAC(get_test_config())
-        session = ConversationSession(conversation_id="conv_123", channel="voice")
+        session = ConversationSession(conversation_id="conv_123", channel="VOICE")
 
         tool = create_studio_handoff_tool(tac, session)
         assert tool.name == "handoff"
@@ -143,7 +143,7 @@ class TestCreateStudioHandoffTool:
     def test_schema_only_shows_reason(self) -> None:
         """Test that the LLM schema only exposes the 'reason' parameter."""
         tac = TAC(get_test_config())
-        session = ConversationSession(conversation_id="conv_123", channel="voice")
+        session = ConversationSession(conversation_id="conv_123", channel="VOICE")
 
         tool = create_studio_handoff_tool(tac, session)
 
@@ -157,7 +157,7 @@ class TestCreateStudioHandoffTool:
     def test_openai_format(self) -> None:
         """Test OpenAI format output."""
         tac = TAC(get_test_config())
-        session = ConversationSession(conversation_id="conv_123", channel="voice")
+        session = ConversationSession(conversation_id="conv_123", channel="VOICE")
 
         tool = create_studio_handoff_tool(tac, session)
         openai_fmt = tool.to_openai_format()
@@ -169,7 +169,7 @@ class TestCreateStudioHandoffTool:
     def test_anthropic_format(self) -> None:
         """Test Anthropic format output."""
         tac = TAC(get_test_config())
-        session = ConversationSession(conversation_id="conv_123", channel="voice")
+        session = ConversationSession(conversation_id="conv_123", channel="VOICE")
 
         tool = create_studio_handoff_tool(tac, session)
         anthropic_fmt = tool.to_anthropic_format()
@@ -192,7 +192,7 @@ class TestHandoffExecution:
         session = ConversationSession(
             conversation_id="conv_123",
             profile_id="prof_456",
-            channel="voice",
+            channel="VOICE",
         )
 
         tool = create_studio_handoff_tool(tac, session)
@@ -208,7 +208,7 @@ class TestHandoffExecution:
         assert handoff_data["profileId"] == "prof_456"
         assert handoff_data["attributes"]["reason"] == "Customer wants human agent"
 
-        assert result == {"status": "handoff_initiated", "channel": "voice"}
+        assert result == {"status": "handoff_initiated", "channel": "VOICE"}
 
     @pytest.mark.asyncio
     async def test_handoff_sets_conversation_inactive(self) -> None:
@@ -217,7 +217,7 @@ class TestHandoffExecution:
         tac.conversation_orchestrator_client.update_conversation = AsyncMock()
         tac.conversation_orchestrator_client.clear_status_callbacks = AsyncMock()
 
-        session = ConversationSession(conversation_id="conv_123", channel="voice")
+        session = ConversationSession(conversation_id="conv_123", channel="VOICE")
 
         tool = create_studio_handoff_tool(tac, session)
         await tool(reason="Escalation needed")
@@ -247,7 +247,7 @@ class TestHandoffExecution:
         post_mock = AsyncMock()
         monkeypatch.setattr(handoff_module, "post_studio_handoff", post_mock)
 
-        session = ConversationSession(conversation_id="conv_123", channel="sms")
+        session = ConversationSession(conversation_id="conv_123", channel="SMS")
 
         tool = create_studio_handoff_tool(tac, session)
         result = await tool(reason="Customer wants human")
@@ -267,12 +267,12 @@ class TestHandoffExecution:
 
         # Digital channels should NOT store pending handoff data
         assert session.pending_handoff_data is None
-        assert result == {"status": "handoff_initiated", "channel": "sms"}
+        assert result == {"status": "handoff_initiated", "channel": "SMS"}
 
     def test_factory_raises_without_flow_sid(self) -> None:
         """Factory rejects missing studio_handoff_flow_sid — it's misconfig, not a soft fallback."""
         tac = TAC(get_test_config(studio_handoff_flow_sid=None))
-        session = ConversationSession(conversation_id="conv_123", channel="sms")
+        session = ConversationSession(conversation_id="conv_123", channel="SMS")
 
         with pytest.raises(ValueError, match="studio_handoff_flow_sid"):
             create_studio_handoff_tool(tac, session)
@@ -280,7 +280,7 @@ class TestHandoffExecution:
     def test_factory_raises_in_relay_only_mode(self) -> None:
         """Factory rejects relay-only TAC — orchestrator and memory are required."""
         tac = TAC(get_test_config(conversation_configuration_id=None))
-        session = ConversationSession(conversation_id="conv_123", channel="voice")
+        session = ConversationSession(conversation_id="conv_123", channel="VOICE")
 
         with pytest.raises(ValueError, match="Conversation Orchestrator"):
             create_studio_handoff_tool(tac, session)
@@ -289,7 +289,7 @@ class TestHandoffExecution:
         """Factory rejects TAC with orchestrator but no memory store."""
         tac = TAC(get_test_config())
         tac.conversation_memory_client = None
-        session = ConversationSession(conversation_id="conv_123", channel="voice")
+        session = ConversationSession(conversation_id="conv_123", channel="VOICE")
 
         with pytest.raises(ValueError, match="memory store ID"):
             create_studio_handoff_tool(tac, session)
@@ -306,13 +306,13 @@ class TestHandoffExecution:
         post_mock = AsyncMock(side_effect=httpx.HTTPError("boom"))
         monkeypatch.setattr(handoff_module, "post_studio_handoff", post_mock)
 
-        session = ConversationSession(conversation_id="conv_123", channel="sms")
+        session = ConversationSession(conversation_id="conv_123", channel="SMS")
 
         tool = create_studio_handoff_tool(tac, session)
         result = await tool(reason="Customer wants human")
 
         assert result["status"] == "handoff_failed"
-        assert result["channel"] == "sms"
+        assert result["channel"] == "SMS"
         assert "boom" in result["error"]
 
     @pytest.mark.asyncio
@@ -322,11 +322,11 @@ class TestHandoffExecution:
         tac.conversation_orchestrator_client.update_conversation = AsyncMock()
         tac.conversation_orchestrator_client.clear_status_callbacks = AsyncMock()
 
-        session = ConversationSession(conversation_id="conv_123", channel="voice")
+        session = ConversationSession(conversation_id="conv_123", channel="VOICE")
 
         tool = create_studio_handoff_tool(tac, session)
         result = await tool(reason="test")
-        assert result["channel"] == "voice"
+        assert result["channel"] == "VOICE"
 
     @pytest.mark.asyncio
     async def test_handoff_includes_store_id_from_memory_client(self) -> None:
@@ -339,7 +339,7 @@ class TestHandoffExecution:
         session = ConversationSession(
             conversation_id="conv_123",
             profile_id="prof_456",
-            channel="voice",
+            channel="VOICE",
         )
 
         tool = create_studio_handoff_tool(tac, session)
@@ -358,7 +358,7 @@ class TestHandoffExecution:
 
         session = ConversationSession(
             conversation_id="conv_123",
-            channel="voice",
+            channel="VOICE",
         )
 
         tool = create_studio_handoff_tool(tac, session)
@@ -377,11 +377,11 @@ class TestHandoffExecution:
         )
         tac.conversation_orchestrator_client.clear_status_callbacks = AsyncMock()
 
-        session = ConversationSession(conversation_id="conv_123", channel="voice")
+        session = ConversationSession(conversation_id="conv_123", channel="VOICE")
 
         tool = create_studio_handoff_tool(tac, session)
         result = await tool(reason="test")
-        assert result == {"status": "handoff_initiated", "channel": "voice"}
+        assert result == {"status": "handoff_initiated", "channel": "VOICE"}
 
         # Payload should still be stored on session
         assert session.pending_handoff_data is not None
@@ -393,7 +393,7 @@ class TestHandoffExecution:
         tac.conversation_orchestrator_client.update_conversation = AsyncMock()
         tac.conversation_orchestrator_client.clear_status_callbacks = AsyncMock()
 
-        session = ConversationSession(conversation_id="conv_123", channel="voice")
+        session = ConversationSession(conversation_id="conv_123", channel="VOICE")
 
         tool = create_studio_handoff_tool(tac, session)
         await tool(reason="test")
@@ -421,7 +421,7 @@ class TestHandoffExecution:
             side_effect=track_clear
         )
 
-        session = ConversationSession(conversation_id="conv_123", channel="voice")
+        session = ConversationSession(conversation_id="conv_123", channel="VOICE")
 
         tool = create_studio_handoff_tool(tac, session)
         await tool(reason="test")
@@ -439,11 +439,11 @@ class TestHandoffExecution:
             side_effect=Exception("API error")
         )
 
-        session = ConversationSession(conversation_id="conv_123", channel="voice")
+        session = ConversationSession(conversation_id="conv_123", channel="VOICE")
 
         tool = create_studio_handoff_tool(tac, session)
         result = await tool(reason="test")
-        assert result == {"status": "handoff_initiated", "channel": "voice"}
+        assert result == {"status": "handoff_initiated", "channel": "VOICE"}
 
         # Payload should still be stored
         assert session.pending_handoff_data is not None
@@ -462,7 +462,7 @@ class TestHandoffAttributes:
         session = ConversationSession(
             conversation_id="conv_123",
             profile_id="prof_456",
-            channel="voice",
+            channel="VOICE",
         )
 
         tool = create_studio_handoff_tool(
@@ -487,7 +487,7 @@ class TestHandoffAttributes:
 
         session = ConversationSession(
             conversation_id="conv_123",
-            channel="voice",
+            channel="VOICE",
         )
 
         tool = create_studio_handoff_tool(tac, session)
@@ -506,7 +506,7 @@ class TestHandoffAttributes:
 
         session = ConversationSession(
             conversation_id="conv_123",
-            channel="voice",
+            channel="VOICE",
         )
 
         tool = create_studio_handoff_tool(
@@ -530,7 +530,7 @@ class TestBuildHandoffPayload:
         session = ConversationSession(
             conversation_id="conv_123",
             profile_id="prof_456",
-            channel="voice",
+            channel="VOICE",
         )
         payload = build_handoff_payload(
             session=session,
@@ -548,7 +548,7 @@ class TestBuildHandoffPayload:
         """Test payload has empty profile_id when not set on session."""
         session = ConversationSession(
             conversation_id="conv_123",
-            channel="voice",
+            channel="VOICE",
         )
         payload = build_handoff_payload(
             session=session,
@@ -602,7 +602,7 @@ class TestPostStudioHandoff:
 
         session = ConversationSession(
             conversation_id="conv_123",
-            channel="sms",
+            channel="SMS",
             author_info=AuthorInfo(address="+15559998888"),
         )
         payload = self._make_payload()
@@ -656,7 +656,7 @@ class TestPostStudioHandoff:
 
         self._install_mock_transport(monkeypatch, handler)
 
-        session = ConversationSession(conversation_id="conv_123", channel="sms")
+        session = ConversationSession(conversation_id="conv_123", channel="SMS")
         payload = self._make_payload()
 
         await post_studio_handoff(

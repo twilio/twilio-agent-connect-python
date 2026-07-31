@@ -185,7 +185,7 @@ class TestSMSOutbound:
         )
 
         assert result.conversation_id == "CHsms_out"
-        assert result.session.channel == "sms"
+        assert result.session.channel == "SMS"
         assert result.session.metadata["direction"] == "outbound"
         assert result.session.author_info is not None
         assert result.session.author_info.address == "+15559876543"
@@ -351,7 +351,7 @@ class TestChatOutbound:
         )
 
         assert result.conversation_id == "CHchat_out"
-        assert result.session.channel == "chat"
+        assert result.session.channel == "CHAT"
         assert result.session.metadata["direction"] == "outbound"
         assert result.session.metadata["channel_id"] == "CHSIDabc"
         tac.conversation_orchestrator_client.create_action.assert_called_once()
@@ -868,7 +868,7 @@ class TestRCSOutbound:
         )
 
         assert result.conversation_id == "CHrcs_out"
-        assert result.session.channel == "rcs"
+        assert result.session.channel == "RCS"
         assert result.session.metadata["direction"] == "outbound"
         assert result.session.author_info is not None
         assert result.session.author_info.address == "rcs:+15559876543"
@@ -967,7 +967,7 @@ class TestWhatsAppOutbound:
         )
 
         assert result.conversation_id == "CHwhatsapp_out"
-        assert result.session.channel == "whatsapp"
+        assert result.session.channel == "WHATSAPP"
         assert result.session.metadata["direction"] == "outbound"
         assert result.session.author_info is not None
         assert result.session.author_info.address == "whatsapp:+15559876543"

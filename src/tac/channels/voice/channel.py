@@ -849,7 +849,7 @@ class VoiceChannel(BaseChannel):
             )
 
     def get_channel_name(self) -> str:
-        return "voice"
+        return "VOICE"
 
     def get_websocket(self, conversation_id: str) -> WebSocketProtocol | None:
         """
