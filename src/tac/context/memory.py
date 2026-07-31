@@ -360,7 +360,7 @@ class MemoryClient(BaseAPIClient):
             source: Source system identifier (default: "conversation-intelligence")
             conversation_ids: List of conversation IDs this observation relates to
             occurred_at: Timestamp when observation occurred (ISO 8601 format).
-                Defaults to the current time when not provided.
+                Defaults to the current time when omitted or blank.
 
         Returns:
             Dict with created observation details
@@ -377,7 +377,7 @@ class MemoryClient(BaseAPIClient):
         }
         if conversation_ids:
             observation["conversationIds"] = conversation_ids
-        if occurred_at is None:
+        if occurred_at is None or not occurred_at.strip():
             occurred_at = datetime.now(timezone.utc).isoformat()
         observation["occurredAt"] = occurred_at
 

@@ -699,8 +699,43 @@ class TestCreateObservation:
         datetime.fromisoformat(observation["occurredAt"])
 
     @pytest.mark.asyncio
-    async def test_create_observation_preserves_falsy_occurred_at(self) -> None:
-        """Only default occurred_at when it is None, not for other falsy values."""
+    async def test_create_observation_defaults_blank_occurred_at(self) -> None:
+        """A blank/whitespace occurred_at is replaced by a valid default timestamp."""
+        from datetime import datetime
+
+        client = MemoryClient(
+            store_id="mem_store_01abc",
+            api_key="SK123",
+            api_secret="secret",
+        )
+
+        for blank in ("", "   "):
+            mock_response = Mock()
+            mock_response.json.return_value = {"message": "accepted"}
+            mock_response.raise_for_status = Mock()
+
+            mock_http = AsyncMock()
+            mock_http.post = AsyncMock(return_value=mock_response)
+
+            with patch("httpx.AsyncClient") as mock_client_class:
+                mock_client_class.return_value.__aenter__.return_value = mock_http
+
+                await client.create_observation(
+                    profile_id="mem_profile_01canonical",
+                    content="Customer prefers email",
+                    occurred_at=blank,
+                )
+
+            _, kwargs = mock_http.post.call_args
+            occurred_at = kwargs["json"]["observations"][0]["occurredAt"]
+            assert occurred_at
+            assert occurred_at.strip() != ""
+            # Replaced with a valid, parseable ISO 8601 timestamp
+            datetime.fromisoformat(occurred_at)
+
+    @pytest.mark.asyncio
+    async def test_create_observation_preserves_provided_occurred_at(self) -> None:
+        """A non-empty ISO timestamp is sent unchanged."""
         client = MemoryClient(
             store_id="mem_store_01abc",
             api_key="SK123",
@@ -720,9 +755,9 @@ class TestCreateObservation:
             await client.create_observation(
                 profile_id="mem_profile_01canonical",
                 content="Customer prefers email",
-                occurred_at="",
+                occurred_at="2025-01-15T10:30:45+00:00",
             )
 
         _, kwargs = mock_http.post.call_args
         observation = kwargs["json"]["observations"][0]
-        assert observation["occurredAt"] == ""
+        assert observation["occurredAt"] == "2025-01-15T10:30:45+00:00"
