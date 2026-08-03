@@ -2375,7 +2375,11 @@ class TestVoicePathsOnTACConfig:
         )
 
     def test_call_event_kinds_covers_every_kind(self) -> None:
-        """CALL_EVENT_KINDS is what the server iterates to register routes."""
+        """CALL_EVENT_KINDS is what the server iterates to validate its paths.
+
+        The routes themselves are three explicit decorators, so a new kind needs
+        a route added by hand — this pins the set they have to stay in step with.
+        """
         from tac.core.config import CALL_EVENT_KINDS
 
         assert set(CALL_EVENT_KINDS) == {"status", "amd", "recording"}
@@ -2391,26 +2395,26 @@ class TestCallEventPredicates:
     def test_is_machine_true_for_every_machine_value(self, answered_by: str) -> None:
         from tac.models.voice import AmdEvent
 
-        assert AmdEvent(answered_by=answered_by).is_machine is True
+        assert AmdEvent(call_sid="CA1", answered_by=answered_by).is_machine is True
 
     @pytest.mark.parametrize("answered_by", ["human", "fax", "unknown", None, ""])
     def test_is_machine_false_otherwise(self, answered_by: str | None) -> None:
         """'unknown' means detection timed out — never hang up on a guess."""
         from tac.models.voice import AmdEvent
 
-        assert AmdEvent(answered_by=answered_by).is_machine is False
+        assert AmdEvent(call_sid="CA1", answered_by=answered_by).is_machine is False
 
     @pytest.mark.parametrize("status", ["busy", "no-answer", "failed", "canceled"])
     def test_is_unreached_true_for_dispositions(self, status: str) -> None:
         from tac.models.voice import CallStatusEvent
 
-        assert CallStatusEvent(call_status=status).is_unreached is True
+        assert CallStatusEvent(call_sid="CA1", call_status=status).is_unreached is True
 
     @pytest.mark.parametrize("status", ["completed", "in-progress", "ringing", None])
     def test_is_unreached_false_otherwise(self, status: str | None) -> None:
         from tac.models.voice import CallStatusEvent
 
-        assert CallStatusEvent(call_status=status).is_unreached is False
+        assert CallStatusEvent(call_sid="CA1", call_status=status).is_unreached is False
 
 
 class TestCallEventModels:

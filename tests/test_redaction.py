@@ -40,7 +40,22 @@ class TestRedactTwiMLParameters:
         )
         assert redact_twiml_parameters(twiml) == twiml
 
-    def test_handles_single_quoted_and_empty(self) -> None:
+    def test_masks_single_quoted_values(self) -> None:
+        """The Twilio SDK double-quotes, but this takes any string."""
+        result = redact_twiml_parameters("<Parameter name='profile_id' value='PR123'/>")
+
+        assert "PR123" not in result
+        assert "value='***'" in result
+        assert "name='profile_id'" in result
+
+    def test_quote_inside_the_other_quote_style_survives(self) -> None:
+        """A double quote in a single-quoted value must not end the match early."""
+        result = redact_twiml_parameters("""<Parameter name="note" value='say "hi"'/>""")
+
+        assert "hi" not in result
+        assert "value='***'" in result
+
+    def test_handles_empty(self) -> None:
         assert redact_twiml_parameters(None) == ""
         assert redact_twiml_parameters("") == ""
 

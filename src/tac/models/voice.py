@@ -146,10 +146,13 @@ class _CallEventBase(BaseModel):
 
     ``call_sid`` is the correlation key across every surface — it matches
     ``ConversationSession.call_sid`` and the SID from
-    ``initiate_outbound_conversation``.
+    ``initiate_outbound_conversation``. It's required: every real call webhook
+    carries one, and defaulting it would hand handlers an empty SID to act on
+    (``end_call("")`` is a Twilio 404). Missing or blank raises, which the route
+    turns into a 400.
     """
 
-    call_sid: str = Field("", alias="CallSid")
+    call_sid: str = Field(..., alias="CallSid", min_length=1)
     account_sid: str | None = Field(None, alias="AccountSid")
     extra: dict[str, str] = Field(
         default_factory=dict,

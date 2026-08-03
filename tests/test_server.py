@@ -303,6 +303,32 @@ class TestCallEventRoutes:
         )
         assert resp.status_code == 400
 
+    def test_returns_400_when_call_sid_is_missing(self) -> None:
+        """Better a 400 than handing the handler an empty SID to act on."""
+        from tac.channels.voice import VoiceChannel
+
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+        received = []
+
+        async def handler(event: object) -> None:
+            received.append(event)
+
+        channel.on_amd(handler)
+        client = self._client(channel)
+        form_data = {"AnsweredBy": "machine_start"}
+        path = "/twilio/call-events/amd"
+        resp = client.post(  # type: ignore[attr-defined]
+            path,
+            data=form_data,
+            headers={
+                "X-Twilio-Signature": compute_signature(f"http://testserver{path}", form_data)
+            },
+        )
+
+        assert resp.status_code == 400
+        assert received == []
+
 
 class TestWebSocketDisconnectError:
     """Test WebSocketDisconnectError."""
