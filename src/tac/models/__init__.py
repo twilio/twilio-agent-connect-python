@@ -40,6 +40,7 @@ from tac.models.memory import (
     SummaryInfo,
 )
 from tac.models.outbound import (
+    CallOptions,
     InitiateChatConversationOptions,
     InitiateConversationResult,
     InitiateMessagingConversationOptions,
@@ -72,6 +73,7 @@ __all__ = [
     "ActionTextContent",
     "AmdEvent",
     "AuthorInfo",
+    "CallOptions",
     "CallStatusEvent",
     "Communication",
     "CommunicationContent",

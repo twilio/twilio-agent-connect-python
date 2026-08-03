@@ -3,12 +3,11 @@ Example: Voice call events (status, AMD, and recording).
 
 Places an outbound ConversationRelay call with answering machine detection and
 recording enabled, then reacts to Twilio's call webhooks: hang up on voicemail,
-and log which calls went unreached. Each handler is optional — register only
-the events you care about.
+log which calls went unreached. Each handler is optional.
 
-TACFastAPIServer registers the call-event routes and auto-wires their URLs from
-TWILIO_VOICE_PUBLIC_DOMAIN, so there is no webhook setup here. The same handlers
-also fire for inbound calls whose status/recording callbacks point at TAC.
+TACFastAPIServer registers the routes and auto-wires their URLs from
+TWILIO_VOICE_PUBLIC_DOMAIN, so there's no webhook setup here. The same handlers
+also fire for inbound calls pointed at TAC.
 
 Env vars:
 - TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_API_KEY, TWILIO_API_SECRET
@@ -29,7 +28,7 @@ from fastapi import FastAPI
 
 from tac import TAC, TACConfig
 from tac.channels.voice import AmdEvent, CallStatusEvent, RecordingEvent, VoiceChannel
-from tac.models.outbound import InitiateVoiceConversationOptions
+from tac.models.outbound import CallOptions, InitiateVoiceConversationOptions
 from tac.server import TACFastAPIServer
 
 load_dotenv()
@@ -40,13 +39,13 @@ voice_channel = VoiceChannel(tac)
 
 async def on_call_status(event: CallStatusEvent) -> None:
     print(f"[STATUS] {event.call_sid}: {event.call_status}")
-    if event.call_status in {"no-answer", "busy", "failed"}:
+    if event.is_unreached:
         print(f"[STATUS] {event.call_sid} unreached — queue retry")
 
 
 async def on_amd(event: AmdEvent) -> None:
     print(f"[AMD] {event.call_sid}: answered_by={event.answered_by}")
-    if event.answered_by and event.answered_by.startswith("machine"):
+    if event.is_machine:
         await voice_channel.end_call(event.call_sid)  # voicemail → hang up
 
 
@@ -54,6 +53,8 @@ async def on_recording(event: RecordingEvent) -> None:
     print(f"[RECORDING] {event.call_sid}: {event.recording_status} {event.recording_url}")
 
 
+# Registering also opts the call into that callback — TAC only hands Twilio a
+# URL it's actually serving.
 voice_channel.on_call_status(on_call_status)
 voice_channel.on_amd(on_amd)
 voice_channel.on_recording(on_recording)
@@ -63,13 +64,14 @@ async def place_call(to: str) -> None:
     result = await voice_channel.initiate_outbound_conversation(
         InitiateVoiceConversationOptions(
             to=to,
-            # Passed through to calls.create(). Note the mixed types — Twilio
-            # takes async_amd as a string but record as a bool.
-            call_options={
-                "async_amd": "true",  # required for the AMD callback (sync AMD won't fire it)
-                "record": True,
-                "timeout": 30,
-            },
+            call_options=CallOptions(
+                # AMD needs both. "Enable" reports as early as possible, which is
+                # what you want to hang up on voicemail.
+                machine_detection="Enable",
+                async_amd=True,
+                record=True,
+                timeout=30,
+            ),
         )
     )
     print(f"Call placed to {to} (CallSid: {result.call_sid})")

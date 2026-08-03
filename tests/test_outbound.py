@@ -20,6 +20,7 @@ from tac.models.conversation import (
     ParticipantResponse,
 )
 from tac.models.outbound import (
+    CallOptions,
     InitiateChatConversationOptions,
     InitiateMessagingConversationOptions,
     InitiateVoiceConversationOptions,
@@ -454,9 +455,16 @@ class TestVoiceOutbound:
             await channel.initiate_outbound_conversation(options)
         return mock_client.calls.create.call_args.kwargs
 
+    @staticmethod
+    def _noop_handler() -> Any:
+        async def handler(event: Any) -> None:
+            return None
+
+        return handler
+
     @pytest.mark.asyncio
     async def test_call_options_passthrough(self) -> None:
-        """Arbitrary call_options are forwarded verbatim to calls.create."""
+        """Typed call_options are forwarded to calls.create."""
         tac = TAC(get_test_config())  # no voice_public_domain → no auto-wiring
         channel = VoiceChannel(tac)
 
@@ -465,31 +473,88 @@ class TestVoiceOutbound:
             InitiateVoiceConversationOptions(
                 to="+15559876543",
                 websocket_url="wss://example.com/ws",
-                call_options={"machine_detection": "Enable", "timeout": 20},
+                call_options={"machine_detection": "Enable", "async_amd": True, "timeout": 20},
             ),
         )
         assert kwargs["machine_detection"] == "Enable"
         assert kwargs["timeout"] == 20
 
     @pytest.mark.asyncio
-    async def test_call_options_cannot_override_reserved(self) -> None:
-        """call_options may not override to/from/twiml (TAC owns those)."""
+    async def test_untyped_calls_api_params_pass_through(self) -> None:
+        """Calls API params TAC doesn't type explicitly still forward."""
         tac = TAC(get_test_config())
         channel = VoiceChannel(tac)
 
-        with pytest.raises(ValueError, match="TAC-owned"):
-            await self._place_call(
-                channel,
-                InitiateVoiceConversationOptions(
-                    to="+15559876543",
-                    websocket_url="wss://example.com/ws",
-                    call_options={"from": "+19998887777"},
-                ),
-            )
+        kwargs = await self._place_call(
+            channel,
+            InitiateVoiceConversationOptions(
+                to="+15559876543",
+                websocket_url="wss://example.com/ws",
+                call_options={"sip_auth_username": "alice", "byoc": "BYxxx"},
+            ),
+        )
+        assert kwargs["sip_auth_username"] == "alice"
+        assert kwargs["byoc"] == "BYxxx"
+
+    def test_rejects_params_the_sdk_does_not_accept(self) -> None:
+        """Unknown keys are a TypeError at call time; caught here instead."""
+        with pytest.raises(ValueError, match="does not accept"):
+            CallOptions(machine_detecton="Enable")  # typo'd machine_detection
+
+    def test_accepted_params_come_from_the_installed_sdk(self) -> None:
+        """Read from the SDK signature, so it can't drift from the installed version."""
+        from tac.models.outbound import _twilio_call_create_params
+
+        accepted = _twilio_call_create_params()
+        # Sanity-check introspection actually found the real signature.
+        assert {"machine_detection", "async_amd", "record", "timeout"} <= accepted
+        assert "machine_detecton" not in accepted
+
+    def test_every_typed_field_is_a_real_sdk_param(self) -> None:
+        """Guards against TAC typing a field the SDK would reject at call time."""
+        from tac.models.outbound import _twilio_call_create_params
+
+        accepted = _twilio_call_create_params()
+        assert set(CallOptions.model_fields) <= accepted
 
     @pytest.mark.asyncio
-    async def test_status_callback_auto_wired_when_domain_set(self) -> None:
-        """status_callback is auto-wired whenever voice_public_domain is set."""
+    async def test_async_amd_serialized_as_string(self) -> None:
+        """Twilio's SDK types async_amd as a string and record as a bool."""
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+
+        kwargs = await self._place_call(
+            channel,
+            InitiateVoiceConversationOptions(
+                to="+15559876543",
+                websocket_url="wss://example.com/ws",
+                call_options={"machine_detection": "Enable", "async_amd": True, "record": True},
+            ),
+        )
+        assert kwargs["async_amd"] == "true"
+        assert kwargs["record"] is True
+
+    @pytest.mark.parametrize("reserved", ["to", "from", "from_", "twiml", "url", "application_sid"])
+    def test_call_options_rejects_reserved(self, reserved: str) -> None:
+        """TAC owns these calls.create params; rejected at construction."""
+        with pytest.raises(ValueError, match="TAC-owned"):
+            CallOptions(**{reserved: "x"})
+
+    @pytest.mark.parametrize(
+        "amd_options",
+        [
+            {"async_amd": True},  # detection never runs
+            {"machine_detection": "Enable"},  # AnsweredBy goes nowhere inline TwiML can read
+        ],
+    )
+    def test_amd_requires_both_flags(self, amd_options: dict[str, Any]) -> None:
+        """Either flag alone silently yields no AMD event."""
+        with pytest.raises(ValueError, match="requires both"):
+            CallOptions(**amd_options)
+
+    @pytest.mark.asyncio
+    async def test_no_auto_wiring_without_handlers(self) -> None:
+        """No handler → no URL advertised, so Twilio never gets pointed at a 404."""
         config = {**get_test_config(), "voice_public_domain": "example.com"}
         channel = VoiceChannel(TAC(config))
 
@@ -499,67 +564,58 @@ class TestVoiceOutbound:
                 to="+15559876543", websocket_url="wss://example.com/ws"
             ),
         )
-        assert kwargs["status_callback"] == "https://example.com/twilio/call-events/status"
-        # AMD/recording are opt-in: not wired unless the feature is enabled.
+        assert "status_callback" not in kwargs
         assert "async_amd_status_callback" not in kwargs
         assert "recording_status_callback" not in kwargs
 
     @pytest.mark.asyncio
-    async def test_amd_callback_auto_wired_only_when_amd_enabled(self) -> None:
+    async def test_each_callback_wired_only_for_its_handler(self) -> None:
+        """Registering on_amd wires the AMD URL and nothing else."""
         config = {**get_test_config(), "voice_public_domain": "example.com"}
         channel = VoiceChannel(TAC(config))
+        channel.on_amd(self._noop_handler())
 
         kwargs = await self._place_call(
             channel,
             InitiateVoiceConversationOptions(
                 to="+15559876543",
                 websocket_url="wss://example.com/ws",
-                call_options={"async_amd": "true"},
+                call_options={"machine_detection": "Enable", "async_amd": True},
             ),
         )
         assert kwargs["async_amd_status_callback"] == "https://example.com/twilio/call-events/amd"
+        assert "status_callback" not in kwargs
+        assert "recording_status_callback" not in kwargs
 
     @pytest.mark.asyncio
-    async def test_recording_callback_auto_wired_when_record_enabled(self) -> None:
+    async def test_all_callbacks_wired_when_all_handlers_registered(self) -> None:
         config = {**get_test_config(), "voice_public_domain": "example.com"}
         channel = VoiceChannel(TAC(config))
+        channel.on_call_status(self._noop_handler())
+        channel.on_amd(self._noop_handler())
+        channel.on_recording(self._noop_handler())
 
         kwargs = await self._place_call(
             channel,
             InitiateVoiceConversationOptions(
                 to="+15559876543",
                 websocket_url="wss://example.com/ws",
-                call_options={"record": True},
+                call_options={"machine_detection": "Enable", "async_amd": True, "record": True},
             ),
         )
+        assert kwargs["status_callback"] == "https://example.com/twilio/call-events/status"
+        assert kwargs["async_amd_status_callback"] == "https://example.com/twilio/call-events/amd"
         assert (
             kwargs["recording_status_callback"]
             == "https://example.com/twilio/call-events/recording"
         )
 
     @pytest.mark.asyncio
-    async def test_feature_flags_accept_bool_or_string(self) -> None:
-        """async_amd/record opt-in accepts both a real bool and the string 'true'."""
-        config = {**get_test_config(), "voice_public_domain": "example.com"}
-        channel = VoiceChannel(TAC(config))
-
-        # bool True for async_amd, string "true" for record — both must wire.
-        kwargs = await self._place_call(
-            channel,
-            InitiateVoiceConversationOptions(
-                to="+15559876543",
-                websocket_url="wss://example.com/ws",
-                call_options={"async_amd": True, "record": "true"},
-            ),
-        )
-        assert kwargs["async_amd_status_callback"].endswith("/amd")
-        assert kwargs["recording_status_callback"].endswith("/recording")
-
-    @pytest.mark.asyncio
     async def test_explicit_callback_url_wins_over_auto_wiring(self) -> None:
         """setdefault: an explicit URL in call_options is never overwritten."""
         config = {**get_test_config(), "voice_public_domain": "example.com"}
         channel = VoiceChannel(TAC(config))
+        channel.on_call_status(self._noop_handler())
 
         kwargs = await self._place_call(
             channel,
@@ -575,6 +631,7 @@ class TestVoiceOutbound:
     async def test_no_auto_wiring_without_domain(self) -> None:
         tac = TAC(get_test_config())  # no voice_public_domain
         channel = VoiceChannel(tac)
+        channel.on_call_status(self._noop_handler())
 
         kwargs = await self._place_call(
             channel,
@@ -593,6 +650,7 @@ class TestVoiceOutbound:
             "voice_call_event_path": "/hooks/calls/",
         }
         channel = VoiceChannel(TAC(config))
+        channel.on_call_status(self._noop_handler())
 
         kwargs = await self._place_call(
             channel,

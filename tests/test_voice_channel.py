@@ -2342,8 +2342,7 @@ class TestVoicePublicDomainNormalization:
 
 
 class TestVoicePathsOnTACConfig:
-    """Voice paths live on TACConfig (one source of truth for both the
-    channel's URL construction and the server's route registration)."""
+    """One source of truth for channel URL construction and route registration."""
 
     def test_default_paths(self) -> None:
         tac = TAC(get_test_config())
@@ -2351,10 +2350,71 @@ class TestVoicePathsOnTACConfig:
         assert tac.config.voice_action_path == "/conversation-relay-callback"
         assert tac.config.voice_call_event_path == "/twilio/call-events"
 
+    def test_call_event_path_per_kind(self) -> None:
+        """One helper builds all three, so channel and server can't drift."""
+        tac = TAC(get_test_config())
+        assert tac.config.call_event_path("status") == "/twilio/call-events/status"
+        assert tac.config.call_event_path("amd") == "/twilio/call-events/amd"
+        assert tac.config.call_event_path("recording") == "/twilio/call-events/recording"
+
+    def test_call_event_path_normalizes_trailing_slash(self) -> None:
+        tac = TAC({**get_test_config(), "voice_call_event_path": "/hooks/calls/"})
+        assert tac.config.call_event_path("amd") == "/hooks/calls/amd"
+
+    def test_call_event_url_requires_domain(self) -> None:
+        config = {**get_test_config()}
+        config.pop("voice_public_domain")
+        tac = TAC(config)
+        assert tac.config.call_event_url("status") is None
+
+    def test_call_event_url_with_domain(self) -> None:
+        tac = TAC({**get_test_config(), "voice_public_domain": "example.ngrok.app"})
+        assert (
+            tac.config.call_event_url("status")
+            == "https://example.ngrok.app/twilio/call-events/status"
+        )
+
+    def test_call_event_kinds_covers_every_kind(self) -> None:
+        """CALL_EVENT_KINDS is what the server iterates to register routes."""
+        from tac.core.config import CALL_EVENT_KINDS
+
+        assert set(CALL_EVENT_KINDS) == {"status", "amd", "recording"}
+
+
+class TestCallEventPredicates:
+    """Keep mode-specific string matching out of application code."""
+
+    @pytest.mark.parametrize(
+        "answered_by",
+        ["machine_start", "machine_end_beep", "machine_end_silence", "machine_end_other"],
+    )
+    def test_is_machine_true_for_every_machine_value(self, answered_by: str) -> None:
+        from tac.models.voice import AmdEvent
+
+        assert AmdEvent(answered_by=answered_by).is_machine is True
+
+    @pytest.mark.parametrize("answered_by", ["human", "fax", "unknown", None, ""])
+    def test_is_machine_false_otherwise(self, answered_by: str | None) -> None:
+        """'unknown' means detection timed out — never hang up on a guess."""
+        from tac.models.voice import AmdEvent
+
+        assert AmdEvent(answered_by=answered_by).is_machine is False
+
+    @pytest.mark.parametrize("status", ["busy", "no-answer", "failed", "canceled"])
+    def test_is_unreached_true_for_dispositions(self, status: str) -> None:
+        from tac.models.voice import CallStatusEvent
+
+        assert CallStatusEvent(call_status=status).is_unreached is True
+
+    @pytest.mark.parametrize("status", ["completed", "in-progress", "ringing", None])
+    def test_is_unreached_false_otherwise(self, status: str | None) -> None:
+        from tac.models.voice import CallStatusEvent
+
+        assert CallStatusEvent(call_status=status).is_unreached is False
+
 
 class TestCallEventModels:
-    """The three call-event models parse their own fields from a Twilio form
-    and bucket everything else into ``extra``."""
+    """Each model parses its own fields; everything else goes to ``extra``."""
 
     def test_amd_event(self) -> None:
         from tac.models.voice import AmdEvent
@@ -2508,15 +2568,14 @@ class TestEndCall:
 
         mock_client = MagicMock()
         with patch.object(channel, "_get_twilio_client", return_value=mock_client):
-            await channel.end_call("CA1")
+            assert await channel.end_call("CA1") is True
 
         mock_client.calls.assert_called_once_with("CA1")
         mock_client.calls().update.assert_called_with(status="completed")
 
     @pytest.mark.asyncio
     async def test_cleans_up_session_via_call_sid(self) -> None:
-        """In orchestrator mode conv_id != call_sid; end_call resolves the right
-        session by scanning tracked sessions for the matching call_sid."""
+        """conv_id != call_sid in orchestrator mode; resolved by scanning sessions."""
         tac = TAC(get_test_config())
         channel = VoiceChannel(tac)
 
@@ -2532,16 +2591,30 @@ class TestEndCall:
         channel._end_conversation.assert_awaited_once_with("conv_abc")
 
     @pytest.mark.asyncio
-    async def test_hangup_failure_does_not_raise(self) -> None:
-        """A failed hangup is logged, not raised — a call-event handler that
-        calls end_call must not turn into a webhook 400 that Twilio retries."""
+    async def test_hangup_failure_returns_false_without_raising(self) -> None:
+        """Already-ended calls are routine: reports rather than raises."""
         tac = TAC(get_test_config())
         channel = VoiceChannel(tac)
 
         mock_client = MagicMock()
         mock_client.calls("CA1").update.side_effect = RuntimeError("Twilio 400")
         with patch.object(channel, "_get_twilio_client", return_value=mock_client):
-            await channel.end_call("CA1")  # must not raise
+            assert await channel.end_call("CA1") is False
+
+    @pytest.mark.asyncio
+    async def test_session_cleanup_runs_even_when_hangup_fails(self) -> None:
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+        session = channel._start_conversation("conv_abc")
+        session.call_sid = "CA1"
+        channel._end_conversation = AsyncMock()  # type: ignore[method-assign]
+
+        mock_client = MagicMock()
+        mock_client.calls("CA1").update.side_effect = RuntimeError("Twilio 400")
+        with patch.object(channel, "_get_twilio_client", return_value=mock_client):
+            assert await channel.end_call("CA1") is False
+
+        channel._end_conversation.assert_awaited_once_with("conv_abc")
 
     @pytest.mark.asyncio
     async def test_hangup_works_without_tracked_session(self) -> None:
@@ -2552,7 +2625,7 @@ class TestEndCall:
 
         mock_client = MagicMock()
         with patch.object(channel, "_get_twilio_client", return_value=mock_client):
-            await channel.end_call("CA_unknown")
+            assert await channel.end_call("CA_unknown") is True
 
         mock_client.calls().update.assert_called_with(status="completed")
         channel._end_conversation.assert_not_awaited()

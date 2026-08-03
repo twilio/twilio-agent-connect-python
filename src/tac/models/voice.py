@@ -1,6 +1,6 @@
 """Pydantic models for Twilio ConversationRelay Voice WebSocket messages."""
 
-from typing import Any, Literal, TypeVar
+from typing import Any, ClassVar, Literal, TypeVar
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -140,18 +140,13 @@ _CallEventT = TypeVar("_CallEventT", bound="_CallEventBase")
 class _CallEventBase(BaseModel):
     """Shared base for the three Twilio call-webhook events.
 
-    Twilio posts to three independent call-callback URLs — ``status_callback``,
-    ``async_amd_status_callback``, and ``recording_status_callback``. TAC serves
-    one route per callback (see ``TACConfig.voice_call_event_path`` + the
-    ``/status`` ``/amd`` ``/recording`` suffixes) and parses each into its own
-    typed event, so a developer registers a separate handler per event via
+    Twilio posts to three independent callback URLs; TAC serves one route each
+    and parses them into separate typed events, registered via
     ``VoiceChannel.on_call_status`` / ``on_amd`` / ``on_recording``.
 
-    ``call_sid`` is the correlation key across every surface (it matches
-    ``ConversationSession.call_sid`` passed to ``on_message_ready`` and the
-    ``call_sid`` returned by ``initiate_outbound_conversation``). ``extra`` holds
-    any webhook fields not surfaced as typed attributes, mirroring
-    ``TwiMLRequest.extra``.
+    ``call_sid`` is the correlation key across every surface — it matches
+    ``ConversationSession.call_sid`` and the SID from
+    ``initiate_outbound_conversation``.
     """
 
     call_sid: str = Field("", alias="CallSid")
@@ -165,11 +160,7 @@ class _CallEventBase(BaseModel):
 
     @classmethod
     def from_form(cls: type[_CallEventT], form: dict[str, str]) -> _CallEventT:
-        """Build an event from a raw Twilio webhook form dict.
-
-        Buckets unknown keys into ``extra`` by alias, following the same pattern
-        as ``TwiMLRequest.from_form``.
-        """
+        """Build an event from a Twilio webhook form, unknown keys into ``extra``."""
         known_aliases = {f.alias for f in cls.model_fields.values() if f.alias}
         known: dict[str, str] = {}
         extra: dict[str, str] = {}
@@ -184,26 +175,50 @@ class _CallEventBase(BaseModel):
 class CallStatusEvent(_CallEventBase):
     """A Twilio ``status_callback`` — call progress and disposition.
 
-    Fires through the call lifecycle (``initiated`` / ``ringing`` / ``answered``
-    / ``completed``) and for unreached dispositions (``no-answer`` / ``busy`` /
-    ``failed``). Register via ``VoiceChannel.on_call_status``.
+    By default Twilio sends only the terminal event, which covers every
+    disposition (``completed`` / ``busy`` / ``no-answer`` / ``failed`` /
+    ``canceled``); set ``CallOptions.status_callback_event`` for the intermediate
+    ones. Register via ``VoiceChannel.on_call_status``.
     """
 
     call_status: str | None = Field(None, alias="CallStatus")
     call_duration: str | None = Field(None, alias="CallDuration")
     sip_response_code: str | None = Field(None, alias="SipResponseCode")
 
+    UNREACHED_STATUSES: ClassVar[frozenset[str]] = frozenset(
+        {"busy", "no-answer", "failed", "canceled"}
+    )
+
+    @property
+    def is_unreached(self) -> bool:
+        """Call ended without reaching the callee — i.e. worth a retry."""
+        return (self.call_status or "") in self.UNREACHED_STATUSES
+
 
 class AmdEvent(_CallEventBase):
     """A Twilio ``async_amd_status_callback`` — answering machine detection.
 
-    Fires at most once per call, only when AMD is enabled. ``answered_by`` is
-    ``human`` / ``machine_start`` / ``machine_end_beep`` / ``fax`` / etc.
-    Register via ``VoiceChannel.on_amd``.
+    Fires at most once per call, and only when the call set both
+    ``CallOptions.machine_detection`` and ``async_amd``.
+
+    ``answered_by`` is mode-dependent — ``machine_start`` under ``"Enable"``,
+    ``machine_end_beep`` / ``machine_end_silence`` / ``machine_end_other`` under
+    ``"DetectMessageEnd"``, plus ``human`` / ``fax`` / ``unknown`` in both. Use
+    :attr:`is_machine` rather than matching those yourself. Register via
+    ``VoiceChannel.on_amd``.
     """
 
     answered_by: str | None = Field(None, alias="AnsweredBy")
     machine_detection_duration: str | None = Field(None, alias="MachineDetectionDuration")
+
+    @property
+    def is_machine(self) -> bool:
+        """A machine answered — any ``machine_*`` value, either mode.
+
+        ``unknown`` (detection timed out) is False, so a call is never hung up on
+        a guess.
+        """
+        return (self.answered_by or "").startswith("machine")
 
 
 class RecordingEvent(_CallEventBase):

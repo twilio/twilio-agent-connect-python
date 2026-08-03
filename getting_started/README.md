@@ -58,6 +58,7 @@ Production-ready examples integrating TAC with partner SDKs:
 - **`rcs.py`**: RCS (Rich Communication Services) channel with automatic memory retrieval
 - **`whatsapp.py`**: WhatsApp channel with automatic memory retrieval
 - **`outbound.py`**: Agent-initiated outbound conversations via SMS, RCS, WhatsApp, or Voice channels
+- **`voice_call_events.py`**: Answering machine detection, recording, and call disposition on outbound calls — hang up on voicemail, track which calls went unreached
 - **`chat/`**: Twilio Conversations (Chat) channel examples
 - **`relay_only.py`**: ConversationRelay-only mode — get started with voice using just ConversationRelay
 - **`dashboard/`**: Real-time observation dashboard for monitoring active sessions, message history, and agent context during development
