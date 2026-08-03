@@ -20,7 +20,7 @@ from tac.models.outbound import (
     InitiateVoiceConversationOptions,
     InitiateVoiceConversationResult,
 )
-from tac.models.session import AuthorInfo
+from tac.models.session import AuthorInfo, ConversationSession
 from tac.models.voice import (
     AmdEvent,
     CallStatusEvent,
@@ -552,23 +552,50 @@ class VoiceChannel(BaseChannel):
                 exc_info=True,
             )
 
-        conv_id = self._conv_id_for_call_sid(call_sid)
-        if conv_id is not None and conv_id in self._conversations:
-            await self._end_conversation(conv_id)
+        session = self.get_conversation_session_by_call_sid(call_sid)
+        if session is not None:
+            await self._end_conversation(session.conversation_id)
         return hung_up
 
-    def _conv_id_for_call_sid(self, call_sid: str) -> str | None:
-        """Resolve the internal conversation id for a Twilio Call SID.
+    def get_conversation_session_by_call_sid(self, call_sid: str) -> ConversationSession | None:
+        """Look up the active voice session for a Twilio Call SID.
 
-        Out-of-band call webhooks carry only the CallSid, but in orchestrator
-        mode the conversation is keyed by the Orchestrator id. Each voice session
-        records its ``call_sid``, so scan the tracked sessions for a match rather
-        than maintaining a second CallSid→conv_id index. Returns ``None`` if no
-        active session matches.
+        Call events (``on_call_status`` / ``on_amd`` / ``on_recording``) carry
+        only the CallSid, but the session-facing methods are keyed by
+        conversation id — which equals the CallSid in ConversationRelay-only mode
+        and is the Orchestrator conversation id otherwise. Use this to cross that
+        gap when a handler needs to do more than :meth:`end_call`: reach the live
+        agent, read the profile, or stash something on the session.
+
+        Named for ``ConversationSession`` specifically — ``session_manager``
+        deals in ``SessionState``, a different type.
+
+        Example:
+            ```python
+            async def on_amd(event: AmdEvent) -> None:
+                if not event.is_machine:
+                    return
+                session = voice_channel.get_conversation_session_by_call_sid(event.call_sid)
+                if session is not None:
+                    session.metadata["reached_voicemail"] = True
+                    await voice_channel.send_response(
+                        session.conversation_id, "Sorry to miss you — we'll try again."
+                    )
+                await voice_channel.end_call(event.call_sid)
+            ```
+
+        Args:
+            call_sid: Twilio Call SID, e.g. from ``AmdEvent.call_sid`` or
+                ``InitiateVoiceConversationResult.call_sid``.
+
+        Returns:
+            The session, or ``None`` if no tracked session matches — the call
+            ended, the WebSocket never connected, or the event landed on another
+            instance (see the horizontal-scaling note in CLAUDE.md).
         """
-        for conv_id, session in self._conversations.items():
+        for session in self._conversations.values():
             if session.call_sid == call_sid:
-                return conv_id
+                return session
         return None
 
     async def _initialize_conversation(
@@ -649,7 +676,7 @@ class VoiceChannel(BaseChannel):
         session = self._start_conversation(conv_id, profile_id)
         # In orchestrator mode conv_id is the Orchestrator conversation id, so
         # record the CallSid so out-of-band call webhooks can reach this session
-        # (resolved via _conv_id_for_call_sid).
+        # (resolved via get_conversation_session_by_call_sid).
         session.call_sid = call_sid
 
         session_state = None

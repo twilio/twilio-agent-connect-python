@@ -2629,3 +2629,68 @@ class TestEndCall:
 
         mock_client.calls().update.assert_called_with(status="completed")
         channel._end_conversation.assert_not_awaited()
+
+
+class TestGetConversationSessionByCallSid:
+    """Call events carry only the CallSid; session methods are keyed by conv id."""
+
+    def test_resolves_orchestrator_mode_session(self) -> None:
+        """conv_id is the Orchestrator id, so the CallSid needs a lookup."""
+        channel = VoiceChannel(TAC(get_test_config()))
+        session = channel._start_conversation("conv_abc")
+        session.call_sid = "CA1"
+
+        found = channel.get_conversation_session_by_call_sid("CA1")
+        assert found is session
+        assert found.conversation_id == "conv_abc"
+
+    def test_resolves_relay_only_session(self) -> None:
+        """conv_id == call_sid here, but the lookup shouldn't assume it."""
+        channel = VoiceChannel(TAC(get_test_config()))
+        session = channel._start_conversation("CA1")
+        session.call_sid = "CA1"
+
+        assert channel.get_conversation_session_by_call_sid("CA1") is session
+
+    def test_returns_none_for_unknown_call_sid(self) -> None:
+        channel = VoiceChannel(TAC(get_test_config()))
+        session = channel._start_conversation("conv_abc")
+        session.call_sid = "CA1"
+
+        assert channel.get_conversation_session_by_call_sid("CA_other") is None
+
+    def test_ignores_sessions_without_a_call_sid(self) -> None:
+        """Messaging sessions leave call_sid None — must not match on None."""
+        channel = VoiceChannel(TAC(get_test_config()))
+        channel._start_conversation("conv_no_sid")
+
+        assert channel.get_conversation_session_by_call_sid("CA1") is None
+
+    def test_picks_the_matching_session_among_several(self) -> None:
+        channel = VoiceChannel(TAC(get_test_config()))
+        for conv_id, call_sid in [("c1", "CA1"), ("c2", "CA2"), ("c3", "CA3")]:
+            channel._start_conversation(conv_id).call_sid = call_sid
+
+        found = channel.get_conversation_session_by_call_sid("CA2")
+        assert found is not None
+        assert found.conversation_id == "c2"
+
+    @pytest.mark.asyncio
+    async def test_reaches_the_live_agent_from_a_call_event(self) -> None:
+        """The gap this closes: an AMD handler doing more than end_call."""
+        channel = VoiceChannel(TAC(get_test_config()))
+        session = channel._start_conversation("conv_abc")
+        session.call_sid = "CA1"
+        channel.send_response = AsyncMock()  # type: ignore[method-assign]
+
+        async def on_amd(event: object) -> None:
+            found = channel.get_conversation_session_by_call_sid(event.call_sid)
+            assert found is not None
+            found.metadata["reached_voicemail"] = True
+            await channel.send_response(found.conversation_id, "We'll try again.")
+
+        channel.on_amd(on_amd)
+        await channel.handle_amd_event({"CallSid": "CA1", "AnsweredBy": "machine_start"})
+
+        assert session.metadata["reached_voicemail"] is True
+        channel.send_response.assert_awaited_once_with("conv_abc", "We'll try again.")
