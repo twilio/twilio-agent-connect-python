@@ -49,9 +49,12 @@ async def on_call_status(event: CallStatusEvent) -> None:
 
 async def on_amd(event: AmdEvent) -> None:
     print(f"[AMD] {event.call_sid}: answered_by={event.answered_by}")
-    # No session here — AMD resolves before the caller's first prompt. Once they
-    # speak, get_conversation_session_by_call_sid(call_sid) reaches the live
-    # session for the rest of the call; end_call never needs one.
+    # Reaches the live session, to do more than hang up. Usually None here:
+    # sessions start on the caller's first prompt, and AMD resolves before a
+    # machine has said anything. Available from then until the call ends.
+    session = voice_channel.get_conversation_session_by_call_sid(event.call_sid)
+    print(f"[AMD] session lookup -> {session.conversation_id if session else None}")
+
     if event.is_machine:
         await voice_channel.end_call(event.call_sid)  # voicemail → hang up
 
