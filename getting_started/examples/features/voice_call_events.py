@@ -53,8 +53,8 @@ async def on_recording(event: RecordingEvent) -> None:
     print(f"[RECORDING] {event.call_sid}: {event.recording_status} {event.recording_url}")
 
 
-# Registering also opts the call into that callback — TAC only hands Twilio a
-# URL it's actually serving.
+# Registering is also what puts each callback URL on the outbound call below.
+# Skip a handler and TAC omits its URL, so Twilio never posts that event.
 voice_channel.on_call_status(on_call_status)
 voice_channel.on_amd(on_amd)
 voice_channel.on_recording(on_recording)

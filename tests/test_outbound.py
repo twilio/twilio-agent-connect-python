@@ -10,7 +10,7 @@ from tac import TAC
 from tac.channels.chat import ChatChannel
 from tac.channels.rcs import RCSChannel
 from tac.channels.sms import SMSChannel
-from tac.channels.voice import VoiceChannel
+from tac.channels.voice import VoiceChannel, VoiceChannelConfig
 from tac.channels.whatsapp import WhatsAppChannel
 from tac.core.config import TwilioMemoryConfig
 from tac.models.conversation import (
@@ -659,6 +659,96 @@ class TestVoiceOutbound:
             ),
         )
         assert kwargs["status_callback"] == "https://example.com/hooks/calls/status"
+
+
+class TestDefaultCallOptions:
+    """Channel-wide CallOptions layer, mirroring default_twiml_options. This is
+    how a custom server or non-default routes supply their own callback URLs."""
+
+    async def _place(
+        self, channel: VoiceChannel, per_call: CallOptions | None = None
+    ) -> dict[str, Any]:
+        mock_client = MagicMock()
+        mock_client.calls.create.return_value = MagicMock(sid="CAxyz")
+        with patch.object(channel, "_get_twilio_client", return_value=mock_client):
+            await channel.initiate_outbound_conversation(
+                InitiateVoiceConversationOptions(
+                    to="+15559876543",
+                    websocket_url="wss://example.com/ws",
+                    call_options=per_call,
+                )
+            )
+        return mock_client.calls.create.call_args.kwargs
+
+    @staticmethod
+    def _channel(**default_call_options: Any) -> VoiceChannel:
+        config = {**get_test_config(), "voice_public_domain": "example.com"}
+        return VoiceChannel(
+            TAC(config),
+            config=VoiceChannelConfig(default_call_options=CallOptions(**default_call_options)),
+        )
+
+    @pytest.mark.asyncio
+    async def test_applies_to_every_call(self) -> None:
+        kwargs = await self._place(self._channel(timeout=45))
+        assert kwargs["timeout"] == 45
+
+    @pytest.mark.asyncio
+    async def test_url_beats_the_derived_default(self) -> None:
+        """The custom-server case: TAC isn't serving /twilio/call-events/amd."""
+        channel = self._channel(
+            machine_detection="Enable",
+            async_amd=True,
+            async_amd_status_callback="https://my-flask-app.com/amd-hook",
+        )
+
+        async def handler(event: Any) -> None:
+            return None
+
+        channel.on_amd(handler)
+
+        kwargs = await self._place(channel)
+        assert kwargs["async_amd_status_callback"] == "https://my-flask-app.com/amd-hook"
+
+    @pytest.mark.asyncio
+    async def test_per_call_beats_channel_wide(self) -> None:
+        kwargs = await self._place(self._channel(timeout=45), CallOptions(timeout=10))
+        assert kwargs["timeout"] == 10
+
+    @pytest.mark.asyncio
+    async def test_unset_per_call_fields_fall_through(self) -> None:
+        """Per-field merge: setting timeout doesn't drop the channel's record flag."""
+        kwargs = await self._place(self._channel(record=True, timeout=45), CallOptions(timeout=10))
+        assert kwargs["timeout"] == 10
+        assert kwargs["record"] is True
+
+    @pytest.mark.asyncio
+    async def test_per_call_can_disable_amd(self) -> None:
+        """Clearing both flags is valid — it turns AMD off for this call."""
+        kwargs = await self._place(
+            self._channel(machine_detection="Enable", async_amd=True),
+            CallOptions(machine_detection=None, async_amd=None),
+        )
+        assert "machine_detection" not in kwargs
+        assert "async_amd" not in kwargs
+
+    @pytest.mark.asyncio
+    async def test_merged_result_is_revalidated(self) -> None:
+        """Clearing only one flag leaves the other from the channel default — an
+        invalid combination reachable only by layering."""
+        with pytest.raises(ValueError, match="requires both"):
+            await self._place(
+                self._channel(machine_detection="Enable", async_amd=True),
+                CallOptions(machine_detection=None),
+            )
+
+    @pytest.mark.asyncio
+    async def test_extras_merge_too(self) -> None:
+        kwargs = await self._place(
+            self._channel(byoc="BYdefault"), CallOptions(sip_auth_username="alice")
+        )
+        assert kwargs["byoc"] == "BYdefault"
+        assert kwargs["sip_auth_username"] == "alice"
 
 
 class TestInitiateVoiceConversationOptionsForbidsExtra:

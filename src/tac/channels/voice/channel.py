@@ -132,10 +132,14 @@ class VoiceChannel(BaseChannel):
         ConversationRelay session callback — see
         :meth:`handle_conversation_relay_callback`.
 
-        Registering also opts outbound calls into the callback: the channel then
-        auto-wires ``status_callback`` on ``calls.create``. Twilio reports only
-        the terminal event by default, which covers every disposition; set
-        ``CallOptions.status_callback_event`` for ringing/answered.
+        Registering does two things: it stores the handler, and it makes later
+        outbound calls pass ``status_callback`` to ``calls.create``. With no
+        handler registered TAC omits that parameter, so Twilio has nowhere to
+        post and the event never arrives.
+
+        Twilio reports only the terminal event by default, which covers every
+        disposition; set ``CallOptions.status_callback_event`` for
+        ringing/answered.
 
         Example:
             ```python
@@ -152,10 +156,12 @@ class VoiceChannel(BaseChannel):
     def on_amd(self, callback: AmdHandler) -> None:
         """Register a handler for Twilio ``async_amd_status_callback`` webhooks.
 
-        Fires at most once per call, and only when the call set
-        ``CallOptions.machine_detection`` and ``async_amd``. Registering
-        auto-wires the callback URL but does not enable detection — that's
-        per-call.
+        Registering makes later outbound calls pass
+        ``async_amd_status_callback`` to ``calls.create``; without a handler TAC
+        omits it and Twilio has nowhere to post the result. It does not enable
+        detection — that's per-call, via ``CallOptions.machine_detection`` and
+        ``async_amd``, both of which are required for this to fire (at most once
+        per call).
 
         Example:
             ```python
@@ -172,9 +178,10 @@ class VoiceChannel(BaseChannel):
     def on_recording(self, callback: RecordingHandler) -> None:
         """Register a handler for Twilio ``recording_status_callback`` webhooks.
 
-        Fires when a recording is ready, and only when the call set
-        ``CallOptions.record``. Registering auto-wires the callback URL; it does
-        not start recording.
+        Registering makes later outbound calls pass
+        ``recording_status_callback`` to ``calls.create``; without a handler TAC
+        omits it and Twilio has nowhere to post. It does not start recording —
+        that's ``CallOptions.record``, which is required for this to fire.
 
         Example:
             ```python
@@ -747,16 +754,40 @@ class VoiceChannel(BaseChannel):
                 self.logger.debug("Cleanup - removing WebSocket", conversation_id=conv_id)
                 await self._cleanup_connection(conv_id)
 
-    def _build_call_kwargs(self, call_options: CallOptions | None) -> dict[str, Any]:
-        """Build the extra kwargs for ``client.calls.create`` (CallOptions has
-        already validated itself).
+    def _merge_call_options(self, per_call: CallOptions | None) -> CallOptions | None:
+        """Overlay ``per_call`` onto ``VoiceChannelConfig.default_call_options``.
 
-        Auto-wires a callback URL only when its handler is registered —
-        advertising a URL TAC isn't serving would point Twilio at a 404 on every
-        call, which is what a custom-server deployment would hit. ``setdefault``
-        keeps an explicit URL in ``call_options`` winning.
+        Per-field via ``model_fields_set``, same as ``_overlay_fields`` does for
+        TwiMLOptions. The merged result is re-validated so a combination only
+        reachable by layering — per-call clearing ``machine_detection`` while the
+        default set ``async_amd`` — still fails instead of reaching Twilio.
         """
-        call_kwargs = call_options.to_call_kwargs() if call_options else {}
+        default = self.config.default_call_options
+        if default is None or per_call is None:
+            return per_call or default
+
+        merged = default.model_dump(by_alias=True, exclude_none=True)
+        for field in per_call.model_fields_set:
+            merged[field] = getattr(per_call, field)
+        merged.update(per_call.__pydantic_extra__ or {})
+        return CallOptions(**merged)
+
+    def _build_call_kwargs(self, call_options: CallOptions | None) -> dict[str, Any]:
+        """Build the extra kwargs for ``client.calls.create``.
+
+        Layers, highest precedence first: this call's ``call_options``,
+        ``VoiceChannelConfig.default_call_options``, then callback URLs derived
+        from ``voice_public_domain`` + ``voice_call_event_path``.
+
+        A URL is derived only when its handler is registered. That's a deliberate
+        deviation from ``websocket_url`` / ``action_url``, which derive
+        unconditionally: those are load-bearing, so a wrong one fails loudly on
+        the first call, whereas an unwanted call-event URL fails as silent 11200
+        alerts for a feature nobody asked for. Set the URLs in
+        ``default_call_options`` when TAC isn't serving the routes.
+        """
+        merged = self._merge_call_options(call_options)
+        call_kwargs = merged.to_call_kwargs() if merged else {}
 
         wiring: list[tuple[CallEventKind, str, Callable[..., Any] | None]] = [
             ("status", "status_callback", self._on_call_status),
