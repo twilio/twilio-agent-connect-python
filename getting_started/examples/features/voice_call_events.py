@@ -43,17 +43,15 @@ voice_channel = VoiceChannel(tac)
 
 async def on_call_status(event: CallStatusEvent) -> None:
     print(f"[STATUS] {event.call_sid}: {event.call_status}")
+    # The conversation session — conversation_id, profile, metadata. Set on the first prompt.
+    session = voice_channel.get_conversation_session_by_call_sid(event.call_sid)
+    print(f"[STATUS] session lookup -> {session.conversation_id if session else None}")
     if event.is_unreached:
         print(f"[STATUS] {event.call_sid} unreached — queue retry")
 
 
 async def on_amd(event: AmdEvent) -> None:
     print(f"[AMD] {event.call_sid}: answered_by={event.answered_by}")
-    # The conversation session — conversation_id, profile, metadata. None until
-    # the caller's first prompt, which AMD usually beats.
-    session = voice_channel.get_conversation_session_by_call_sid(event.call_sid)
-    print(f"[AMD] session lookup -> {session.conversation_id if session else None}")
-
     if event.is_machine:
         await voice_channel.end_call(event.call_sid)  # voicemail → hang up
 

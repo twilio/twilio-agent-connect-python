@@ -571,6 +571,11 @@ class VoiceChannel(BaseChannel):
         ``machine_detection="Enable"``, which fires before the first prompt by
         design — hang up with :meth:`end_call`, which needs no session.
 
+        At the other end, orchestrator mode keeps the session until Conversation
+        Orchestrator's CLOSED webhook, so it outlives the call and
+        ``on_call_status`` / ``on_recording`` do resolve. Relay-only mode tears
+        down on the ConversationRelay callback instead, which races them.
+
         Named for ``ConversationSession``; ``session_manager`` deals in
         ``SessionState``, a different type.
 
