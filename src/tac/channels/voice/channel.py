@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING, Any
 
@@ -363,6 +364,7 @@ class VoiceChannel(BaseChannel):
         if conversation_orchestrator_client is None:
             raise RuntimeError("_initialize_conversation called without Conversation Orchestrator")
 
+        init_start_at = time.monotonic()
         conversations: list[Any] = []
         for attempt in range(_POLL_ATTEMPTS):
             conversations = await conversation_orchestrator_client.list_conversations(
@@ -425,6 +427,13 @@ class VoiceChannel(BaseChannel):
             else None
         )
 
+        self.logger.info(
+            "Latency: conversation orchestrator poll/init",
+            call_sid=call_sid,
+            conversation_id=conv_id,
+            duration_ms=round((time.monotonic() - init_start_at) * 1000, 1),
+        )
+
         self._websocket_manager.add_websocket(conv_id, websocket)
         session = self._start_conversation(conv_id, profile_id)
 
@@ -460,10 +469,12 @@ class VoiceChannel(BaseChannel):
             websocket: Any WebSocket implementation satisfying WebSocketProtocol
         """
         await websocket.accept()
+        setup_received_at = time.monotonic()
         self.logger.debug("WebSocket connection established")
 
         conv_id: str | None = None
         session_state = None
+        first_prompt_seen = False
 
         try:
             # First message should be 'setup'
@@ -481,6 +492,13 @@ class VoiceChannel(BaseChannel):
                     msg_type = data.get("type")
 
                     if msg_type == "prompt":
+                        if not first_prompt_seen:
+                            first_prompt_seen = True
+                            self.logger.info(
+                                "Latency: setup to first prompt (includes user speech + STT)",
+                                call_sid=call_sid,
+                                duration_ms=round((time.monotonic() - setup_received_at) * 1000, 1),
+                            )
                         if not conv_id and call_sid:
                             if self.tac.is_orchestrator_enabled():
                                 conv_id, session_state = await self._initialize_conversation(
@@ -764,6 +782,8 @@ class VoiceChannel(BaseChannel):
             return
 
         full_response = ""
+        send_start_at = time.monotonic()
+        first_token_at: float | None = None
 
         try:
             # Check if response is an async generator (streaming)
@@ -783,6 +803,14 @@ class VoiceChannel(BaseChannel):
                                 token = str(chunk)
                         else:
                             token = chunk
+
+                        if first_token_at is None:
+                            first_token_at = time.monotonic()
+                            self.logger.info(
+                                "Latency: time to first token",
+                                conversation_id=conversation_id,
+                                duration_ms=round((first_token_at - send_start_at) * 1000, 1),
+                            )
 
                         full_response += token
                         json_template["token"] = token
@@ -808,12 +836,22 @@ class VoiceChannel(BaseChannel):
                                 "WebSocket closed before sending final marker",
                                 conversation_id=conversation_id,
                             )
+                    self.logger.info(
+                        "Latency: streaming response complete",
+                        conversation_id=conversation_id,
+                        duration_ms=round((time.monotonic() - send_start_at) * 1000, 1),
+                    )
                 except asyncio.CancelledError:
                     # Let Python's async generator cleanup handle closing the generator
                     raise
             else:
                 await websocket.send_text(
                     json.dumps({"type": "text", "token": response, "last": True})
+                )
+                self.logger.info(
+                    "Latency: response sent",
+                    conversation_id=conversation_id,
+                    duration_ms=round((time.monotonic() - send_start_at) * 1000, 1),
                 )
 
             # If a handoff is pending, send the WS "end" message now that the
@@ -882,15 +920,35 @@ class VoiceChannel(BaseChannel):
         message_body = message.voice_prompt or ""
         session = self._conversations[conv_id]
 
+        prompt_received_at = time.monotonic()
+
         # Retrieve memory if memory_mode is enabled and Twilio Memory is configured
         memory_response = await self._retrieve_memory_if_enabled(session, message_body, conv_id)
+        memory_done_at = time.monotonic()
+        self.logger.info(
+            "Latency: memory retrieval",
+            conversation_id=conv_id,
+            duration_ms=round((memory_done_at - prompt_received_at) * 1000, 1),
+        )
 
         # Trigger message ready callback
         try:
             response = await self.tac.trigger_message_ready(message_body, session, memory_response)
+            callback_done_at = time.monotonic()
+            self.logger.info(
+                "Latency: on_message_ready callback",
+                conversation_id=conv_id,
+                duration_ms=round((callback_done_at - memory_done_at) * 1000, 1),
+            )
             # Auto-send if callback returned a string (None = manual send_response flow)
             if response is not None:
                 await self.send_response(conv_id, response, role="assistant")
+            total_done_at = time.monotonic()
+            self.logger.info(
+                "Latency: total prompt handling",
+                conversation_id=conv_id,
+                duration_ms=round((total_done_at - prompt_received_at) * 1000, 1),
+            )
         except Exception as e:
             self.logger.error(
                 "Error in message ready callback",
