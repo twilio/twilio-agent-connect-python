@@ -184,25 +184,9 @@ class TAC:
                     )
                     raise ValueError("No profile_id or author_info available")
 
-            if conversation_context.profile_id and not conversation_context.profile:
-                try:
-                    profile_response = await self.conversation_memory_client.get_profile(
-                        profile_id=conversation_context.profile_id,
-                        trait_groups=self.config.memory_config.trait_groups,
-                    )
-                    conversation_context.profile = profile_response
-                except asyncio.CancelledError:
-                    raise
-                except Exception as e:
-                    self.logger.warning(
-                        f"Failed to fetch profile for {conversation_context.profile_id}: {e}. "
-                        "Continuing without profile data.",
-                        exc_info=True,
-                    )
-
             # Get memory retrieval configuration
             cfg = self.config.memory_config
-            memory_response = await self.conversation_memory_client.retrieve_memory(
+            memory_coro = self.conversation_memory_client.retrieve_memory(
                 profile_id=conversation_context.profile_id,
                 conversation_id=conversation_context.conversation_id,
                 query=query,
@@ -211,6 +195,33 @@ class TAC:
                 communications_limit=cfg.communications_limit,
                 relevance_threshold=cfg.relevance_threshold,
             )
+
+            profile_id = conversation_context.profile_id
+            memory_client = self.conversation_memory_client
+            if profile_id and not conversation_context.profile:
+                # get_profile only needs profile_id (already known here), so it's
+                # independent of retrieve_memory — run both concurrently instead of
+                # paying two sequential round trips.
+                async def _fetch_profile() -> None:
+                    try:
+                        profile_response = await memory_client.get_profile(
+                            profile_id=profile_id,
+                            trait_groups=cfg.trait_groups,
+                        )
+                        conversation_context.profile = profile_response
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as e:
+                        self.logger.warning(
+                            f"Failed to fetch profile for {profile_id}: "
+                            f"{e}. Continuing without profile data.",
+                            exc_info=True,
+                        )
+
+                _, memory_response = await asyncio.gather(_fetch_profile(), memory_coro)
+            else:
+                memory_response = await memory_coro
+
             return TACMemoryResponse(memory_response)
 
         except Exception as e:

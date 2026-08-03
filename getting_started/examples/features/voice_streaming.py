@@ -16,7 +16,7 @@ from agents import Agent, Runner, set_tracing_disabled
 from dotenv import load_dotenv
 
 from tac import TAC, TACConfig
-from tac.channels.voice import VoiceChannel
+from tac.channels.voice import VoiceChannel, VoiceChannelConfig
 from tac.models.session import ConversationSession
 from tac.models.tac import TACMemoryResponse
 from tac.server import TACFastAPIServer
@@ -25,7 +25,7 @@ load_dotenv()
 set_tracing_disabled(True)
 
 tac = TAC(config=TACConfig.from_env())
-voice_channel = VoiceChannel(tac)
+voice_channel = VoiceChannel(tac, config=VoiceChannelConfig(memory_mode="once"))
 
 SYSTEM_INSTRUCTIONS = (
     "You are a voice assistant speaking with a user over the phone. "
