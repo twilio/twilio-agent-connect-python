@@ -517,6 +517,32 @@ class TestVoiceOutbound:
         accepted = _twilio_call_create_params()
         assert set(CallOptions.model_fields) <= accepted
 
+    def test_goes_permissive_if_the_sdk_takes_kwargs(self) -> None:
+        """A **kwargs signature accepts anything, so there's nothing to validate."""
+        import inspect
+
+        from tac.models import outbound
+
+        class FakeCallList:
+            def create(self, to=None, from_=None, twiml=None, **kwargs):  # type: ignore[no-untyped-def]
+                ...
+
+        real_signature = inspect.signature
+
+        def fake_signature(obj: object) -> inspect.Signature:
+            return real_signature(FakeCallList.create)
+
+        outbound._twilio_call_create_params.cache_clear()
+        try:
+            with patch.object(inspect, "signature", fake_signature):
+                assert outbound._twilio_call_create_params() == frozenset()
+        finally:
+            outbound._twilio_call_create_params.cache_clear()
+
+        # Without the guard, named params would become the accepted set and a
+        # real Calls-API param would be rejected as unknown.
+        CallOptions(caller_id="+15551234567")
+
     @pytest.mark.asyncio
     async def test_async_amd_serialized_as_string(self) -> None:
         """Twilio's SDK types async_amd as a string and record as a bool."""

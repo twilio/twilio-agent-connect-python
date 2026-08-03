@@ -6,8 +6,12 @@ recording enabled, then reacts to Twilio's call webhooks: hang up on voicemail,
 log which calls went unreached. Each handler is optional.
 
 TACFastAPIServer registers the routes and auto-wires their URLs from
-TWILIO_VOICE_PUBLIC_DOMAIN, so there's no webhook setup here. The same handlers
-also fire for inbound calls pointed at TAC.
+TWILIO_VOICE_PUBLIC_DOMAIN, so there's no webhook setup here.
+
+Outbound only: machine_detection and record are calls.create parameters, so AMD
+and recording have no inbound equivalent. on_call_status does work for inbound,
+but the URL isn't auto-wired — point the number's "Call Status Changes" webhook
+at <TWILIO_VOICE_PUBLIC_DOMAIN>/twilio/call-events/status yourself.
 
 Env vars:
 - TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_API_KEY, TWILIO_API_SECRET
@@ -45,6 +49,9 @@ async def on_call_status(event: CallStatusEvent) -> None:
 
 async def on_amd(event: AmdEvent) -> None:
     print(f"[AMD] {event.call_sid}: answered_by={event.answered_by}")
+    # No session here — AMD resolves before the caller's first prompt. Once they
+    # speak, get_conversation_session_by_call_sid(call_sid) reaches the live
+    # session for the rest of the call; end_call never needs one.
     if event.is_machine:
         await voice_channel.end_call(event.call_sid)  # voicemail → hang up
 

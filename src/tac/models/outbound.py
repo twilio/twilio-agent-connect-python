@@ -54,15 +54,21 @@ def _twilio_call_create_params() -> frozenset[str]:
     """Param names ``calls.create()`` accepts, read from the installed SDK.
 
     ``CallList.create`` takes no ``**kwargs``, so an unknown key is a TypeError
-    at call time, not something Twilio validates. Empty set if introspection
-    fails, making validation permissive rather than breaking callers.
+    at call time, not something Twilio validates. Empty set if there's nothing
+    to validate against, making validation permissive rather than breaking
+    callers.
     """
     try:
         import inspect
 
         from twilio.rest.api.v2010.account.call import CallList
 
-        return frozenset(inspect.signature(CallList.create).parameters) - {"self"}
+        sig = inspect.signature(CallList.create)
+        # If the SDK ever switches to **kwargs, the named params stop being the
+        # accepted set — validating against them would reject every real extra.
+        if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
+            return frozenset()
+        return frozenset(sig.parameters) - {"self"}
     except Exception:  # pragma: no cover - defensive against SDK changes
         return frozenset()
 

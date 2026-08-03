@@ -2675,9 +2675,19 @@ class TestGetConversationSessionByCallSid:
         assert found is not None
         assert found.conversation_id == "c2"
 
+    def test_returns_none_before_the_first_prompt(self) -> None:
+        """Sessions start on the first prompt, so a connected-but-silent call has none.
+
+        This is what an on_amd handler sees under machine_detection="Enable":
+        AMD resolves before the callee has said anything.
+        """
+        channel = VoiceChannel(TAC(get_test_config()))
+
+        assert channel.get_conversation_session_by_call_sid("CA1") is None
+
     @pytest.mark.asyncio
-    async def test_reaches_the_live_agent_from_a_call_event(self) -> None:
-        """The gap this closes: an AMD handler doing more than end_call."""
+    async def test_reaches_the_live_agent_mid_conversation(self) -> None:
+        """Once the caller has prompted, out-of-band code can reach the session."""
         channel = VoiceChannel(TAC(get_test_config()))
         session = channel._start_conversation("conv_abc")
         session.call_sid = "CA1"

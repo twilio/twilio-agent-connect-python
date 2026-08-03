@@ -560,38 +560,36 @@ class VoiceChannel(BaseChannel):
     def get_conversation_session_by_call_sid(self, call_sid: str) -> ConversationSession | None:
         """Look up the active voice session for a Twilio Call SID.
 
-        Call events (``on_call_status`` / ``on_amd`` / ``on_recording``) carry
-        only the CallSid, but the session-facing methods are keyed by
-        conversation id — which equals the CallSid in ConversationRelay-only mode
-        and is the Orchestrator conversation id otherwise. Use this to cross that
-        gap when a handler needs to do more than :meth:`end_call`: reach the live
-        agent, read the profile, or stash something on the session.
+        Out-of-band code holding a CallSid — a dashboard route, an operator
+        action, a call-event handler — can't reach the session-facing methods,
+        which are keyed by conversation id: the Orchestrator conversation id in
+        orchestrator mode, the CallSid only in ConversationRelay-only mode.
 
-        Named for ``ConversationSession`` specifically — ``session_manager``
-        deals in ``SessionState``, a different type.
+        Sessions are created on the caller's first prompt, not at WebSocket
+        setup, so this returns ``None`` for a call that connected but hasn't been
+        spoken into. That includes ``on_amd`` under
+        ``machine_detection="Enable"``, which fires before the first prompt by
+        design — hang up with :meth:`end_call`, which needs no session.
+
+        Named for ``ConversationSession``; ``session_manager`` deals in
+        ``SessionState``, a different type.
 
         Example:
             ```python
-            async def on_amd(event: AmdEvent) -> None:
-                if not event.is_machine:
-                    return
-                session = voice_channel.get_conversation_session_by_call_sid(event.call_sid)
+            async def nudge(call_sid: str) -> None:
+                session = voice_channel.get_conversation_session_by_call_sid(call_sid)
                 if session is not None:
-                    session.metadata["reached_voicemail"] = True
-                    await voice_channel.send_response(
-                        session.conversation_id, "Sorry to miss you — we'll try again."
-                    )
-                await voice_channel.end_call(event.call_sid)
+                    await voice_channel.send_response(session.conversation_id, "Still there?")
             ```
 
         Args:
-            call_sid: Twilio Call SID, e.g. from ``AmdEvent.call_sid`` or
-                ``InitiateVoiceConversationResult.call_sid``.
+            call_sid: Twilio Call SID, e.g. from
+                ``InitiateVoiceConversationResult.call_sid`` or a call event.
 
         Returns:
-            The session, or ``None`` if no tracked session matches — the call
-            ended, the WebSocket never connected, or the event landed on another
-            instance (see the horizontal-scaling note in CLAUDE.md).
+            The session, or ``None`` — no first prompt yet, the call ended, or it
+            landed on another instance (see the horizontal-scaling note in
+            CLAUDE.md).
         """
         for session in self._conversations.values():
             if session.call_sid == call_sid:
@@ -794,9 +792,9 @@ class VoiceChannel(BaseChannel):
             return per_call or default
 
         merged = default.model_dump(by_alias=True, exclude_none=True)
+        # model_fields_set covers extras too, since CallOptions allows them.
         for field in per_call.model_fields_set:
             merged[field] = getattr(per_call, field)
-        merged.update(per_call.__pydantic_extra__ or {})
         return CallOptions(**merged)
 
     def _build_call_kwargs(self, call_options: CallOptions | None) -> dict[str, Any]:

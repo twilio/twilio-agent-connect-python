@@ -9,6 +9,7 @@ from tac.channels.voice.config import (
     VoiceChannelConfig,
 )
 from tac.channels.voice.twiml import generate_twiml
+from tac.models.outbound import CallOptions
 from tac.models.voice import (
     AmdEvent,
     CallStatusEvent,
@@ -22,6 +23,7 @@ from tac.models.voice import (
 __all__ = [
     "AmdEvent",
     "AmdHandler",
+    "CallOptions",
     "CallStatusEvent",
     "CallStatusHandler",
     "InboundCallTwiMLHandler",
