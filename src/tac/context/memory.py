@@ -1,15 +1,22 @@
-from typing import Any
+from typing import Any, TypeVar
 
 import httpx
+from pydantic import BaseModel, ValidationError
 
 from tac.context.base import BaseAPIClient
 from tac.models.memory import (
+    MemoryCommunication,
+    MemoryRetrievalMeta,
     MemoryRetrievalRequest,
     MemoryRetrievalResponse,
+    ObservationInfo,
     ProfileLookupRequest,
     ProfileLookupResponse,
     ProfileResponse,
+    SummaryInfo,
 )
+
+_ItemModel = TypeVar("_ItemModel", bound=BaseModel)
 
 
 class MemoryClient(BaseAPIClient):
@@ -90,12 +97,11 @@ class MemoryClient(BaseAPIClient):
 
                 response.raise_for_status()
 
-                # Parse the response according to the API spec
+                # Parse the response according to the API spec. Validate each
+                # item independently so a single malformed observation, summary,
+                # or communication does not collapse the entire response to empty.
                 data = response.json()
-                memory_response = MemoryRetrievalResponse(**data)
-
-                # Return full response with observations, summaries, sessions, and metadata
-                return memory_response
+                return self._parse_recall_response(data)
 
         except httpx.HTTPError as e:
             response_text = (
@@ -116,6 +122,52 @@ class MemoryClient(BaseAPIClient):
             self.logger.error(f"Failed to parse Conversation Memory response: {e}")
             # Return empty response on parsing errors
             return MemoryRetrievalResponse()
+
+    def _parse_recall_response(self, data: Any) -> MemoryRetrievalResponse:
+        """Parse a /Recall response, dropping (and logging) invalid items.
+
+        Observations, summaries, and communications are validated per item so a
+        single malformed entry does not discard the valid results alongside it.
+        """
+        if not isinstance(data, dict):
+            self.logger.warning(
+                f"Unexpected Conversation Memory response type: {type(data).__name__}; "
+                "returning empty response"
+            )
+            return MemoryRetrievalResponse()
+
+        meta = MemoryRetrievalMeta()
+        raw_meta = data.get("meta")
+        if raw_meta is not None:
+            try:
+                meta = MemoryRetrievalMeta.model_validate(raw_meta)
+            except ValidationError as e:
+                self.logger.warning(f"Dropping invalid Conversation Memory meta: {e}")
+
+        return MemoryRetrievalResponse(
+            observations=self._parse_items(data.get("observations"), ObservationInfo),
+            summaries=self._parse_items(data.get("summaries"), SummaryInfo),
+            communications=self._parse_items(data.get("communications"), MemoryCommunication),
+            meta=meta,
+        )
+
+    def _parse_items(self, items: Any, model: type[_ItemModel]) -> list[_ItemModel]:
+        """Validate a list of items into `model`, skipping invalid entries."""
+        if items is None:
+            return []
+        if not isinstance(items, list):
+            self.logger.warning(
+                f"Expected a list of Conversation Memory {model.__name__} but received "
+                f"{type(items).__name__}; returning empty list"
+            )
+            return []
+        parsed: list[_ItemModel] = []
+        for item in items:
+            try:
+                parsed.append(model.model_validate(item))
+            except ValidationError as e:
+                self.logger.warning(f"Dropping invalid Conversation Memory {model.__name__}: {e}")
+        return parsed
 
     async def get_profile(
         self,

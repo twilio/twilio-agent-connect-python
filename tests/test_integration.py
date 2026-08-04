@@ -206,7 +206,7 @@ class TestTACIntegration:
         assert callback_invoked
         assert received_context is not None
         assert received_context.conversation_id == "CH123456"
-        assert received_context.channel == "sms"
+        assert received_context.channel == "SMS"
         assert received_context.profile_id == "profile_test_123"
         assert isinstance(received_memories, TACMemoryResponse)
 
@@ -299,7 +299,7 @@ class TestTACIntegration:
         channel = SMSChannel(tac)
 
         channel._conversations["CH222"] = ConversationSession(
-            conversation_id="CH222", channel="sms"
+            conversation_id="CH222", channel="SMS"
         )
 
         await channel.process_webhook(
@@ -433,7 +433,7 @@ class TestTACIntegration:
         assert callback_invoked
         assert received_context is not None
         assert received_context.conversation_id == conv_id
-        assert received_context.channel == "sms"
+        assert received_context.channel == "SMS"
 
     @pytest.mark.asyncio
     async def test_sms_channel_posts_agent_on_solo_customer_inbound(self) -> None:

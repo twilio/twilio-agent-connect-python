@@ -131,6 +131,218 @@ class TestVoiceUrlConfigValidationAtStartup:
         tac = TAC(cfg)
         TACFastAPIServer(tac=tac)  # no raise
 
+    def test_raises_when_call_event_path_missing_leading_slash(self) -> None:
+        """'hooks/calls' would build 'https://example.comhooks/calls/status'."""
+        from tac.channels.voice import VoiceChannel
+        from tac.server import TACFastAPIServer
+
+        tac = TAC({**get_test_config(), "voice_call_event_path": "hooks/calls"})
+        with pytest.raises(ValueError, match="must start with"):
+            TACFastAPIServer(tac=tac, voice_channel=VoiceChannel(tac))
+
+    def test_raises_when_derived_call_event_path_collides(self) -> None:
+        """Checked on the derived /status path — why this collision is invisible."""
+        from tac.channels.voice import VoiceChannel
+        from tac.server import TACFastAPIServer
+
+        tac = TAC({**get_test_config(), "voice_call_event_path": "/hooks"})
+        with pytest.raises(ValueError, match="collides with"):
+            TACFastAPIServer(
+                tac=tac,
+                voice_channel=VoiceChannel(tac),
+                config=TACServerConfig(twiml_path="/hooks/status"),
+            )
+
+    def test_leaves_preexisting_paths_alone(self) -> None:
+        """Scoped to voice_call_event_path — configs that used to start still do."""
+        from tac.channels.voice import VoiceChannel
+        from tac.server import TACFastAPIServer
+
+        tac = TAC({**get_test_config(), "voice_action_path": "/twiml"})
+        TACFastAPIServer(
+            tac=tac,
+            voice_channel=VoiceChannel(tac),
+            config=TACServerConfig(twiml_path="/twiml"),
+        )  # no raise — pre-existing collision, not this PR's business
+
+    def test_allows_call_event_base_sharing_another_path(self) -> None:
+        """Sharing a base is fine — the registered paths are /<base>/<kind>."""
+        from tac.channels.voice import VoiceChannel
+        from tac.server import TACFastAPIServer
+
+        tac = TAC({**get_test_config(), "voice_call_event_path": "/twiml"})
+        TACFastAPIServer(
+            tac=tac,
+            voice_channel=VoiceChannel(tac),
+            config=TACServerConfig(twiml_path="/twiml"),
+        )  # no raise: /twiml vs /twiml/status, /twiml/amd, /twiml/recording
+
+
+class TestCallEventRoutes:
+    """One route per Twilio callback; the route is the event discriminator."""
+
+    @staticmethod
+    def _server(tac: TAC, vc: object) -> object:
+        from tac.server import TACFastAPIServer
+
+        return TACFastAPIServer(tac=tac, config=TACServerConfig(), voice_channel=vc)  # type: ignore[arg-type]
+
+    def _client(self, channel: object) -> object:
+        from fastapi.testclient import TestClient
+
+        tac = TAC(get_test_config())
+        server = self._server(tac, channel)
+        return TestClient(server.app)  # type: ignore[attr-defined]
+
+    def test_all_three_routes_registered_at_configured_paths(self) -> None:
+        from tac.channels.voice import VoiceChannel
+        from tac.server import TACFastAPIServer
+
+        tac = TAC({**get_test_config(), "voice_call_event_path": "/hooks/calls"})
+        server = TACFastAPIServer(
+            tac=tac, config=TACServerConfig(), voice_channel=VoiceChannel(tac)
+        )
+        paths = {r.path for r in server.app.routes}  # type: ignore[attr-defined]
+        assert {"/hooks/calls/status", "/hooks/calls/amd", "/hooks/calls/recording"} <= paths
+
+    def test_routes_have_distinct_names(self) -> None:
+        """Distinct endpoint names keep /docs readable (one summary per route)."""
+        from tac.channels.voice import VoiceChannel
+        from tac.server import TACFastAPIServer
+
+        tac = TAC(get_test_config())
+        server = TACFastAPIServer(
+            tac=tac, config=TACServerConfig(), voice_channel=VoiceChannel(tac)
+        )
+        names = [
+            r.name  # type: ignore[attr-defined]
+            for r in server.app.routes  # type: ignore[attr-defined]
+            if getattr(r, "path", "").startswith("/twilio/call-events")
+        ]
+        assert len(names) == len(set(names)) == 3
+
+    @pytest.mark.parametrize("kind", ["status", "amd", "recording"])
+    def test_rejects_missing_signature(self, kind: str) -> None:
+        from tac.channels.voice import VoiceChannel
+
+        tac = TAC(get_test_config())
+        client = self._client(VoiceChannel(tac))
+        resp = client.post(f"/twilio/call-events/{kind}")  # type: ignore[attr-defined]
+        assert resp.status_code == 403
+
+    @pytest.mark.parametrize(
+        ("kind", "form", "attr", "expected"),
+        [
+            ("status", {"CallStatus": "no-answer"}, "call_status", "no-answer"),
+            ("amd", {"AnsweredBy": "machine_start"}, "answered_by", "machine_start"),
+            ("recording", {"RecordingStatus": "completed"}, "recording_status", "completed"),
+        ],
+    )
+    def test_route_dispatches_to_its_own_handler(
+        self, kind: str, form: dict[str, str], attr: str, expected: str
+    ) -> None:
+        """Pins each route to its own handler, not all three to one."""
+        from tac.channels.voice import VoiceChannel
+
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+        received: dict[str, list[object]] = {"status": [], "amd": [], "recording": []}
+
+        async def status_handler(event: object) -> None:
+            received["status"].append(event)
+
+        async def amd_handler(event: object) -> None:
+            received["amd"].append(event)
+
+        async def recording_handler(event: object) -> None:
+            received["recording"].append(event)
+
+        channel.on_call_status(status_handler)
+        channel.on_amd(amd_handler)
+        channel.on_recording(recording_handler)
+
+        client = self._client(channel)
+        path = f"/twilio/call-events/{kind}"
+        form_data = {"CallSid": "CA1", "AccountSid": "ACtest123", **form}
+        resp = client.post(  # type: ignore[attr-defined]
+            path,
+            data=form_data,
+            headers={
+                "X-Twilio-Signature": compute_signature(f"http://testserver{path}", form_data)
+            },
+        )
+
+        assert resp.status_code == 200
+        assert len(received[kind]) == 1
+        assert getattr(received[kind][0], attr) == expected
+        # Only the matching handler fired.
+        assert all(not v for k, v in received.items() if k != kind)
+
+    def test_returns_200_with_no_handler_registered(self) -> None:
+        """Routes register unconditionally, so a stale config no-ops instead of 404ing."""
+        from tac.channels.voice import VoiceChannel
+
+        tac = TAC(get_test_config())
+        client = self._client(VoiceChannel(tac))
+        form_data = {"CallSid": "CA1", "CallStatus": "completed"}
+        path = "/twilio/call-events/status"
+        resp = client.post(  # type: ignore[attr-defined]
+            path,
+            data=form_data,
+            headers={
+                "X-Twilio-Signature": compute_signature(f"http://testserver{path}", form_data)
+            },
+        )
+        assert resp.status_code == 200
+
+    def test_returns_400_when_handler_raises(self) -> None:
+        from tac.channels.voice import VoiceChannel
+
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+
+        async def boom(event: object) -> None:
+            raise RuntimeError("handler exploded")
+
+        channel.on_amd(boom)
+        client = self._client(channel)
+        form_data = {"CallSid": "CA1", "AnsweredBy": "human"}
+        path = "/twilio/call-events/amd"
+        resp = client.post(  # type: ignore[attr-defined]
+            path,
+            data=form_data,
+            headers={
+                "X-Twilio-Signature": compute_signature(f"http://testserver{path}", form_data)
+            },
+        )
+        assert resp.status_code == 400
+
+    def test_returns_400_when_call_sid_is_missing(self) -> None:
+        """Better a 400 than handing the handler an empty SID to act on."""
+        from tac.channels.voice import VoiceChannel
+
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+        received = []
+
+        async def handler(event: object) -> None:
+            received.append(event)
+
+        channel.on_amd(handler)
+        client = self._client(channel)
+        form_data = {"AnsweredBy": "machine_start"}
+        path = "/twilio/call-events/amd"
+        resp = client.post(  # type: ignore[attr-defined]
+            path,
+            data=form_data,
+            headers={
+                "X-Twilio-Signature": compute_signature(f"http://testserver{path}", form_data)
+            },
+        )
+
+        assert resp.status_code == 400
+        assert received == []
+
 
 class TestWebSocketDisconnectError:
     """Test WebSocketDisconnectError."""

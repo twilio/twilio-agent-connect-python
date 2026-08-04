@@ -36,7 +36,7 @@ class TestInterruptCallbacks:
 
         tac.on_interrupt(sync_handler)
 
-        context = ConversationSession(conversation_id="conv123", channel="voice")
+        context = ConversationSession(conversation_id="conv123", channel="VOICE")
         interrupt = InterruptMessage(
             type="interrupt",
             utteranceUntilInterrupt="Hello",
@@ -75,7 +75,7 @@ class TestInterruptCallbacks:
 
         tac.on_interrupt(callback_returning_task)
 
-        context = ConversationSession(conversation_id="conv456", channel="voice")
+        context = ConversationSession(conversation_id="conv456", channel="VOICE")
         interrupt = InterruptMessage(
             type="interrupt",
             utteranceUntilInterrupt="Test",
@@ -107,7 +107,7 @@ class TestInterruptCallbacks:
 
         tac.on_interrupt(async_handler)
 
-        context = ConversationSession(conversation_id="conv789", channel="voice")
+        context = ConversationSession(conversation_id="conv789", channel="VOICE")
         interrupt = InterruptMessage(
             type="interrupt",
             utteranceUntilInterrupt="Test",
@@ -139,7 +139,7 @@ class TestInterruptCallbacks:
 
         tac.on_interrupt(async_handler)
 
-        context = ConversationSession(conversation_id="conv999", channel="voice")
+        context = ConversationSession(conversation_id="conv999", channel="VOICE")
         interrupt = InterruptMessage(
             type="interrupt",
             utteranceUntilInterrupt="Test",
@@ -166,7 +166,7 @@ class TestInterruptCallbacks:
         tac = TAC(get_test_config())
 
         # Don't register any callback
-        context = ConversationSession(conversation_id="conv_no_cb", channel="voice")
+        context = ConversationSession(conversation_id="conv_no_cb", channel="VOICE")
         interrupt = InterruptMessage(
             type="interrupt",
             utteranceUntilInterrupt="Test",
@@ -186,7 +186,7 @@ class TestInterruptCallbacks:
 
         tac.on_interrupt(failing_handler)
 
-        context = ConversationSession(conversation_id="conv_fail", channel="voice")
+        context = ConversationSession(conversation_id="conv_fail", channel="VOICE")
         interrupt = InterruptMessage(
             type="interrupt",
             utteranceUntilInterrupt="Test",
@@ -212,7 +212,7 @@ class TestInterruptCallbacks:
 
         tac.on_interrupt(failing_async_handler)
 
-        context = ConversationSession(conversation_id="conv_async_fail", channel="voice")
+        context = ConversationSession(conversation_id="conv_async_fail", channel="VOICE")
         interrupt = InterruptMessage(
             type="interrupt",
             utteranceUntilInterrupt="Test",
@@ -257,7 +257,7 @@ class TestInterruptCallbacks:
 
         tac.on_interrupt(callback_returning_future)
 
-        context = ConversationSession(conversation_id="conv_future", channel="voice")
+        context = ConversationSession(conversation_id="conv_future", channel="VOICE")
         interrupt = InterruptMessage(
             type="interrupt",
             utteranceUntilInterrupt="Test",
@@ -294,7 +294,7 @@ class TestInterruptCallbacks:
         wrapped_handler = partial(async_handler_with_extra_arg, "test_extra")
         tac.on_interrupt(wrapped_handler)
 
-        context = ConversationSession(conversation_id="conv_wrapped", channel="voice")
+        context = ConversationSession(conversation_id="conv_wrapped", channel="VOICE")
         interrupt = InterruptMessage(
             type="interrupt",
             utteranceUntilInterrupt="Test",

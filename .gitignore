@@ -113,6 +113,10 @@ celerybeat.pid
 
 # Environments
 .env
+.env.*
+*.env
+.*env
+!.env.example
 .mcp.json
 .venv
 env/

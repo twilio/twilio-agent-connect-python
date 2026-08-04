@@ -2,8 +2,15 @@
 
 import os
 import re
+from typing import Literal, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+CallEventKind = Literal["status", "amd", "recording"]
+"""The three Twilio call callbacks TAC serves, one route per kind."""
+
+CALL_EVENT_KINDS: tuple[CallEventKind, ...] = get_args(CallEventKind)
+"""Iterable form of :data:`CallEventKind`, for registering every route."""
 
 
 class ConversationIntelligenceConfig(BaseModel):
@@ -302,6 +309,28 @@ class TACConfig(BaseModel):
         "cleanup callback.",
     )
 
+    voice_call_event_path: str = Field(
+        default="/twilio/call-events",
+        description="Base path for the call-event callbacks (status, async AMD, "
+        "recording). TACFastAPIServer registers one route per callback under it — "
+        "<base>/status, <base>/amd, <base>/recording — so the route identifies the "
+        "event. Same role as voice_action_path.",
+    )
+
+    def call_event_path(self, kind: CallEventKind) -> str:
+        """Path a call-event callback is served at.
+
+        Single source of truth: the channel builds callback URLs from this and
+        TACFastAPIServer registers routes at it, so the two can't drift.
+        """
+        return f"{self.voice_call_event_path.rstrip('/')}/{kind}"
+
+    def call_event_url(self, kind: CallEventKind) -> str | None:
+        """Public URL for a call-event callback, or None without a public domain."""
+        if not self.voice_public_domain:
+            return None
+        return f"https://{self.voice_public_domain}{self.call_event_path(kind)}"
+
     @field_validator("voice_public_domain", mode="before")
     @classmethod
     def _normalize_voice_public_domain(cls, v: str | None) -> str | None:
@@ -426,6 +455,9 @@ class TACConfig(BaseModel):
             voice_websocket_path=os.environ.get("TWILIO_VOICE_WEBSOCKET_PATH", "/ws"),
             voice_action_path=os.environ.get(
                 "TWILIO_VOICE_ACTION_PATH", "/conversation-relay-callback"
+            ),
+            voice_call_event_path=os.environ.get(
+                "TWILIO_VOICE_CALL_EVENT_PATH", "/twilio/call-events"
             ),
             memory_config=memory_config,
             conversation_intelligence_config=conversation_intelligence_config,

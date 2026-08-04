@@ -118,7 +118,7 @@ def rcs_channel(mock_tac: TAC) -> RCSChannel:
 async def test_rcs_channel_initialization(mock_tac: TAC) -> None:
     """Test RCS channel initialization succeeds with rcs_sender_id in TAC config."""
     channel = RCSChannel(mock_tac)
-    assert channel.get_channel_name() == "rcs"
+    assert channel.get_channel_name() == "RCS"
 
 
 @pytest.mark.asyncio
@@ -126,8 +126,7 @@ async def test_rcs_channel_initialization_with_config(mock_tac: TAC) -> None:
     """Test RCS channel initialization with explicit config."""
     config = RCSChannelConfig()
     channel = RCSChannel(mock_tac, config=config)
-    assert channel.get_channel_name() == "rcs"
-    assert channel.get_channel_type_upper() == "RCS"
+    assert channel.get_channel_name() == "RCS"
 
 
 @pytest.mark.asyncio

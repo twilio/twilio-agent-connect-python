@@ -88,8 +88,7 @@ class TestChatChannel:
         tac = TAC(get_test_config())
         channel = ChatChannel(tac)
         assert channel.agent_address == "ai-assistant"
-        assert channel.get_channel_name() == "chat"
-        assert channel.get_channel_type_upper() == "CHAT"
+        assert channel.get_channel_name() == "CHAT"
 
     def test_initialization_custom_agent_address(self) -> None:
         tac = TAC(get_test_config())
@@ -233,7 +232,7 @@ class TestChatChannel:
         channel = ChatChannel(tac)
 
         channel._conversations["CH123"] = ConversationSession(
-            conversation_id="CH123", channel="chat", profile_id="profile_123"
+            conversation_id="CH123", channel="CHAT", profile_id="profile_123"
         )
 
         await channel.process_webhook(
@@ -250,7 +249,7 @@ class TestChatChannel:
         tac.on_conversation_ended(lambda ctx: captured.append(ctx))
 
         channel._conversations["CH123"] = ConversationSession(
-            conversation_id="CH123", channel="chat", profile_id="profile_123"
+            conversation_id="CH123", channel="CHAT", profile_id="profile_123"
         )
         await channel.process_webhook(
             create_conversation_updated_webhook("CH123", "CLOSED", "2025-11-18T00:10:00.000Z")
@@ -258,7 +257,7 @@ class TestChatChannel:
 
         assert len(captured) == 1
         assert captured[0].conversation_id == "CH123"
-        assert captured[0].channel == "chat"
+        assert captured[0].channel == "CHAT"
 
     @pytest.mark.asyncio
     async def test_send_response_uses_stashed_ids(self) -> None:
@@ -269,7 +268,7 @@ class TestChatChannel:
         # Session is pre-populated as if reconcile (or outbound initiation) ran.
         channel._conversations["CH123"] = ConversationSession(
             conversation_id="CH123",
-            channel="chat",
+            channel="CHAT",
             author_info=AuthorInfo(address="user@example.com", participant_id="PA_USER"),
             ai_agent_info=AuthorInfo(address="ai-assistant", participant_id="PA_AGENT"),
             metadata={"channel_id": "CH_CHAT_SID_123"},
@@ -309,7 +308,7 @@ class TestChatChannel:
 
         channel._conversations["CH123"] = ConversationSession(
             conversation_id="CH123",
-            channel="chat",
+            channel="CHAT",
             author_info=AuthorInfo(address="user@example.com", participant_id="PA_USER"),
             ai_agent_info=AuthorInfo(address="ai-assistant", participant_id="PA_AGENT"),
             metadata={},  # No channel_id
@@ -329,7 +328,7 @@ class TestChatChannel:
 
         channel._conversations["CH123"] = ConversationSession(
             conversation_id="CH123",
-            channel="chat",
+            channel="CHAT",
             author_info=AuthorInfo(address="user@example.com", participant_id="PA_USER"),
             # ai_agent_info is intentionally missing
             metadata={"channel_id": "CH_CHAT_SID_123"},
@@ -420,7 +419,7 @@ class TestChatChannel:
         # Pre-seed session with profile_id so retrieve_memory skips the
         # lookup_profile fallback path.
         channel._conversations["CH123"] = ConversationSession(
-            conversation_id="CH123", channel="chat", profile_id="profile_test_123"
+            conversation_id="CH123", channel="CHAT", profile_id="profile_test_123"
         )
         tac.conversation_memory_client.get_profile = AsyncMock(
             side_effect=Exception("skip profile")

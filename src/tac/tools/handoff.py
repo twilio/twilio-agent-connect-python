@@ -179,7 +179,7 @@ async def _handoff_impl(
         )
 
     # 3. Deliver handoff payload.
-    if channel == "voice":
+    if channel == "VOICE":
         # Voice: store on session for deferred delivery. The voice channel
         # sends the WS "end" message after the LLM's final response so the
         # caller hears a goodbye before transfer.

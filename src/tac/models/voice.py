@@ -1,6 +1,6 @@
 """Pydantic models for Twilio ConversationRelay Voice WebSocket messages."""
 
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal, TypeVar
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -132,6 +132,109 @@ class ConversationRelayCallbackPayload(BaseModel):
     )
 
     model_config = {"populate_by_name": True}
+
+
+_CallEventT = TypeVar("_CallEventT", bound="_CallEventBase")
+
+
+class _CallEventBase(BaseModel):
+    """Shared base for the three Twilio call-webhook events.
+
+    Twilio posts to three independent callback URLs; TAC serves one route each
+    and parses them into separate typed events, registered via
+    ``VoiceChannel.on_call_status`` / ``on_amd`` / ``on_recording``.
+
+    ``call_sid`` is the correlation key across every surface — it matches
+    ``ConversationSession.call_sid`` and the SID from
+    ``initiate_outbound_conversation``. It's required: every real call webhook
+    carries one, and defaulting it would hand handlers an empty SID to act on
+    (``end_call("")`` is a Twilio 404). Missing or blank raises, which the route
+    turns into a 400.
+    """
+
+    call_sid: str = Field(..., alias="CallSid", min_length=1)
+    account_sid: str | None = Field(None, alias="AccountSid")
+    extra: dict[str, str] = Field(
+        default_factory=dict,
+        description="Any other Twilio webhook fields not surfaced above.",
+    )
+
+    model_config = {"populate_by_name": True, "extra": "ignore"}
+
+    @classmethod
+    def from_form(cls: type[_CallEventT], form: dict[str, str]) -> _CallEventT:
+        """Build an event from a Twilio webhook form, unknown keys into ``extra``."""
+        known_aliases = {f.alias for f in cls.model_fields.values() if f.alias}
+        known: dict[str, str] = {}
+        extra: dict[str, str] = {}
+        for key, value in form.items():
+            if key in known_aliases:
+                known[key] = value
+            else:
+                extra[key] = value
+        return cls(extra=extra, **known)
+
+
+class CallStatusEvent(_CallEventBase):
+    """A Twilio ``status_callback`` — call progress and disposition.
+
+    By default Twilio sends only the terminal event, which covers every
+    disposition (``completed`` / ``busy`` / ``no-answer`` / ``failed`` /
+    ``canceled``); set ``CallOptions.status_callback_event`` for the intermediate
+    ones. Register via ``VoiceChannel.on_call_status``.
+    """
+
+    call_status: str | None = Field(None, alias="CallStatus")
+    call_duration: str | None = Field(None, alias="CallDuration")
+    sip_response_code: str | None = Field(None, alias="SipResponseCode")
+
+    UNREACHED_STATUSES: ClassVar[frozenset[str]] = frozenset(
+        {"busy", "no-answer", "failed", "canceled"}
+    )
+
+    @property
+    def is_unreached(self) -> bool:
+        """Call ended without reaching the callee — i.e. worth a retry."""
+        return (self.call_status or "") in self.UNREACHED_STATUSES
+
+
+class AmdEvent(_CallEventBase):
+    """A Twilio ``async_amd_status_callback`` — answering machine detection.
+
+    Fires at most once per call, and only when the call set both
+    ``CallOptions.machine_detection`` and ``async_amd``.
+
+    ``answered_by`` is mode-dependent — ``machine_start`` under ``"Enable"``,
+    ``machine_end_beep`` / ``machine_end_silence`` / ``machine_end_other`` under
+    ``"DetectMessageEnd"``, plus ``human`` / ``fax`` / ``unknown`` in both. Use
+    :attr:`is_machine` rather than matching those yourself. Register via
+    ``VoiceChannel.on_amd``.
+    """
+
+    answered_by: str | None = Field(None, alias="AnsweredBy")
+    machine_detection_duration: str | None = Field(None, alias="MachineDetectionDuration")
+
+    @property
+    def is_machine(self) -> bool:
+        """A machine answered — any ``machine_*`` value, either mode.
+
+        ``unknown`` (detection timed out) is False, so a call is never hung up on
+        a guess.
+        """
+        return (self.answered_by or "").startswith("machine")
+
+
+class RecordingEvent(_CallEventBase):
+    """A Twilio ``recording_status_callback`` — a recording became available.
+
+    Fires when the recording is ready (``recording_url`` accessible), only when
+    recording is enabled. Register via ``VoiceChannel.on_recording``.
+    """
+
+    recording_sid: str | None = Field(None, alias="RecordingSid")
+    recording_url: str | None = Field(None, alias="RecordingUrl")
+    recording_status: str | None = Field(None, alias="RecordingStatus")
+    recording_duration: str | None = Field(None, alias="RecordingDuration")
 
 
 class LanguageConfig(BaseModel):

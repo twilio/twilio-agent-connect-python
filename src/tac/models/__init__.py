@@ -40,6 +40,7 @@ from tac.models.memory import (
     SummaryInfo,
 )
 from tac.models.outbound import (
+    CallOptions,
     InitiateChatConversationOptions,
     InitiateConversationResult,
     InitiateMessagingConversationOptions,
@@ -54,7 +55,7 @@ from tac.models.tac import (
     TACCommunicationContent,
     TACMemoryResponse,
 )
-from tac.models.voice import TwiMLOptions
+from tac.models.voice import AmdEvent, CallStatusEvent, RecordingEvent, TwiMLOptions
 
 # Rebuild ConversationSession after importing TACMemoryResponse so Pydantic can
 # resolve the forward reference used by ConversationSession. The session model
@@ -70,7 +71,10 @@ __all__ = [
     "ActionParticipantRef",
     "ActionResponse",
     "ActionTextContent",
+    "AmdEvent",
     "AuthorInfo",
+    "CallOptions",
+    "CallStatusEvent",
     "Communication",
     "CommunicationContent",
     "CommunicationParticipant",
@@ -105,6 +109,7 @@ __all__ = [
     "ParticipantRequest",
     "ParticipantResponse",
     "ProfileResponse",
+    "RecordingEvent",
     "SendMessageActionPayload",
     "SendMessageActionRequest",
     "SummaryInfo",

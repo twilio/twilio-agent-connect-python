@@ -10,10 +10,16 @@ permissions:
   id-token: write
   contents: read
 
-env:
-  ARTIFACTORY_URL: ${{ vars.ARTIFACTORY_URL }}
-
 jobs:
+  lockfile-hygiene:
+    name: Lockfile Hygiene
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || 'ubuntu-x64' }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+
+      - name: Scan uv.lock + clean-room public install
+        uses: twilio/sdk-actions/uv-lockfile-hygiene@26f95a54e57993c1bf3b26bec2905f395814c23a # v1.0.0
+
   lint:
     name: Linting
     runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || 'ubuntu-x64' }}
@@ -22,7 +28,9 @@ jobs:
 
       - name: Authenticate with Artifactory
         if: ${{ !github.event.pull_request.head.repo.fork }}
-        uses: ./.github/actions/artifactory-oidc
+        uses: twilio/sdk-actions/artifactory-oidc@26f95a54e57993c1bf3b26bec2905f395814c23a # v1.0.0
+        with:
+          ecosystem: python
 
       - name: Install uv
         uses: astral-sh/setup-uv@0c5e2b8115b80b4c7c5ddf6ffdd634974642d182 # v5
@@ -68,7 +76,9 @@ jobs:
 
       - name: Authenticate with Artifactory
         if: ${{ !github.event.pull_request.head.repo.fork }}
-        uses: ./.github/actions/artifactory-oidc
+        uses: twilio/sdk-actions/artifactory-oidc@26f95a54e57993c1bf3b26bec2905f395814c23a # v1.0.0
+        with:
+          ecosystem: python
 
       - name: Install uv
         uses: astral-sh/setup-uv@0c5e2b8115b80b4c7c5ddf6ffdd634974642d182 # v5
@@ -111,7 +121,9 @@ jobs:
 
       - name: Authenticate with Artifactory
         if: ${{ !github.event.pull_request.head.repo.fork }}
-        uses: ./.github/actions/artifactory-oidc
+        uses: twilio/sdk-actions/artifactory-oidc@26f95a54e57993c1bf3b26bec2905f395814c23a # v1.0.0
+        with:
+          ecosystem: python
 
       - name: Install uv
         uses: astral-sh/setup-uv@0c5e2b8115b80b4c7c5ddf6ffdd634974642d182 # v5
@@ -142,7 +154,9 @@ jobs:
 
       - name: Authenticate with Artifactory
         if: ${{ !github.event.pull_request.head.repo.fork }}
-        uses: ./.github/actions/artifactory-oidc
+        uses: twilio/sdk-actions/artifactory-oidc@26f95a54e57993c1bf3b26bec2905f395814c23a # v1.0.0
+        with:
+          ecosystem: python
 
       - name: Install uv
         uses: astral-sh/setup-uv@0c5e2b8115b80b4c7c5ddf6ffdd634974642d182 # v5
@@ -174,13 +188,14 @@ jobs:
 
   all-checks:
     name: All Checks Passed
-    needs: [lint, type-check, test, build]
+    needs: [lockfile-hygiene, lint, type-check, test, build]
     runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || 'ubuntu-x64' }}
     if: always()
     steps:
       - name: Check all job statuses
         run: |
-          if [ "${{ needs.lint.result }}" != "success" ] || \
+          if [ "${{ needs['lockfile-hygiene'].result }}" != "success" ] || \
+             [ "${{ needs.lint.result }}" != "success" ] || \
              [ "${{ needs['type-check'].result }}" != "success" ] || \
              [ "${{ needs.test.result }}" != "success" ] || \
              [ "${{ needs.build.result }}" != "success" ]; then

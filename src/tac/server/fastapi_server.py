@@ -10,10 +10,12 @@ Requires: pip install tac[server]
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
 from tac.channels.base import BaseChannel
 from tac.channels.websocket_protocol import WebSocketDisconnectError
+from tac.core.config import CALL_EVENT_KINDS
 from tac.core.logging import get_logger
 from tac.core.tac import TAC
 from tac.models.voice import TwiMLRequest
@@ -125,10 +127,9 @@ class TACFastAPIServer:
         self._register_routes(self.app)
 
     def _validate_voice_url_config(self) -> None:
-        """Fail fast at server construction if the voice channel can't build a
-        WebSocket URL.
+        """Fail fast at server construction on voice URL misconfiguration.
 
-        Without this check, the misconfiguration would only surface on the
+        Without these checks, the misconfiguration would only surface on the
         first inbound call as a 500 — an easy thing to miss in CI or smoke
         tests that don't hit voice. Failing here means the server doesn't
         start at all if the voice channel isn't wired up.
@@ -138,12 +139,49 @@ class TACFastAPIServer:
         can't know what URL plumbing they're doing outside this server.
         """
         assert self.voice_channel is not None  # checked by caller
-        if self.tac.config.voice_public_domain:
-            return
-        raise ValueError(
-            "Voice channel is configured but TACConfig.voice_public_domain is "
-            "not set. Set it directly or via the TWILIO_VOICE_PUBLIC_DOMAIN env var."
-        )
+        if not self.tac.config.voice_public_domain:
+            raise ValueError(
+                "Voice channel is configured but TACConfig.voice_public_domain is "
+                "not set. Set it directly or via the TWILIO_VOICE_PUBLIC_DOMAIN env var."
+            )
+        self._validate_call_event_paths()
+
+    def _validate_call_event_paths(self) -> None:
+        """Validate ``voice_call_event_path``, the one path that isn't literal.
+
+        Every other TAC path registers as configured, so a bad value is visible.
+        This one expands into three sub-paths, hiding two mistakes: a missing
+        leading slash (``"hooks/calls"`` → ``https://example.comhooks/...``), and
+        a sub-path colliding with another route while the base looks unrelated
+        (base ``/hooks`` vs ``twiml_path="/hooks/status"``).
+        """
+        cfg = self.tac.config
+        if not cfg.voice_call_event_path.startswith("/"):
+            raise ValueError(
+                f"voice_call_event_path must start with '/', got {cfg.voice_call_event_path!r}."
+            )
+
+        others = {
+            self.config.twiml_path.rstrip("/"): "TACServerConfig.twiml_path",
+            cfg.voice_action_path.rstrip("/"): "voice_action_path",
+            self.config.conversation_webhook_path.rstrip(
+                "/"
+            ): "TACServerConfig.conversation_webhook_path",
+        }
+        if self.config.cintel_webhook_path is not None:
+            others[self.config.cintel_webhook_path.rstrip("/")] = (
+                "TACServerConfig.cintel_webhook_path"
+            )
+
+        for kind in CALL_EVENT_KINDS:
+            path = cfg.call_event_path(kind)
+            clash = others.get(path.rstrip("/"))
+            if clash is not None:
+                raise ValueError(
+                    f"voice_call_event_path expands to {path!r}, which collides with "
+                    f"{clash}. Both would register as POST routes and requests would "
+                    "reach the wrong handler."
+                )
 
     def _register_routes(self, app: FastAPI) -> None:
         """Register TAC routes (conversation webhook, voice, CI) onto the given FastAPI app."""
@@ -235,6 +273,47 @@ class TACFastAPIServer:
                     logger.error("Failed to process ConversationRelay callback", exc_info=True)
                     return Response(content="", media_type="text/plain", status_code=400)
                 return Response(content="", media_type="text/plain", status_code=200)
+
+            # One route per Twilio call callback — the route is the
+            # discriminator, so each handler parses its own typed event with no
+            # payload sniffing.
+            async def handle_call_event(
+                request: Request,
+                handler: Callable[[dict[str, str]], Awaitable[None]],
+            ) -> Response:
+                """Parse a Twilio call webhook form and dispatch it to ``handler``."""
+                try:
+                    form_data = await request.form()
+                    payload_dict = {k: v for k, v in form_data.items() if isinstance(v, str)}
+                    await handler(payload_dict)
+                except Exception:
+                    logger.error("Failed to process call event callback", exc_info=True)
+                    return Response(content="", media_type="text/plain", status_code=400)
+                return Response(content="", media_type="text/plain", status_code=200)
+
+            @app.post(
+                self.tac.config.call_event_path("status"),
+                dependencies=[Depends(http_sig)],
+            )
+            async def call_status_callback(request: Request) -> Response:
+                """Handle a Twilio call status callback (progress and disposition)."""
+                return await handle_call_event(request, vc.handle_call_status_event)
+
+            @app.post(
+                self.tac.config.call_event_path("amd"),
+                dependencies=[Depends(http_sig)],
+            )
+            async def call_amd_callback(request: Request) -> Response:
+                """Handle a Twilio async AMD status callback (answering machine detection)."""
+                return await handle_call_event(request, vc.handle_amd_event)
+
+            @app.post(
+                self.tac.config.call_event_path("recording"),
+                dependencies=[Depends(http_sig)],
+            )
+            async def call_recording_callback(request: Request) -> Response:
+                """Handle a Twilio recording status callback."""
+                return await handle_call_event(request, vc.handle_recording_event)
 
         if config.cintel_webhook_path is not None:
             tac = self.tac
