@@ -182,7 +182,8 @@ class OperatorResultProcessor:
         1. Parses the payload into an OperatorResultEvent (Pydantic validates required fields)
         2. Applies filtering logic based on intelligence configuration ID and operator SIDs
         3. Iterates over operator_results array
-        4. For each operator result: extracts profile IDs, generates content
+        4. For each operator result: filters by operator SID, then generates
+           content and extracts profile IDs
         5. Creates conversation summaries in Conversation Memory
 
         Args:
@@ -282,30 +283,10 @@ class OperatorResultProcessor:
         Returns:
             OperatorProcessingResult with status and count
         """
-        # Extract profile IDs from this operator result
-        profile_ids = _extract_profile_ids(operator_result)
-        if not profile_ids:
-            error_msg = f"No profile IDs found in operator result {operator_result.id}"
-            self.logger.error(error_msg)
-            return OperatorProcessingResult(
-                success=False,
-                error=error_msg,
-            )
-
-        # Generate content from result
-        content = _generate_content(operator_result)
-        if not content:
-            error_msg = f"Failed to generate content from operator result {operator_result.id}"
-            self.logger.error(error_msg)
-            return OperatorProcessingResult(
-                success=False,
-                error=error_msg,
-            )
-
-        # Determine event type by operator SID and process
+        # Filter by operator SID first so unrelated operators are skipped rather
+        # than failing the whole event.
         operator_id = operator_result.operator.id if operator_result.operator else None
 
-        # Check if operator matches the configured summary SID.
         if self.config.summary_operator_sid is None:
             # No summary operator configured - nothing to process
             self.logger.debug("Skipping operator - summary operator SID not configured")
@@ -314,15 +295,8 @@ class OperatorResultProcessor:
                 skipped=True,
                 skip_reason="Summary operator SID not configured",
             )
-        elif operator_id == self.config.summary_operator_sid:
-            # Process as summary (SID match)
-            return await self._process_summary_event(
-                event=event,
-                operator_result=operator_result,
-                content=content,
-                profile_ids=profile_ids,
-            )
-        else:
+
+        if operator_id != self.config.summary_operator_sid:
             # Configured summary SID doesn't match this operator - skip
             self.logger.debug(
                 f"Skipping operator - SID {operator_id} doesn't match "
@@ -333,6 +307,33 @@ class OperatorResultProcessor:
                 skipped=True,
                 skip_reason="Operator SID mismatch",
             )
+
+        # Generate content from result
+        content = _generate_content(operator_result)
+        if not content:
+            self.logger.info(f"Skipping operator result {operator_result.id} with empty content")
+            return OperatorProcessingResult(
+                success=True,
+                skipped=True,
+                skip_reason="Operator result has empty content",
+            )
+
+        # Extract profile IDs from this operator result
+        profile_ids = _extract_profile_ids(operator_result)
+        if not profile_ids:
+            self.logger.info(f"No profile IDs found in operator result {operator_result.id}")
+            return OperatorProcessingResult(
+                success=True,
+                skipped=True,
+                skip_reason="No profile IDs found in operator result execution details",
+            )
+
+        return await self._process_summary_event(
+            event=event,
+            operator_result=operator_result,
+            content=content,
+            profile_ids=profile_ids,
+        )
 
     async def _process_summary_event(
         self,

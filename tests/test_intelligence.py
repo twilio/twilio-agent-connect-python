@@ -345,7 +345,7 @@ class TestContentGeneration:
 
 
 class TestContentParsing:
-    """Test content parsing for observations and summaries."""
+    """Test summary content parsing."""
 
     def test_parse_summaries_array_format(self):
         """Test parsing summaries array format."""
@@ -397,15 +397,46 @@ class TestOperatorResultProcessor:
         return OperatorResultProcessor(mock_memory_client, ci_config)
 
     @pytest.mark.asyncio
-    async def test_process_event_requires_profile_ids(self, processor):
-        """Test that profile IDs are required."""
-        payload = make_valid_event()
+    async def test_process_event_skips_when_no_profile_ids(self, processor):
+        """A matching operator result without profile IDs is skipped, not failed."""
+        payload = make_valid_event(
+            operator_friendly_name="Summary Extractor",
+            operator_id=VALID_SUMMARY_OPERATOR_SID,
+            result={"payload": '{"summary": "Test summary"}'},
+        )
         # executionDetails is now nested inside operatorResults
         payload["operatorResults"][0]["executionDetails"]["participants"] = []
         result = await processor.process_event(payload)
 
-        assert result.success is False
-        assert "No profile IDs" in result.error
+        assert result.success is True
+        assert result.skipped is True
+        assert "No profile IDs found" in result.skip_reason
+
+    @pytest.mark.asyncio
+    async def test_process_event_skips_when_content_empty(self, processor):
+        """A matching operator result with empty content is skipped, not failed."""
+        payload = make_valid_event(
+            operator_friendly_name="Summary Extractor",
+            operator_id=VALID_SUMMARY_OPERATOR_SID,
+            result={"payload": ""},
+        )
+        result = await processor.process_event(payload)
+
+        assert result.success is True
+        assert result.skipped is True
+        assert "empty content" in result.skip_reason
+
+    @pytest.mark.asyncio
+    async def test_non_summary_operator_does_not_fail_event(self, processor, mock_memory_client):
+        """A non-summary operator result skips even when it has no profile IDs."""
+        payload = make_valid_event()
+        payload["operatorResults"][0]["executionDetails"]["participants"] = []
+        result = await processor.process_event(payload)
+
+        assert result.success is True
+        assert result.skipped is True
+        assert "Operator SID mismatch" in result.skip_reason
+        mock_memory_client.create_conversation_summaries.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_observation_operator_event_no_longer_creates_observations(
