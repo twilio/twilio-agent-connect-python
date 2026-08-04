@@ -339,6 +339,55 @@ class MemoryClient(BaseAPIClient):
             raise ValueError(f"CreateProfile response missing 'id' field: {data!r}")
         return profile_id
 
+    async def list_observations(
+        self,
+        profile_id: str,
+        limit: int = 500,
+    ) -> MemoryRetrievalResponse:
+        """
+        Fetch all observations for a profile via the List Observations API.
+
+        Unlike the Recall API, this does no semantic search — it returns all observations
+        up to `limit`. Ideal for voice calls where you want to fetch the full profile
+        once at call start and cache it for the duration.
+
+        Args:
+            profile_id: Profile ID (TTID format)
+            limit: Max observations to return (default 500)
+
+        Returns:
+            MemoryRetrievalResponse populated with observations.
+            Returns empty MemoryRetrievalResponse() on error.
+        """
+        endpoint = f"/v1/Stores/{self.store_id}/Profiles/{profile_id}/Observations"
+        url = f"{self.base_url}{endpoint}"
+
+        try:
+            async with self._get_client() as client:
+                response = await client.get(url, params={"limit": limit})
+                response.raise_for_status()
+                data = response.json()
+                observations = data.get("observations", [])
+                return MemoryRetrievalResponse(observations=observations)
+
+        except httpx.HTTPError as e:
+            response_text = (
+                getattr(e.response, "text", "No response body")
+                if hasattr(e, "response")
+                else "No response"
+            )
+            self.logger.error(
+                f"Failed to list observations from Conversation Memory: {e}\n"
+                f"URL: {url}\n"
+                f"Profile ID: {profile_id}\n"
+                f"Response: {response_text}"
+            )
+            return MemoryRetrievalResponse()
+
+        except Exception as e:
+            self.logger.error(f"Failed to parse list observations response: {e}")
+            return MemoryRetrievalResponse()
+
     async def create_observation(
         self,
         profile_id: str,
@@ -366,14 +415,13 @@ class MemoryClient(BaseAPIClient):
         endpoint = f"/v1/Stores/{self.store_id}/Profiles/{profile_id}/Observations"
         url = f"{self.base_url}{endpoint}"
 
-        payload: dict[str, Any] = {
-            "content": content,
-            "source": source,
-        }
+        observation: dict[str, Any] = {"content": content, "source": source}
         if conversation_ids:
-            payload["conversationIds"] = conversation_ids
+            observation["conversationIds"] = conversation_ids
         if occurred_at:
-            payload["occurredAt"] = occurred_at
+            observation["occurredAt"] = occurred_at
+
+        payload: dict[str, Any] = {"observations": [observation]}
 
         try:
             async with self._get_client() as client:

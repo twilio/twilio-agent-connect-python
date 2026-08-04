@@ -329,9 +329,13 @@ class BaseChannel(ABC):
                     )
                     memory_response = session.cached_memory
                 else:
-                    # First retrieval - use empty query and cache result
+                    # First retrieval - use List Observations API to fetch all observations
+                    # once and cache for the call. Avoids per-turn semantic search overhead
+                    # (~750ms) and enables prefix caching since the memory block is static.
+                    # Control how many observations are fetched via TWILIO_MEMORY_OBSERVATIONS_LIMIT
+                    # (default 20, max 500). Example: TWILIO_MEMORY_OBSERVATIONS_LIMIT=500
                     try:
-                        memory_response = await self.tac.retrieve_memory(session, query=None)
+                        memory_response = await self.tac.list_observations(session)
                         session.cached_memory = memory_response
                         self.logger.debug(
                             "Memory retrieved and cached",

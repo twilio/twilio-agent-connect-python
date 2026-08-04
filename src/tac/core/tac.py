@@ -229,6 +229,62 @@ class TAC:
             )
             return TACMemoryResponse(communications)
 
+    async def list_observations(
+        self,
+        conversation_context: ConversationSession,
+    ) -> TACMemoryResponse:
+        """Fetch all observations for a profile via the List Observations API.
+
+        Unlike retrieve_memory (Recall API), this fetches the full observation set without
+        semantic search. Used by memory_mode="once" — fetch everything once at call start,
+        cache for the duration. Enables prefix caching since the memory block never changes
+        between turns.
+
+        Falls back to retrieve_memory if conversation_memory_client is not configured.
+
+        Args:
+            conversation_context: Session containing profile information.
+
+        Returns:
+            Memory response containing all observations.
+        """
+        if self.conversation_memory_client is None:
+            return await self.retrieve_memory(conversation_context)
+
+        try:
+            if not conversation_context.profile_id:
+                self.logger.debug(
+                    "profile_id not found, attempting to lookup profile using address"
+                )
+                if conversation_context.author_info and conversation_context.author_info.address:
+                    address = conversation_context.author_info.address
+                    id_type = "email" if "@" in address else "phone"
+                    lookup_response: ProfileLookupResponse = (
+                        await self.conversation_memory_client.lookup_profile(
+                            id_type=id_type,
+                            value=address,
+                        )
+                    )
+                    if lookup_response.profiles:
+                        conversation_context.profile_id = lookup_response.profiles[0]
+                    else:
+                        self.logger.debug("No profile found, returning empty memory.")
+                        return TACMemoryResponse([])
+                else:
+                    self.logger.debug("No profile_id or address available, returning empty memory.")
+                    return TACMemoryResponse([])
+
+            cfg = self.config.memory_config
+            memory_response = await self.conversation_memory_client.list_observations(
+                profile_id=conversation_context.profile_id,
+                limit=cfg.observations_limit or 500,
+            )
+            return TACMemoryResponse(memory_response)
+
+        except Exception as e:
+            self.logger.warning(f"list_observations failed: {e}. Returning empty memory.")
+            return TACMemoryResponse([])
+
     async def process_cintel_event(
         self,
         payload: dict[str, Any],
