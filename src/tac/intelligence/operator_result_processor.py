@@ -148,10 +148,10 @@ class OperatorResultProcessor:
         processor = OperatorResultProcessor(conversation_memory_client, config)
 
         result = await processor.process_event(webhook_payload)
-        if result.success:
-            print(f"Created {result.created_count} {result.event_type}(s)")
-        elif result.skipped:
+        if result.skipped:
             print(f"Skipped: {result.skip_reason}")
+        elif result.success:
+            print(f"Created {result.created_count} {result.event_type}(s)")
         else:
             print(f"Error: {result.error}")
         ```
