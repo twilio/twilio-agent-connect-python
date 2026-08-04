@@ -3,7 +3,40 @@
 import pytest
 from pydantic import ValidationError
 
-from tac.core.config import TACConfig, TwilioMemoryConfig
+from tac.core.config import ConversationIntelligenceConfig, TACConfig, TwilioMemoryConfig
+
+
+class TestConversationIntelligenceConfigFromEnv:
+    """Test suite for ConversationIntelligenceConfig.from_env() factory method."""
+
+    def test_from_env_without_configuration_id(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test from_env() returns None when no configuration ID is set."""
+        monkeypatch.delenv("CONVERSATION_INTELLIGENCE_CONFIGURATION_ID", raising=False)
+
+        assert ConversationIntelligenceConfig.from_env() is None
+
+    def test_from_env_reads_summary_operator_sid(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test from_env() reads the summary operator SID."""
+        monkeypatch.setenv("CONVERSATION_INTELLIGENCE_CONFIGURATION_ID", "GA123")
+        monkeypatch.setenv("CONVERSATION_INTELLIGENCE_SUMMARY_OPERATOR_SID", "LY123")
+
+        config = ConversationIntelligenceConfig.from_env()
+
+        assert config is not None
+        assert config.summary_operator_sid == "LY123"
+
+    @pytest.mark.parametrize("blank", ["", "   "])
+    def test_from_env_normalizes_blank_summary_operator_sid(
+        self, monkeypatch: pytest.MonkeyPatch, blank: str
+    ) -> None:
+        """Test blank/whitespace summary operator SID is treated as not configured."""
+        monkeypatch.setenv("CONVERSATION_INTELLIGENCE_CONFIGURATION_ID", "GA123")
+        monkeypatch.setenv("CONVERSATION_INTELLIGENCE_SUMMARY_OPERATOR_SID", blank)
+
+        config = ConversationIntelligenceConfig.from_env()
+
+        assert config is not None
+        assert config.summary_operator_sid is None
 
 
 class TestTwilioMemoryConfigFromEnv:

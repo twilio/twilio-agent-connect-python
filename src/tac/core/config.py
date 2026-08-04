@@ -40,15 +40,22 @@ class ConversationIntelligenceConfig(BaseModel):
 
     @classmethod
     def from_env(cls) -> "ConversationIntelligenceConfig | None":
-        """Create ConversationIntelligenceConfig from CONVERSATION_INTELLIGENCE_* env vars."""
+        """Create ConversationIntelligenceConfig from CONVERSATION_INTELLIGENCE_* env vars.
+
+        Blank or whitespace-only operator SIDs are treated as not configured.
+        """
         configuration_id = os.environ.get("CONVERSATION_INTELLIGENCE_CONFIGURATION_ID")
 
         if not configuration_id:
             return None
 
+        summary_operator_sid = os.environ.get("CONVERSATION_INTELLIGENCE_SUMMARY_OPERATOR_SID")
+        if summary_operator_sid is not None and not summary_operator_sid.strip():
+            summary_operator_sid = None
+
         return cls(
             configuration_id=configuration_id,
-            summary_operator_sid=os.environ.get("CONVERSATION_INTELLIGENCE_SUMMARY_OPERATOR_SID"),
+            summary_operator_sid=summary_operator_sid,
         )
 
 
