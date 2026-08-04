@@ -3,7 +3,67 @@
 import logging
 
 from tac.core.logging import ConsoleFormatter, ContextLogger, JSONFormatter
-from tac.utils.redaction import mask_address, mask_email, mask_phone
+from tac.utils.redaction import (
+    mask_address,
+    mask_email,
+    mask_phone,
+    redact_twiml_parameters,
+)
+
+
+class TestRedactTwiMLParameters:
+    """<Parameter> values are arbitrary developer data, so they're masked."""
+
+    def test_masks_parameter_values_keeps_names(self) -> None:
+        twiml = (
+            '<Response><Connect action="https://x/cb">'
+            '<ConversationRelay url="wss://x/ws" welcomeGreeting="Hi">'
+            '<Parameter name="profile_id" value="PR123"/>'
+            '<Parameter name="caller_name" value="Jane Doe"/>'
+            "</ConversationRelay></Connect></Response>"
+        )
+        result = redact_twiml_parameters(twiml)
+
+        assert "PR123" not in result
+        assert "Jane Doe" not in result
+        # Names survive: knowing which parameters were sent is the point.
+        assert 'name="profile_id"' in result
+        assert 'name="caller_name"' in result
+        assert result.count('value="***"') == 2
+
+    def test_leaves_non_parameter_attributes_alone(self) -> None:
+        """The WS/action URLs and greeting are TAC-generated config, not user data."""
+        twiml = (
+            '<Response><Connect action="https://x/cb">'
+            '<ConversationRelay url="wss://x/ws" welcomeGreeting="Hello there"/>'
+            "</Connect></Response>"
+        )
+        assert redact_twiml_parameters(twiml) == twiml
+
+    def test_masks_single_quoted_values(self) -> None:
+        """The Twilio SDK double-quotes, but this takes any string."""
+        result = redact_twiml_parameters("<Parameter name='profile_id' value='PR123'/>")
+
+        assert "PR123" not in result
+        assert "value='***'" in result
+        assert "name='profile_id'" in result
+
+    def test_quote_inside_the_other_quote_style_survives(self) -> None:
+        """A double quote in a single-quoted value must not end the match early."""
+        result = redact_twiml_parameters("""<Parameter name="note" value='say "hi"'/>""")
+
+        assert "hi" not in result
+        assert "value='***'" in result
+
+    def test_handles_empty(self) -> None:
+        assert redact_twiml_parameters(None) == ""
+        assert redact_twiml_parameters("") == ""
+
+    def test_masks_value_containing_special_chars(self) -> None:
+        twiml = '<Parameter name="note" value="a=b&amp;c d"/>'
+        result = redact_twiml_parameters(twiml)
+        assert 'value="***"' in result
+        assert "a=b" not in result
 
 
 class TestMaskPhone:

@@ -5,10 +5,20 @@ from collections.abc import Awaitable, Callable
 from pydantic import BaseModel, Field
 
 from tac.models.memory import MemoryMode
-from tac.models.voice import TwiMLOptions, TwiMLRequest
+from tac.models.outbound import CallOptions
+from tac.models.voice import (
+    AmdEvent,
+    CallStatusEvent,
+    RecordingEvent,
+    TwiMLOptions,
+    TwiMLRequest,
+)
 from tac.session import SessionManager, ThreadSafeSessionManager
 
 InboundCallTwiMLHandler = Callable[[TwiMLRequest], Awaitable[TwiMLOptions]]
+CallStatusHandler = Callable[[CallStatusEvent], Awaitable[None]]
+AmdHandler = Callable[[AmdEvent], Awaitable[None]]
+RecordingHandler = Callable[[RecordingEvent], Awaitable[None]]
 
 
 class VoiceChannelConfig(BaseModel):
@@ -29,6 +39,12 @@ class VoiceChannelConfig(BaseModel):
         2. ``default_twiml_options``                          [optional]
         3. TAC defaults
 
+      Calls-API parameters (``initiate_outbound_conversation``):
+        1. ``InitiateVoiceConversationOptions.call_options`` [optional]
+        2. ``default_call_options``                          [optional]
+        3. Callback URLs derived from ``TACConfig.voice_public_domain`` +
+           ``voice_call_event_path``, for handlers that are registered
+
     All layers merge per-field via Pydantic's ``model_fields_set`` — only
     fields a layer explicitly sets override lower layers. Lists (``languages``)
     and nested models (``custom_parameters``) replace wholesale when set.
@@ -47,6 +63,10 @@ class VoiceChannelConfig(BaseModel):
             ``<ConversationRelay>`` — voice, language, transcription provider,
             welcome_greeting, ``<Language>`` children, etc. Use this when the
             same ConversationRelay configuration is correct for every call.
+        default_call_options: Static ``CallOptions`` applied to every outbound
+            call — the ``calls.create`` parameters, including the call-event
+            callback URLs. This is the layer to use for a custom server or
+            non-default routes.
 
     Per-call inbound customization is registered via
     ``VoiceChannel.on_inbound_call_twiml(...)`` (not on this config).
@@ -72,4 +92,12 @@ class VoiceChannelConfig(BaseModel):
         "customization is registered via VoiceChannel.on_inbound_call_twiml(...). "
         "Note: ``custom_parameters`` and ``languages`` replace wholesale when a "
         "higher-priority layer sets them — see VoiceChannel._overlay_fields.",
+    )
+    default_call_options: CallOptions | None = Field(
+        default=None,
+        description="Static CallOptions applied to every outbound call — AMD, "
+        "recording, timeout, and the call-event callback URLs. Set the URLs here "
+        "when TAC isn't serving the routes (custom server) or they're at "
+        "non-default paths; they override the URLs TAC would derive from "
+        "voice_public_domain + voice_call_event_path.",
     )

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -13,23 +13,37 @@ from pydantic import ValidationError
 from tac.channels.base import BaseChannel
 from tac.channels.websocket_manager import WebSocketManager
 from tac.channels.websocket_protocol import WebSocketDisconnectError, WebSocketProtocol
+from tac.core.config import CallEventKind
 from tac.core.tac import TAC
-from tac.models.outbound import InitiateVoiceConversationOptions, InitiateVoiceConversationResult
-from tac.models.session import AuthorInfo
+from tac.models.outbound import (
+    CallOptions,
+    InitiateVoiceConversationOptions,
+    InitiateVoiceConversationResult,
+)
+from tac.models.session import AuthorInfo, ConversationSession
 from tac.models.voice import (
+    AmdEvent,
+    CallStatusEvent,
     ConversationRelayCallbackPayload,
     InterruptMessage,
     PromptMessage,
+    RecordingEvent,
     SetupMessage,
     TwiMLOptions,
     TwiMLRequest,
 )
 from tac.session import SessionState
 from tac.tools.handoff import studio_voice_handoff_url
-from tac.utils.redaction import mask_phone
+from tac.utils.redaction import mask_phone, redact_twiml_parameters
 
 from . import twiml
-from .config import InboundCallTwiMLHandler, VoiceChannelConfig
+from .config import (
+    AmdHandler,
+    CallStatusHandler,
+    InboundCallTwiMLHandler,
+    RecordingHandler,
+    VoiceChannelConfig,
+)
 
 _POLL_ATTEMPTS = 5
 _POLL_BASE_DELAY = 0.25
@@ -80,6 +94,9 @@ class VoiceChannel(BaseChannel):
         self.config = config
         self.session_manager = config.session_manager
         self._on_inbound_call_twiml: InboundCallTwiMLHandler | None = None
+        self._on_call_status: CallStatusHandler | None = None
+        self._on_amd: AmdHandler | None = None
+        self._on_recording: RecordingHandler | None = None
         self._websocket_manager = WebSocketManager()
         self._twilio_client: Client | None = None
 
@@ -107,6 +124,76 @@ class VoiceChannel(BaseChannel):
         ``InitiateVoiceConversationOptions.twiml_options`` directly.
         """
         self._on_inbound_call_twiml = callback
+
+    def on_call_status(self, callback: CallStatusHandler) -> None:
+        """Register a handler for Twilio ``status_callback`` webhooks.
+
+        This is the Calls-API status callback (call disposition), not the
+        ConversationRelay session callback — see
+        :meth:`handle_conversation_relay_callback`.
+
+        Registering does two things: it stores the handler, and it makes later
+        outbound calls pass ``status_callback`` to ``calls.create``. With no
+        handler registered TAC omits that parameter, so Twilio has nowhere to
+        post and the event never arrives.
+
+        Twilio reports only the terminal event by default, which covers every
+        disposition; set ``CallOptions.status_callback_event`` for
+        ringing/answered.
+
+        Example:
+            ```python
+            async def on_call_status(event: CallStatusEvent) -> None:
+                if event.is_unreached:
+                    ...  # queue a retry
+
+
+            voice_channel.on_call_status(on_call_status)
+            ```
+        """
+        self._on_call_status = callback
+
+    def on_amd(self, callback: AmdHandler) -> None:
+        """Register a handler for Twilio ``async_amd_status_callback`` webhooks.
+
+        Registering makes later outbound calls pass
+        ``async_amd_status_callback`` to ``calls.create``; without a handler TAC
+        omits it and Twilio has nowhere to post the result. It does not enable
+        detection — that's per-call, via ``CallOptions.machine_detection`` and
+        ``async_amd``, both of which are required for this to fire (at most once
+        per call).
+
+        Example:
+            ```python
+            async def on_amd(event: AmdEvent) -> None:
+                if event.is_machine:
+                    await voice_channel.end_call(event.call_sid)  # voicemail → hang up
+
+
+            voice_channel.on_amd(on_amd)
+            ```
+        """
+        self._on_amd = callback
+
+    def on_recording(self, callback: RecordingHandler) -> None:
+        """Register a handler for Twilio ``recording_status_callback`` webhooks.
+
+        Registering makes later outbound calls pass
+        ``recording_status_callback`` to ``calls.create``; without a handler TAC
+        omits it and Twilio has nowhere to post. It does not start recording —
+        that's ``CallOptions.record``, which is required for this to fire.
+
+        Example:
+            ```python
+            async def on_recording(event: RecordingEvent) -> None:
+                if event.recording_status == "completed":
+                    ...  # store event.recording_url
+
+
+            voice_channel.on_recording(on_recording)
+            ```
+        """
+        self._on_recording = callback
 
     def _resolve_websocket_url(self, action: str) -> str:
         """Resolve the public WebSocket URL from
@@ -351,6 +438,169 @@ class VoiceChannel(BaseChannel):
             if payload.call_sid in self._conversations:
                 await self._end_conversation(payload.call_sid)
 
+    def _call_event_account_ok(self, payload_dict: dict[str, str]) -> bool:
+        """Whether a call-webhook payload belongs to the configured account.
+
+        Twilio signature validation already gates the route; this is defense in
+        depth. A payload with no ``AccountSid`` is allowed through.
+
+        Subaccounts: events carry the SID the call was placed on, so configure
+        TAC with that account or its events get dropped here.
+        """
+        account_sid = payload_dict.get("AccountSid")
+        if account_sid and account_sid != self.tac.config.account_sid:
+            self.logger.warning(
+                "Call event account_sid mismatch, ignoring",
+                expected=self.tac.config.account_sid,
+                received=account_sid,
+            )
+            return False
+        return True
+
+    async def handle_call_status_event(self, payload_dict: dict[str, str]) -> None:
+        """Handle a Twilio ``status_callback`` webhook.
+
+        The developer routes the request here (``TACFastAPIServer`` does this
+        automatically for its ``/status`` call-event route). Parsed into a
+        :class:`CallStatusEvent` and dispatched to the :meth:`on_call_status`
+        handler. No-op if no handler is registered.
+
+        Args:
+            payload_dict: Raw form data dict from the webhook request.
+        """
+        if self._on_call_status is None or not self._call_event_account_ok(payload_dict):
+            return
+        event = CallStatusEvent.from_form(payload_dict)
+        self.logger.debug(
+            "Call status event received",
+            call_sid=event.call_sid,
+            call_status=event.call_status,
+        )
+        await self._on_call_status(event)
+
+    async def handle_amd_event(self, payload_dict: dict[str, str]) -> None:
+        """Handle a Twilio ``async_amd_status_callback`` webhook.
+
+        The developer routes the request here (``TACFastAPIServer`` does this
+        automatically for its ``/amd`` call-event route). Parsed into an
+        :class:`AmdEvent` and dispatched to the :meth:`on_amd` handler. No-op if
+        no handler is registered.
+
+        Args:
+            payload_dict: Raw form data dict from the webhook request.
+        """
+        if self._on_amd is None or not self._call_event_account_ok(payload_dict):
+            return
+        event = AmdEvent.from_form(payload_dict)
+        self.logger.debug(
+            "Call AMD event received",
+            call_sid=event.call_sid,
+            answered_by=event.answered_by,
+        )
+        await self._on_amd(event)
+
+    async def handle_recording_event(self, payload_dict: dict[str, str]) -> None:
+        """Handle a Twilio ``recording_status_callback`` webhook.
+
+        The developer routes the request here (``TACFastAPIServer`` does this
+        automatically for its ``/recording`` call-event route). Parsed into a
+        :class:`RecordingEvent` and dispatched to the :meth:`on_recording`
+        handler. No-op if no handler is registered.
+
+        Args:
+            payload_dict: Raw form data dict from the webhook request.
+        """
+        if self._on_recording is None or not self._call_event_account_ok(payload_dict):
+            return
+        event = RecordingEvent.from_form(payload_dict)
+        self.logger.debug(
+            "Call recording event received",
+            call_sid=event.call_sid,
+            recording_status=event.recording_status,
+        )
+        await self._on_recording(event)
+
+    async def end_call(self, call_sid: str) -> bool:
+        """Hang up a call and clean up its ConversationRelay session.
+
+        Works on ``call_sid`` alone, in any mode and before a session exists, so
+        it's safe from a call-event handler that fires before the first prompt.
+        Session cleanup no-ops if no tracked session matches.
+
+        Does not raise — hanging up an already-ended call is routine (the callee
+        hangs up while AMD is still resolving), and handlers shouldn't have to
+        guard against it.
+
+        Args:
+            call_sid: Twilio Call SID (from a call event, the outbound result, or
+                ``ConversationSession.call_sid``).
+
+        Returns:
+            True if Twilio accepted the hangup, False if it failed (logged).
+            Session cleanup runs either way.
+        """
+        client = self._get_twilio_client()
+        hung_up = True
+        try:
+            await asyncio.to_thread(client.calls(call_sid).update, status="completed")
+        except Exception as e:
+            hung_up = False
+            self.logger.error(
+                "Failed to hang up call",
+                call_sid=call_sid,
+                error=str(e),
+                exc_info=True,
+            )
+
+        session = self.get_conversation_session_by_call_sid(call_sid)
+        if session is not None:
+            await self._end_conversation(session.conversation_id)
+        return hung_up
+
+    def get_conversation_session_by_call_sid(self, call_sid: str) -> ConversationSession | None:
+        """Look up the active voice session for a Twilio Call SID.
+
+        Out-of-band code holding a CallSid — a dashboard route, an operator
+        action, a call-event handler — can't reach the session-facing methods,
+        which are keyed by conversation id: the Orchestrator conversation id in
+        orchestrator mode, the CallSid only in ConversationRelay-only mode.
+
+        Sessions are created on the caller's first prompt, not at WebSocket
+        setup, so this returns ``None`` for a call that connected but hasn't been
+        spoken into. That includes ``on_amd`` under
+        ``machine_detection="Enable"``, which fires before the first prompt by
+        design — hang up with :meth:`end_call`, which needs no session.
+
+        At the other end, orchestrator mode keeps the session until Conversation
+        Orchestrator's CLOSED webhook, so it outlives the call and
+        ``on_call_status`` / ``on_recording`` do resolve. Relay-only mode tears
+        down on the ConversationRelay callback instead, which races them.
+
+        Named for ``ConversationSession``; ``session_manager`` deals in
+        ``SessionState``, a different type.
+
+        Example:
+            ```python
+            async def nudge(call_sid: str) -> None:
+                session = voice_channel.get_conversation_session_by_call_sid(call_sid)
+                if session is not None:
+                    await voice_channel.send_response(session.conversation_id, "Still there?")
+            ```
+
+        Args:
+            call_sid: Twilio Call SID, e.g. from
+                ``InitiateVoiceConversationResult.call_sid`` or a call event.
+
+        Returns:
+            The session, or ``None`` — no first prompt yet, the call ended, or it
+            landed on another instance (see the horizontal-scaling note in
+            CLAUDE.md).
+        """
+        for session in self._conversations.values():
+            if session.call_sid == call_sid:
+                return session
+        return None
+
     async def _initialize_conversation(
         self,
         call_sid: str,
@@ -427,6 +677,10 @@ class VoiceChannel(BaseChannel):
 
         self._websocket_manager.add_websocket(conv_id, websocket)
         session = self._start_conversation(conv_id, profile_id)
+        # In orchestrator mode conv_id is the Orchestrator conversation id, so
+        # record the CallSid so out-of-band call webhooks can reach this session
+        # (resolved via get_conversation_session_by_call_sid).
+        session.call_sid = call_sid
 
         session_state = None
         if self.session_manager is not None:
@@ -489,7 +743,9 @@ class VoiceChannel(BaseChannel):
                             else:
                                 conv_id = call_sid
                                 self._websocket_manager.add_websocket(conv_id, websocket)
-                                self._start_conversation(conv_id, profile_id=None)
+                                session = self._start_conversation(conv_id, profile_id=None)
+                                # Relay-only: conv_id == call_sid.
+                                session.call_sid = call_sid
 
                                 caller = self._caller_address(setup_msg)
                                 if caller:
@@ -527,6 +783,55 @@ class VoiceChannel(BaseChannel):
             if conv_id:
                 self.logger.debug("Cleanup - removing WebSocket", conversation_id=conv_id)
                 await self._cleanup_connection(conv_id)
+
+    def _merge_call_options(self, per_call: CallOptions | None) -> CallOptions | None:
+        """Overlay ``per_call`` onto ``VoiceChannelConfig.default_call_options``.
+
+        Per-field via ``model_fields_set``, same as ``_overlay_fields`` does for
+        TwiMLOptions. The merged result is re-validated so a combination only
+        reachable by layering — per-call clearing ``machine_detection`` while the
+        default set ``async_amd`` — still fails instead of reaching Twilio.
+        """
+        default = self.config.default_call_options
+        if default is None or per_call is None:
+            return per_call or default
+
+        merged = default.model_dump(by_alias=True, exclude_none=True)
+        # model_fields_set covers extras too, since CallOptions allows them.
+        for field in per_call.model_fields_set:
+            merged[field] = getattr(per_call, field)
+        return CallOptions(**merged)
+
+    def _build_call_kwargs(self, call_options: CallOptions | None) -> dict[str, Any]:
+        """Build the extra kwargs for ``client.calls.create``.
+
+        Layers, highest precedence first: this call's ``call_options``,
+        ``VoiceChannelConfig.default_call_options``, then callback URLs derived
+        from ``voice_public_domain`` + ``voice_call_event_path``.
+
+        A URL is derived only when its handler is registered. That's a deliberate
+        deviation from ``websocket_url`` / ``action_url``, which derive
+        unconditionally: those are load-bearing, so a wrong one fails loudly on
+        the first call, whereas an unwanted call-event URL fails as silent 11200
+        alerts for a feature nobody asked for. Set the URLs in
+        ``default_call_options`` when TAC isn't serving the routes.
+        """
+        merged = self._merge_call_options(call_options)
+        call_kwargs = merged.to_call_kwargs() if merged else {}
+
+        wiring: list[tuple[CallEventKind, str, Callable[..., Any] | None]] = [
+            ("status", "status_callback", self._on_call_status),
+            ("amd", "async_amd_status_callback", self._on_amd),
+            ("recording", "recording_status_callback", self._on_recording),
+        ]
+        for kind, param, handler in wiring:
+            if handler is None:
+                continue
+            url = self.tac.config.call_event_url(kind)
+            if url is not None:
+                call_kwargs.setdefault(param, url)
+
+        return call_kwargs
 
     async def initiate_outbound_conversation(
         self,
@@ -577,12 +882,28 @@ class VoiceChannel(BaseChannel):
         else:
             websocket_url = self._resolve_websocket_url("initiate_outbound_conversation")
 
+        call_kwargs = self._build_call_kwargs(options.call_options)
+
         try:
             twiml_xml = twiml.generate_twiml(websocket_url, merged)
 
+            # The inline TwiML handed to Twilio, useful for debugging the
+            # <Connect action> handoff target. custom_parameters values are
+            # masked — they're arbitrary developer data (profile IDs, caller
+            # names), unlike the WS/action URLs and conversation config.
+            self.logger.debug(
+                "Outbound call TwiML",
+                twiml=redact_twiml_parameters(twiml_xml),
+                to=mask_phone(options.to),
+            )
+
             client = self._get_twilio_client()
             call = await asyncio.to_thread(
-                client.calls.create, to=options.to, from_=from_number, twiml=twiml_xml
+                client.calls.create,
+                to=options.to,
+                from_=from_number,
+                twiml=twiml_xml,
+                **call_kwargs,
             )
 
             self.logger.info(

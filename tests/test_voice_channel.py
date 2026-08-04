@@ -2342,10 +2342,369 @@ class TestVoicePublicDomainNormalization:
 
 
 class TestVoicePathsOnTACConfig:
-    """Voice paths live on TACConfig (one source of truth for both the
-    channel's URL construction and the server's route registration)."""
+    """One source of truth for channel URL construction and route registration."""
 
     def test_default_paths(self) -> None:
         tac = TAC(get_test_config())
         assert tac.config.voice_websocket_path == "/ws"
         assert tac.config.voice_action_path == "/conversation-relay-callback"
+        assert tac.config.voice_call_event_path == "/twilio/call-events"
+
+    def test_call_event_path_per_kind(self) -> None:
+        """One helper builds all three, so channel and server can't drift."""
+        tac = TAC(get_test_config())
+        assert tac.config.call_event_path("status") == "/twilio/call-events/status"
+        assert tac.config.call_event_path("amd") == "/twilio/call-events/amd"
+        assert tac.config.call_event_path("recording") == "/twilio/call-events/recording"
+
+    def test_call_event_path_normalizes_trailing_slash(self) -> None:
+        tac = TAC({**get_test_config(), "voice_call_event_path": "/hooks/calls/"})
+        assert tac.config.call_event_path("amd") == "/hooks/calls/amd"
+
+    def test_call_event_url_requires_domain(self) -> None:
+        config = {**get_test_config()}
+        config.pop("voice_public_domain")
+        tac = TAC(config)
+        assert tac.config.call_event_url("status") is None
+
+    def test_call_event_url_with_domain(self) -> None:
+        tac = TAC({**get_test_config(), "voice_public_domain": "example.ngrok.app"})
+        assert (
+            tac.config.call_event_url("status")
+            == "https://example.ngrok.app/twilio/call-events/status"
+        )
+
+    def test_call_event_kinds_covers_every_kind(self) -> None:
+        """CALL_EVENT_KINDS is what the server iterates to validate its paths.
+
+        The routes themselves are three explicit decorators, so a new kind needs
+        a route added by hand — this pins the set they have to stay in step with.
+        """
+        from tac.core.config import CALL_EVENT_KINDS
+
+        assert set(CALL_EVENT_KINDS) == {"status", "amd", "recording"}
+
+
+class TestCallEventPredicates:
+    """Keep mode-specific string matching out of application code."""
+
+    @pytest.mark.parametrize(
+        "answered_by",
+        ["machine_start", "machine_end_beep", "machine_end_silence", "machine_end_other"],
+    )
+    def test_is_machine_true_for_every_machine_value(self, answered_by: str) -> None:
+        from tac.models.voice import AmdEvent
+
+        assert AmdEvent(call_sid="CA1", answered_by=answered_by).is_machine is True
+
+    @pytest.mark.parametrize("answered_by", ["human", "fax", "unknown", None, ""])
+    def test_is_machine_false_otherwise(self, answered_by: str | None) -> None:
+        """'unknown' means detection timed out — never hang up on a guess."""
+        from tac.models.voice import AmdEvent
+
+        assert AmdEvent(call_sid="CA1", answered_by=answered_by).is_machine is False
+
+    @pytest.mark.parametrize("status", ["busy", "no-answer", "failed", "canceled"])
+    def test_is_unreached_true_for_dispositions(self, status: str) -> None:
+        from tac.models.voice import CallStatusEvent
+
+        assert CallStatusEvent(call_sid="CA1", call_status=status).is_unreached is True
+
+    @pytest.mark.parametrize("status", ["completed", "in-progress", "ringing", None])
+    def test_is_unreached_false_otherwise(self, status: str | None) -> None:
+        from tac.models.voice import CallStatusEvent
+
+        assert CallStatusEvent(call_sid="CA1", call_status=status).is_unreached is False
+
+
+class TestCallEventModels:
+    """Each model parses its own fields; everything else goes to ``extra``."""
+
+    def test_amd_event(self) -> None:
+        from tac.models.voice import AmdEvent
+
+        event = AmdEvent.from_form(
+            {
+                "CallSid": "CA1",
+                "AccountSid": "ACtest123",
+                "AnsweredBy": "machine_end_beep",
+                "MachineDetectionDuration": "3200",
+            }
+        )
+        assert event.call_sid == "CA1"
+        assert event.answered_by == "machine_end_beep"
+        assert event.machine_detection_duration == "3200"
+
+    def test_recording_event(self) -> None:
+        from tac.models.voice import RecordingEvent
+
+        event = RecordingEvent.from_form(
+            {
+                "CallSid": "CA1",
+                "RecordingSid": "RE1",
+                "RecordingUrl": "https://x/r",
+                "RecordingStatus": "completed",
+                "RecordingDuration": "12",
+            }
+        )
+        assert event.recording_sid == "RE1"
+        assert event.recording_url == "https://x/r"
+        assert event.recording_duration == "12"
+
+    def test_status_event(self) -> None:
+        from tac.models.voice import CallStatusEvent
+
+        event = CallStatusEvent.from_form(
+            {
+                "CallSid": "CA1",
+                "CallStatus": "no-answer",
+                "CallDuration": "0",
+                "SipResponseCode": "480",
+            }
+        )
+        assert event.call_status == "no-answer"
+        assert event.call_duration == "0"
+        assert event.sip_response_code == "480"
+
+    def test_keeps_extra_form(self) -> None:
+        from tac.models.voice import CallStatusEvent
+
+        event = CallStatusEvent.from_form(
+            {"CallSid": "CA1", "CallStatus": "completed", "Custom": "x"}
+        )
+        assert event.extra["Custom"] == "x"
+        # Fields belonging to another event type land in extra, not dropped.
+        assert "RecordingSid" not in event.extra
+
+
+class TestHandleCallEvents:
+    @pytest.mark.asyncio
+    async def test_status_fires_registered_handler(self) -> None:
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+        received = []
+
+        async def handler(event: object) -> None:
+            received.append(event)
+
+        channel.on_call_status(handler)
+        await channel.handle_call_status_event(
+            {"CallSid": "CA1", "AccountSid": "ACtest123", "CallStatus": "no-answer"}
+        )
+        assert len(received) == 1
+        assert received[0].call_status == "no-answer"
+
+    @pytest.mark.asyncio
+    async def test_amd_fires_registered_handler(self) -> None:
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+        received = []
+
+        async def handler(event: object) -> None:
+            received.append(event)
+
+        channel.on_amd(handler)
+        await channel.handle_amd_event(
+            {"CallSid": "CA1", "AccountSid": "ACtest123", "AnsweredBy": "human"}
+        )
+        assert received[0].answered_by == "human"
+
+    @pytest.mark.asyncio
+    async def test_recording_fires_registered_handler(self) -> None:
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+        received = []
+
+        async def handler(event: object) -> None:
+            received.append(event)
+
+        channel.on_recording(handler)
+        await channel.handle_recording_event(
+            {"CallSid": "CA1", "AccountSid": "ACtest123", "RecordingStatus": "completed"}
+        )
+        assert received[0].recording_status == "completed"
+
+    @pytest.mark.asyncio
+    async def test_handlers_are_independently_optional(self) -> None:
+        """Only on_amd registered: amd fires, status/recording no-op silently."""
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+        received = []
+
+        async def handler(event: object) -> None:
+            received.append(event)
+
+        channel.on_amd(handler)
+        await channel.handle_call_status_event({"CallSid": "CA1", "CallStatus": "completed"})
+        await channel.handle_recording_event({"CallSid": "CA1", "RecordingStatus": "completed"})
+        await channel.handle_amd_event({"CallSid": "CA1", "AnsweredBy": "human"})
+        assert len(received) == 1
+        assert received[0].answered_by == "human"
+
+    @pytest.mark.asyncio
+    async def test_noop_without_handler(self) -> None:
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+        # Should not raise despite no handler registered.
+        await channel.handle_call_status_event({"CallSid": "CA1", "CallStatus": "completed"})
+
+    @pytest.mark.asyncio
+    async def test_ignores_account_sid_mismatch(self) -> None:
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+        received = []
+
+        async def handler(event: object) -> None:
+            received.append(event)
+
+        channel.on_call_status(handler)
+        await channel.handle_call_status_event(
+            {"CallSid": "CA1", "AccountSid": "ACwrong", "CallStatus": "completed"}
+        )
+        assert received == []
+
+
+class TestEndCall:
+    @pytest.mark.asyncio
+    async def test_hangs_up_via_twilio(self) -> None:
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+
+        mock_client = MagicMock()
+        with patch.object(channel, "_get_twilio_client", return_value=mock_client):
+            assert await channel.end_call("CA1") is True
+
+        mock_client.calls.assert_called_once_with("CA1")
+        mock_client.calls().update.assert_called_with(status="completed")
+
+    @pytest.mark.asyncio
+    async def test_cleans_up_session_via_call_sid(self) -> None:
+        """conv_id != call_sid in orchestrator mode; resolved by scanning sessions."""
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+
+        # Simulate an active orchestrator-mode session (conv id != call sid).
+        session = channel._start_conversation("conv_abc")
+        session.call_sid = "CA1"
+        channel._end_conversation = AsyncMock()  # type: ignore[method-assign]
+
+        mock_client = MagicMock()
+        with patch.object(channel, "_get_twilio_client", return_value=mock_client):
+            await channel.end_call("CA1")
+
+        channel._end_conversation.assert_awaited_once_with("conv_abc")
+
+    @pytest.mark.asyncio
+    async def test_hangup_failure_returns_false_without_raising(self) -> None:
+        """Already-ended calls are routine: reports rather than raises."""
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+
+        mock_client = MagicMock()
+        mock_client.calls("CA1").update.side_effect = RuntimeError("Twilio 400")
+        with patch.object(channel, "_get_twilio_client", return_value=mock_client):
+            assert await channel.end_call("CA1") is False
+
+    @pytest.mark.asyncio
+    async def test_session_cleanup_runs_even_when_hangup_fails(self) -> None:
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+        session = channel._start_conversation("conv_abc")
+        session.call_sid = "CA1"
+        channel._end_conversation = AsyncMock()  # type: ignore[method-assign]
+
+        mock_client = MagicMock()
+        mock_client.calls("CA1").update.side_effect = RuntimeError("Twilio 400")
+        with patch.object(channel, "_get_twilio_client", return_value=mock_client):
+            assert await channel.end_call("CA1") is False
+
+        channel._end_conversation.assert_awaited_once_with("conv_abc")
+
+    @pytest.mark.asyncio
+    async def test_hangup_works_without_tracked_session(self) -> None:
+        """A machine may never prompt (no session); the hangup must still work."""
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+        channel._end_conversation = AsyncMock()  # type: ignore[method-assign]
+
+        mock_client = MagicMock()
+        with patch.object(channel, "_get_twilio_client", return_value=mock_client):
+            assert await channel.end_call("CA_unknown") is True
+
+        mock_client.calls().update.assert_called_with(status="completed")
+        channel._end_conversation.assert_not_awaited()
+
+
+class TestGetConversationSessionByCallSid:
+    """Call events carry only the CallSid; session methods are keyed by conv id."""
+
+    def test_resolves_orchestrator_mode_session(self) -> None:
+        """conv_id is the Orchestrator id, so the CallSid needs a lookup."""
+        channel = VoiceChannel(TAC(get_test_config()))
+        session = channel._start_conversation("conv_abc")
+        session.call_sid = "CA1"
+
+        found = channel.get_conversation_session_by_call_sid("CA1")
+        assert found is session
+        assert found.conversation_id == "conv_abc"
+
+    def test_resolves_relay_only_session(self) -> None:
+        """conv_id == call_sid here, but the lookup shouldn't assume it."""
+        channel = VoiceChannel(TAC(get_test_config()))
+        session = channel._start_conversation("CA1")
+        session.call_sid = "CA1"
+
+        assert channel.get_conversation_session_by_call_sid("CA1") is session
+
+    def test_returns_none_for_unknown_call_sid(self) -> None:
+        channel = VoiceChannel(TAC(get_test_config()))
+        session = channel._start_conversation("conv_abc")
+        session.call_sid = "CA1"
+
+        assert channel.get_conversation_session_by_call_sid("CA_other") is None
+
+    def test_ignores_sessions_without_a_call_sid(self) -> None:
+        """Messaging sessions leave call_sid None — must not match on None."""
+        channel = VoiceChannel(TAC(get_test_config()))
+        channel._start_conversation("conv_no_sid")
+
+        assert channel.get_conversation_session_by_call_sid("CA1") is None
+
+    def test_picks_the_matching_session_among_several(self) -> None:
+        channel = VoiceChannel(TAC(get_test_config()))
+        for conv_id, call_sid in [("c1", "CA1"), ("c2", "CA2"), ("c3", "CA3")]:
+            channel._start_conversation(conv_id).call_sid = call_sid
+
+        found = channel.get_conversation_session_by_call_sid("CA2")
+        assert found is not None
+        assert found.conversation_id == "c2"
+
+    def test_returns_none_before_the_first_prompt(self) -> None:
+        """Sessions start on the first prompt, so a connected-but-silent call has none.
+
+        This is what an on_amd handler sees under machine_detection="Enable":
+        AMD resolves before the callee has said anything.
+        """
+        channel = VoiceChannel(TAC(get_test_config()))
+
+        assert channel.get_conversation_session_by_call_sid("CA1") is None
+
+    @pytest.mark.asyncio
+    async def test_reaches_the_live_agent_mid_conversation(self) -> None:
+        """Once the caller has prompted, out-of-band code can reach the session."""
+        channel = VoiceChannel(TAC(get_test_config()))
+        session = channel._start_conversation("conv_abc")
+        session.call_sid = "CA1"
+        channel.send_response = AsyncMock()  # type: ignore[method-assign]
+
+        async def on_amd(event: object) -> None:
+            found = channel.get_conversation_session_by_call_sid(event.call_sid)
+            assert found is not None
+            found.metadata["reached_voicemail"] = True
+            await channel.send_response(found.conversation_id, "We'll try again.")
+
+        channel.on_amd(on_amd)
+        await channel.handle_amd_event({"CallSid": "CA1", "AnsweredBy": "machine_start"})
+
+        assert session.metadata["reached_voicemail"] is True
+        channel.send_response.assert_awaited_once_with("conv_abc", "We'll try again.")

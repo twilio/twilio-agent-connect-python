@@ -1,6 +1,13 @@
 """PII redaction utilities for log output."""
 
+import re
+
 _MASK = "***"
+
+_TWIML_PARAMETER_VALUE = re.compile(
+    r"(<Parameter\b[^>]*?\bvalue=)([\"'])(.*?)\2",
+    re.IGNORECASE,
+)
 
 
 def mask_phone(value: str | None) -> str:
@@ -43,3 +50,19 @@ def mask_address(value: str | None) -> str:
     if "@" in value:
         return mask_email(value)
     return mask_phone(value)
+
+
+def redact_twiml_parameters(twiml: str | None) -> str:
+    """Mask ``<Parameter value="...">`` contents, keeping the names.
+
+    ``<Parameter>`` children carry whatever the developer put in
+    ``custom_parameters`` — profile IDs, caller names. Names stay because knowing
+    which parameters were sent is the point of logging the TwiML.
+
+    Handles either quote style. TAC's own TwiML comes from the Twilio SDK, which
+    always double-quotes, but this takes a plain string and shouldn't depend on
+    that to stay safe.
+    """
+    if not twiml:
+        return ""
+    return _TWIML_PARAMETER_VALUE.sub(rf"\1\g<2>{_MASK}\g<2>", twiml)
