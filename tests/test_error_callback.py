@@ -58,11 +58,11 @@ class TestErrorCallbackRegistration:
         tac.on_error(handler)
 
         err = ValueError("nope")
-        await tac.trigger_error(err, {"channel": "sms"})
+        await tac.trigger_error(err, {"channel": "SMS"})
 
         assert len(received) == 1
         assert received[0][0] is err
-        assert received[0][1]["channel"] == "sms"
+        assert received[0][1]["channel"] == "SMS"
 
     @pytest.mark.asyncio
     async def test_no_handler_is_noop(self) -> None:
@@ -141,7 +141,7 @@ class TestReconcileFailureRoutesToOnError:
         assert len(error_calls) == 1
         _error, context = error_calls[0]
         assert context["conversation_id"] == "CH123"
-        assert context["channel"] == "sms"
+        assert context["channel"] == "SMS"
         assert context["dropped_inbound"] is True
 
     @pytest.mark.asyncio
