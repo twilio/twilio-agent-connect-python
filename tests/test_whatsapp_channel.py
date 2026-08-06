@@ -370,7 +370,7 @@ async def test_conversation_updated_closed(whatsapp_channel: WhatsAppChannel) ->
 @pytest.mark.asyncio
 async def test_send_response_type_error(whatsapp_channel: WhatsAppChannel) -> None:
     """Test that send_response raises TypeError for non-string responses."""
-    with pytest.raises(TypeError, match="WhatsApp channel only supports string responses"):
+    with pytest.raises(TypeError, match="WHATSAPP channel only supports string responses"):
 
         async def async_gen():
             yield "chunk"

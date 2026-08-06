@@ -343,7 +343,7 @@ class TestChatChannel:
     async def test_send_response_rejects_non_string(self) -> None:
         tac = TAC(get_test_config())
         channel = ChatChannel(tac)
-        with pytest.raises(TypeError, match="Chat channel only supports string responses"):
+        with pytest.raises(TypeError, match="CHAT channel only supports string responses"):
             await channel.send_response("CH123", 123)  # type: ignore[arg-type]
 
     @pytest.mark.asyncio

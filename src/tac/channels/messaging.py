@@ -24,7 +24,7 @@ from tac.models.conversation import (
 )
 from tac.models.memory import MemoryMode
 from tac.models.outbound import InitiateConversationResult, InitiateMessagingConversationOptions
-from tac.models.session import AuthorInfo
+from tac.models.session import AuthorInfo, ConversationSession
 from tac.utils.redaction import mask_address
 
 
@@ -65,8 +65,11 @@ class MessagingChannel(BaseChannel):
     Subclasses must implement:
     - is_default_agent_address(): Fast-path check for the channel's default agent address
     - get_agent_address(conversation_id): Return the agent's ParticipantAddress for a conversation
-    - send_response(): Send messages back through the channel
     - get_channel_name(): Return channel name ("SMS", "RCS", "WHATSAPP", "CHAT")
+
+    send_response() is provided here as a shared implementation. Subclasses may
+    override _build_channel_settings() to customize how ActionChannelSettings
+    is built for the outbound send (e.g. chat requires channel_id).
 
     Subclass class attributes:
     - reconcile_customer_type: If True, reconciliation will also promote a
@@ -157,14 +160,105 @@ class MessagingChannel(BaseChannel):
         """
         pass
 
-    @abstractmethod
+    def _build_channel_settings(
+        self, conversation_id: str, session: ConversationSession
+    ) -> ActionChannelSettings | None:
+        """Build the ActionChannelSettings for an outbound send, if any.
+
+        Default behavior (SMS, RCS, WhatsApp): channel_id is optional and,
+        when present in session metadata, is passed through as-is. Chat
+        overrides this since channel_id is required for delivery.
+        """
+        channel_id = session.metadata.get("channel_id")
+        return (
+            ActionChannelSettings(channel_id=channel_id)
+            if isinstance(channel_id, str) and channel_id
+            else None
+        )
+
     async def send_response(
         self,
         conversation_id: str,
         response: str | AsyncGenerator[str | dict[str, Any], None],
         role: str | None = None,
     ) -> None:
-        pass
+        """Send a text response using the Conversation Orchestrator Send API.
+
+        Reads the agent and customer participant ids stashed on the session
+        by inbound reconciliation or outbound initiation. Missing ids are a
+        misuse — send_response is only expected to be called after an inbound
+        webhook (COMMUNICATION_CREATED → reconcile) or after
+        `initiate_outbound_conversation`, both of which populate the session.
+
+        Args:
+            conversation_id: Conversation ID to send response to
+            response: Message content. Must be ``str`` — messaging channels send a
+                single complete message via the Conversation Orchestrator Send API
+                and do not support streaming (unlike the Voice channel).
+            role: Optional message role (unused by messaging channels)
+
+        Raises:
+            TypeError: If response is not a string (e.g. an async generator is
+                passed, since messaging channels don't support streaming)
+            RuntimeError: If the session or participant ids are missing
+        """
+        channel_name = self.get_channel_name()
+        if not isinstance(response, str):
+            raise TypeError(f"{channel_name} channel only supports string responses")
+
+        session = self._conversations.get(conversation_id)
+        if session is None or not session.author_info or not session.ai_agent_info:
+            raise RuntimeError(
+                f"Unable to send {channel_name} message: send_response called without a "
+                f"reconciled session for conversation {conversation_id}. Wait for an "
+                "inbound webhook or call initiate_outbound_conversation first."
+            )
+
+        customer_participant_id = session.author_info.participant_id
+        agent_participant_id = session.ai_agent_info.participant_id
+        if not customer_participant_id or not agent_participant_id:
+            raise RuntimeError(
+                f"Unable to send {channel_name} message: session for conversation "
+                f"{conversation_id} is missing participant ids."
+            )
+
+        channel_settings = self._build_channel_settings(conversation_id, session)
+
+        try:
+            action_request = SendMessageActionRequest(
+                payload=SendMessageActionPayload(
+                    from_=ActionParticipantRef(
+                        channel=channel_name,
+                        participant_id=agent_participant_id,
+                    ),
+                    to=[
+                        ActionParticipantRef(
+                            channel=channel_name,
+                            participant_id=customer_participant_id,
+                        )
+                    ],
+                    content=ActionTextContent(text=response),
+                    channel_settings=channel_settings,
+                ),
+            )
+
+            await self.conversation_orchestrator_client.create_action(
+                conversation_id, action_request
+            )
+
+            self.logger.info(
+                f"Sent {channel_name} response via Actions API",
+                conversation_id=conversation_id,
+                to_address=mask_address(session.author_info.address),
+                channel_id=channel_settings.channel_id if channel_settings else None,
+            )
+        except Exception as e:
+            self.logger.error(
+                "Failed to create action",
+                conversation_id=conversation_id,
+                error=str(e),
+                exc_info=True,
+            )
 
     async def process_webhook(
         self, webhook_data: dict[str, Any], idempotency_token: str | None = None
