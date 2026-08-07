@@ -241,6 +241,7 @@ class TAC:
     async def list_observations(
         self,
         conversation_context: ConversationSession,
+        created_before: str | None = None,
     ) -> TACMemoryResponse:
         """Fetch all observations for a profile via the List Observations API.
 
@@ -253,6 +254,9 @@ class TAC:
 
         Args:
             conversation_context: Session containing profile information.
+            created_before: ISO 8601 timestamp. Only observations created before this time
+                are returned. Freeze the snapshot at call-start time so mid-call updates
+                don't alter the memory block injected into later turns.
 
         Returns:
             Memory response containing all observations.
@@ -298,6 +302,7 @@ class TAC:
                 memory_response = await self.conversation_memory_client.list_observations(
                     profile_id=conversation_context.profile_id,
                     limit=limit,
+                    created_before=created_before,
                 )
             tracing.record_obs_fetch_count(call_sid, len(memory_response.observations or []))
             return TACMemoryResponse(memory_response)

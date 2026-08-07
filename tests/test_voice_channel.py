@@ -1677,3 +1677,131 @@ class TestSessionManagerDefaults:
 
         warning_calls = [str(c) for c in channel.logger.warning.call_args_list]
         assert any("Early co_init" in w or "early co_init" in w for w in warning_calls)
+
+    @pytest.mark.asyncio
+    async def test_co_init_warning_logged_when_slow(self) -> None:
+        """Test that a warning is logged when co_init exceeds the 800ms threshold."""
+        import time
+
+        from tac.channels.voice.channel import _CO_INIT_WARN_THRESHOLD_S
+        from tac.models.conversation import ParticipantAddress, ParticipantResponse
+
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+        channel.logger = MagicMock()
+
+        # Simulate CO that takes longer than the threshold
+        mock_conversation = ConversationResponse(
+            id="CH_slow_init",
+            accountId="ACtest123",
+            configuration_id="conv_configuration_test123",
+            status="ACTIVE",
+        )
+        mock_agent = ParticipantResponse(
+            **{
+                "id": "PA_AGENT",
+                "accountId": "ACtest123",
+                "conversationId": "CH_slow_init",
+                "name": "Agent",
+                "type": "AI_AGENT",
+                "addresses": [
+                    ParticipantAddress(channel="VOICE", address="+15551234567").model_dump(
+                        by_alias=True
+                    )
+                ],
+            }
+        )
+        mock_customer = ParticipantResponse(
+            **{
+                "id": "PA_CUSTOMER",
+                "accountId": "ACtest123",
+                "conversationId": "CH_slow_init",
+                "name": "+12345678901",
+                "type": "CUSTOMER",
+                "addresses": [
+                    ParticipantAddress(channel="VOICE", address="+12345678901").model_dump(
+                        by_alias=True
+                    )
+                ],
+            }
+        )
+
+        call_count = 0
+
+        async def slow_list_conversations(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            # Simulate slow CO only on the first call, then return immediately
+            if call_count == 1:
+                await asyncio.sleep(_CO_INIT_WARN_THRESHOLD_S + 0.05)
+            return [mock_conversation]
+
+        co_client = tac.conversation_orchestrator_client
+        co_client.list_conversations = slow_list_conversations
+        co_client.list_participants = AsyncMock(return_value=[mock_agent, mock_customer])
+
+        await channel._initialize_conversation(
+            call_sid="CA_slow",
+            setup_msg=MagicMock(call_sid="CA_slow"),
+            websocket=AsyncMock(),
+        )
+
+        warning_calls = [str(c) for c in channel.logger.warning.call_args_list]
+        assert any("co_init exceeded threshold" in w for w in warning_calls)
+
+    @pytest.mark.asyncio
+    async def test_co_init_no_warning_when_fast(self) -> None:
+        """Test that no co_init warning is logged when init completes quickly."""
+        from tac.models.conversation import ParticipantAddress, ParticipantResponse
+
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+        channel.logger = MagicMock()
+
+        mock_conversation = ConversationResponse(
+            id="CH_fast_init",
+            accountId="ACtest123",
+            configuration_id="conv_configuration_test123",
+            status="ACTIVE",
+        )
+        mock_agent = ParticipantResponse(
+            **{
+                "id": "PA_AGENT",
+                "accountId": "ACtest123",
+                "conversationId": "CH_fast_init",
+                "name": "Agent",
+                "type": "AI_AGENT",
+                "addresses": [
+                    ParticipantAddress(channel="VOICE", address="+15551234567").model_dump(
+                        by_alias=True
+                    )
+                ],
+            }
+        )
+        mock_customer = ParticipantResponse(
+            **{
+                "id": "PA_CUSTOMER",
+                "accountId": "ACtest123",
+                "conversationId": "CH_fast_init",
+                "name": "+12345678901",
+                "type": "CUSTOMER",
+                "addresses": [
+                    ParticipantAddress(channel="VOICE", address="+12345678901").model_dump(
+                        by_alias=True
+                    )
+                ],
+            }
+        )
+
+        co_client = tac.conversation_orchestrator_client
+        co_client.list_conversations = AsyncMock(return_value=[mock_conversation])
+        co_client.list_participants = AsyncMock(return_value=[mock_agent, mock_customer])
+
+        await channel._initialize_conversation(
+            call_sid="CA_fast",
+            setup_msg=MagicMock(call_sid="CA_fast"),
+            websocket=AsyncMock(),
+        )
+
+        warning_calls = [str(c) for c in channel.logger.warning.call_args_list]
+        assert not any("co_init exceeded threshold" in w for w in warning_calls)

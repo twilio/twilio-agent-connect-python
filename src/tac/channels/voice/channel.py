@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING, Any
 
@@ -32,6 +33,7 @@ from .config import VoiceChannelConfig
 
 _POLL_ATTEMPTS = 5
 _POLL_BASE_DELAY = 0.25
+_CO_INIT_WARN_THRESHOLD_S = 0.8
 
 
 class VoiceChannel(BaseChannel):
@@ -205,6 +207,7 @@ class VoiceChannel(BaseChannel):
             raise RuntimeError("_initialize_conversation called without Conversation Orchestrator")
 
         conversations: list[Any] = []
+        co_init_start = time.monotonic()
         with tracing.co_init_span(call_sid):
             for attempt in range(_POLL_ATTEMPTS):
                 conversations = await conversation_orchestrator_client.list_conversations(
@@ -221,6 +224,14 @@ class VoiceChannel(BaseChannel):
                         found=len(conversations),
                     )
                     await asyncio.sleep(_POLL_BASE_DELAY * (2**attempt))
+        co_init_elapsed = time.monotonic() - co_init_start
+        if co_init_elapsed >= _CO_INIT_WARN_THRESHOLD_S:
+            self.logger.warning(
+                "co_init exceeded threshold — CO may be cold",
+                call_sid=call_sid,
+                co_init_elapsed_ms=round(co_init_elapsed * 1000),
+                threshold_ms=round(_CO_INIT_WARN_THRESHOLD_S * 1000),
+            )
 
         if len(conversations) != 1:
             raise RuntimeError(
