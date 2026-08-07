@@ -6,7 +6,6 @@ from tac.context.base import BaseAPIClient
 from tac.models.memory import (
     MemoryRetrievalRequest,
     MemoryRetrievalResponse,
-    ObservationInfo,
     ProfileLookupRequest,
     ProfileLookupResponse,
     ProfileResponse,
@@ -283,64 +282,6 @@ class MemoryClient(BaseAPIClient):
         if not isinstance(profile_id, str):
             raise ValueError(f"CreateProfile response missing 'id' field: {data!r}")
         return profile_id
-
-    async def list_observations(
-        self,
-        profile_id: str,
-        limit: int = 500,
-        created_before: str | None = None,
-    ) -> MemoryRetrievalResponse:
-        """
-        Fetch observations for a profile via the List Observations API.
-
-        Unlike retrieve_memory (Recall/vector search), this returns observations in
-        insertion order without semantic ranking. Intended for memory_mode="once" on
-        voice calls: fetch once at call start so the memory block is deterministic
-        across calls and prefix caching can hit.
-
-        Args:
-            profile_id: Profile ID to fetch observations for.
-            limit: Max number of observations to return (default 500).
-            created_before: ISO 8601 timestamp. Only observations created before this
-                time are returned. Useful to freeze a snapshot so mid-call updates
-                don't change the memory block injected into later turns.
-
-        Returns:
-            MemoryRetrievalResponse with only the observations field populated.
-
-        Raises:
-            httpx.HTTPError: If the API request fails.
-        """
-        endpoint = f"/v1/Stores/{self.store_id}/Profiles/{profile_id}/Observations"
-        url = f"{self.base_url}{endpoint}"
-
-        params: dict[str, Any] = {"limit": limit}
-        if created_before is not None:
-            params["createdBefore"] = created_before
-
-        try:
-            async with self._get_client() as client:
-                response = await client.get(url, params=params)
-                response.raise_for_status()
-
-                data = response.json()
-                raw_observations: list[dict[str, Any]] = data.get("observations", [])
-                observations = [ObservationInfo(**obs) for obs in raw_observations]
-                return MemoryRetrievalResponse(observations=observations)
-
-        except httpx.HTTPError as e:
-            response_text = (
-                getattr(e.response, "text", "No response body")
-                if hasattr(e, "response")
-                else "No response"
-            )
-            self.logger.error(
-                f"Failed to list observations from Conversation Memory: {e}\n"
-                f"URL: {url}\n"
-                f"Query params: {params}\n"
-                f"Response: {response_text}"
-            )
-            raise
 
     async def create_observation(
         self,

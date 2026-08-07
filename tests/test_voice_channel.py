@@ -1681,7 +1681,6 @@ class TestSessionManagerDefaults:
     @pytest.mark.asyncio
     async def test_co_init_warning_logged_when_slow(self) -> None:
         """Test that a warning is logged when co_init exceeds the 800ms threshold."""
-        import time
 
         from tac.channels.voice.channel import _CO_INIT_WARN_THRESHOLD_S
         from tac.models.conversation import ParticipantAddress, ParticipantResponse
