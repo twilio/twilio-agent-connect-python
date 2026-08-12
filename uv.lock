@@ -2776,6 +2776,9 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+openai-realtime-media-streams = [
+    { name = "websockets" },
+]
 openai-realtime-sip = [
     { name = "openai" },
     { name = "websockets" },
@@ -2821,6 +2824,7 @@ requires-dist = [
     { name = "python-multipart", marker = "extra == 'server'", specifier = ">=0.0.20,<1" },
     { name = "twilio", specifier = ">=9.8.3,<10" },
     { name = "uvicorn", extras = ["standard"], marker = "extra == 'server'", specifier = ">=0.32.0,<1" },
+    { name = "websockets", marker = "extra == 'openai-realtime-media-streams'", specifier = ">=13,<17" },
     { name = "websockets", marker = "extra == 'openai-realtime-sip'", specifier = ">=13,<17" },
 ]
 

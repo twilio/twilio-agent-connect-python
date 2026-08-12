@@ -166,7 +166,7 @@ class OpenAIRealtimeSipChannel(BaseChannel):
         session_config = await self._call_incoming_handler(event)
         if session_config.tools is None and self._tools:
             session_config = session_config.model_copy(
-                update={"tools": [_tool_to_realtime_schema(t) for t in self._tools.values()]}
+                update={"tools": [t.to_realtime_format() for t in self._tools.values()]}
             )
 
         await self.client.accept_call(event.call_id, session_config)
@@ -281,13 +281,3 @@ class OpenAIRealtimeSipChannel(BaseChannel):
             "OpenAIRealtimeSipClient.control_connection(call_id) to steer an "
             "in-progress call instead."
         )
-
-
-def _tool_to_realtime_schema(tool: TACTool) -> dict[str, Any]:
-    """Flatten a TACTool into the Realtime API's tool schema shape."""
-    return {
-        "type": "function",
-        "name": tool.name,
-        "description": tool.description,
-        "parameters": tool.params_json_schema,
-    }

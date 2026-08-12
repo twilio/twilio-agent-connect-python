@@ -40,6 +40,9 @@ openai-realtime-sip = [
     "openai>=2.0.0,<3",
     "websockets>=13,<17",
 ]
+openai-realtime-media-streams = [
+    "websockets>=13,<17",
+]
 
 [dependency-groups]
 dev = [
