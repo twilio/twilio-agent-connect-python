@@ -264,6 +264,7 @@ class VoiceChannel(BaseChannel):
 
         self._websocket_manager.add_websocket(conv_id, websocket)
         session = self._start_conversation(conv_id, profile_id)
+        session.metadata["call_sid"] = call_sid
 
         session_state = None
         if self.session_manager is not None:
