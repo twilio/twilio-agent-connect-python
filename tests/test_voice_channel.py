@@ -2129,34 +2129,79 @@ class TestConversationInitializationFlow:
         assert len(channel._conversations) == 0
 
     @pytest.mark.asyncio
-    async def test_setup_message_does_not_initialize_conversation(self) -> None:
-        """Test that setup message stores call_sid but doesn't initialize conversation."""
+    async def test_setup_message_starts_background_conversation_init(self) -> None:
+        """Setup kicks off the CO lookup immediately in the background — it
+        doesn't wait for the first prompt — so it overlaps with the wait for
+        the caller's first utterance instead of adding to it.
+
+        If the call disconnects before any prompt arrives to claim the
+        result, the websocket the lookup already registered (as a side
+        effect of `_initialize_conversation`) must still be cleaned up, not
+        leaked. (The conversation itself intentionally stays in
+        `_conversations` until CO's CLOSED webhook, same as any other
+        orchestrator-mode call — see `_cleanup_connection`.)
+        """
         from tac.channels.websocket_protocol import WebSocketDisconnectError
+        from tac.models.conversation import ParticipantAddress, ParticipantResponse
 
         tac = TAC(get_test_config())
         channel = VoiceChannel(tac)
 
-        # Mock Conversation Orchestrator (should not be called during setup)
-        tac.conversation_orchestrator_client.list_conversations = AsyncMock()
-        tac.conversation_orchestrator_client.list_participants = AsyncMock()
+        mock_conversation = ConversationResponse(
+            id="CH_setup_test",
+            accountId="ACtest123",
+            configuration_id="conv_configuration_test123",
+            status="ACTIVE",
+        )
+        co_client = tac.conversation_orchestrator_client
+        co_client.list_conversations = AsyncMock(return_value=[mock_conversation])
+        mock_participant = ParticipantResponse(
+            id="PA_test",
+            conversation_id="CH_setup_test",
+            account_id="ACtest123",
+            name="Test Participant",
+            profile_id="profile_setup",
+            addresses=[ParticipantAddress(channel="VOICE", address="+15551234567")],
+        )
+        co_client.list_participants = AsyncMock(return_value=[mock_participant])
 
-        # Create mock websocket: setup -> disconnect (no prompt)
+        # Create mock websocket: setup -> disconnect (no prompt ever arrives).
+        # receive_json yields to the event loop a couple of times before
+        # raising, so the background init task gets a chance to actually run
+        # (rather than being cancelled before it starts) — this is what makes
+        # the "already registered, must be cleaned up" path deterministic.
         mock_websocket = AsyncMock()
         setup_data = {"type": "setup", "callSid": "CA_setup_test", "from": "+15551234567"}
+        call_count = 0
 
-        mock_websocket.receive_json = AsyncMock(
-            side_effect=[setup_data, WebSocketDisconnectError()]
-        )
+        async def fake_receive_json() -> dict[str, str]:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return setup_data
+            await asyncio.sleep(0)
+            await asyncio.sleep(0)
+            raise WebSocketDisconnectError()
 
-        # Drive handle_websocket - should process setup but not initialize conversation
+        mock_websocket.receive_json = fake_receive_json
+
+        # Drive handle_websocket - should start CO lookup on setup and clean
+        # up properly when the call ends before any prompt claims it.
         await channel.handle_websocket(mock_websocket)
 
-        # Verify CO was NOT called (initialization only on first prompt)
-        tac.conversation_orchestrator_client.list_conversations.assert_not_called()
-        tac.conversation_orchestrator_client.list_participants.assert_not_called()
+        # The background lookup ran to completion (not cancelled mid-flight).
+        co_client.list_conversations.assert_called_once_with(
+            channel_id="CA_setup_test",
+            status=["ACTIVE"],
+        )
+        co_client.list_participants.assert_called_once_with("CH_setup_test")
 
-        # Verify no conversations initialized
-        assert len(channel._conversations) == 0
+        # The websocket registration is cleaned up (not leaked) even though
+        # no prompt ever arrived to claim conv_id itself.
+        assert not channel._websocket_manager.has_websocket("CH_setup_test")
+        # The conversation entry legitimately stays until CO's CLOSED
+        # webhook — same as any other orchestrator-mode call.
+        assert list(channel._conversations.keys()) == ["CH_setup_test"]
 
     @pytest.mark.asyncio
     async def test_subsequent_prompts_reuse_conversation(self) -> None:

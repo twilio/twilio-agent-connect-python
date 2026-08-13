@@ -718,6 +718,7 @@ class VoiceChannel(BaseChannel):
 
         conv_id: str | None = None
         session_state = None
+        init_task: asyncio.Task[tuple[str, SessionState | None]] | None = None
 
         try:
             # First message should be 'setup'
@@ -726,8 +727,17 @@ class VoiceChannel(BaseChannel):
                 setup_msg = SetupMessage(**data)
                 call_sid = setup_msg.call_sid
 
-                # Don't initialize conversation yet - wait for first prompt
-                # when ConversationRelay has created the conversation
+                # Kick off the CO conversation lookup now, in the background,
+                # instead of waiting for the first prompt. ConversationRelay
+                # creates the CO conversation as soon as the call connects, not
+                # when the caller speaks, so this overlaps CO's
+                # list_conversations/list_participants polling with the wait
+                # for the caller's first utterance (transcription) rather than
+                # paying that latency serially once the first prompt lands.
+                if call_sid and self.tac.is_orchestrator_enabled():
+                    init_task = asyncio.create_task(
+                        self._initialize_conversation(call_sid, setup_msg, websocket)
+                    )
 
                 # Process all subsequent messages
                 while True:
@@ -736,7 +746,10 @@ class VoiceChannel(BaseChannel):
 
                     if msg_type == "prompt":
                         if not conv_id and call_sid:
-                            if self.tac.is_orchestrator_enabled():
+                            if init_task is not None:
+                                conv_id, session_state = await init_task
+                                init_task = None
+                            elif self.tac.is_orchestrator_enabled():
                                 conv_id, session_state = await self._initialize_conversation(
                                     call_sid, setup_msg, websocket
                                 )
@@ -780,6 +793,22 @@ class VoiceChannel(BaseChannel):
         except Exception as e:
             self.logger.error(f"WebSocket error: {str(e)}")
         finally:
+            if init_task is not None:
+                # Call ended before any prompt arrived, so the background
+                # lookup was never awaited.
+                if not init_task.done():
+                    init_task.cancel()
+                result: tuple[str, SessionState | None] | None
+                try:
+                    result = await init_task
+                except (Exception, asyncio.CancelledError):
+                    result = None
+                if result is not None and conv_id is None:
+                    # The lookup finished and already registered the session
+                    # (websocket manager, self._conversations) as a side
+                    # effect before anyone claimed conv_id — adopt it here so
+                    # it gets cleaned up instead of leaking.
+                    conv_id = result[0]
             if conv_id:
                 self.logger.debug("Cleanup - removing WebSocket", conversation_id=conv_id)
                 await self._cleanup_connection(conv_id)
