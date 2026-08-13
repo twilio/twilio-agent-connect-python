@@ -523,9 +523,10 @@ class VoiceChannel(BaseChannel):
     async def end_call(self, call_sid: str) -> bool:
         """Hang up a call and clean up its ConversationRelay session.
 
-        Works on ``call_sid`` alone, in any mode and before a session exists, so
-        it's safe from a call-event handler that fires before the first prompt.
-        Session cleanup no-ops if no tracked session matches.
+        Works on ``call_sid`` alone, whether or not a session exists yet — safe
+        to call from a call-event handler that fires before the caller has
+        spoken (e.g. ``on_amd``). No-ops the session cleanup if none is
+        tracked.
 
         Does not raise — hanging up an already-ended call is routine (the callee
         hangs up while AMD is still resolving), and handlers shouldn't have to
@@ -565,11 +566,12 @@ class VoiceChannel(BaseChannel):
         which are keyed by conversation id: the Orchestrator conversation id in
         orchestrator mode, the CallSid only in ConversationRelay-only mode.
 
-        Sessions are created on the caller's first prompt, not at WebSocket
-        setup, so this returns ``None`` for a call that connected but hasn't been
-        spoken into. That includes ``on_amd`` under
-        ``machine_detection="Enable"``, which fires before the first prompt by
-        design — hang up with :meth:`end_call`, which needs no session.
+        Relay-only mode creates the session on the caller's first prompt.
+        Orchestrator mode creates it earlier — as soon as the background CO
+        lookup started at WebSocket setup finishes — so it may already exist
+        before the caller has said anything, including before ``on_amd``
+        fires. Either way, treat this as racy and use :meth:`end_call` to hang
+        up, which works whether or not a session exists yet.
 
         At the other end, orchestrator mode keeps the session until Conversation
         Orchestrator's CLOSED webhook, so it outlives the call and
@@ -592,9 +594,10 @@ class VoiceChannel(BaseChannel):
                 ``InitiateVoiceConversationResult.call_sid`` or a call event.
 
         Returns:
-            The session, or ``None`` — no first prompt yet, the call ended, or it
-            landed on another instance (see the horizontal-scaling note in
-            CLAUDE.md).
+            The session, or ``None`` — not created yet (relay-only mode, or
+            orchestrator mode where the background CO lookup hasn't finished),
+            the call ended, or it landed on another instance (see the
+            horizontal-scaling note in CLAUDE.md).
         """
         for session in self._conversations.values():
             if session.call_sid == call_sid:
@@ -718,6 +721,10 @@ class VoiceChannel(BaseChannel):
 
         conv_id: str | None = None
         session_state = None
+        # This call's background CO conversation lookup task (kicked off
+        # below on "setup"), consumed and reset to None on the first
+        # "prompt". Still non-None in `finally` means the call ended before
+        # any prompt arrived.
         init_task: asyncio.Task[tuple[str, SessionState | None]] | None = None
 
         try:
@@ -793,6 +800,7 @@ class VoiceChannel(BaseChannel):
         except Exception as e:
             self.logger.error(f"WebSocket error: {str(e)}")
         finally:
+            cancelled_error: asyncio.CancelledError | None = None
             if init_task is not None:
                 # Call ended before any prompt arrived, so the background
                 # lookup was never awaited.
@@ -801,17 +809,30 @@ class VoiceChannel(BaseChannel):
                 result: tuple[str, SessionState | None] | None
                 try:
                     result = await init_task
-                except (Exception, asyncio.CancelledError):
+                except asyncio.CancelledError as e:
+                    # Defer deciding whether to re-raise until after cleanup.
+                    cancelled_error = e
+                    result = None
+                except Exception as e:
+                    # No prompt ever arrived to surface this failure via the
+                    # outer except Exception above, so log it here instead.
+                    self.logger.error(
+                        f"Background CO conversation lookup failed: {e}",
+                        call_sid=call_sid,
+                    )
                     result = None
                 if result is not None and conv_id is None:
-                    # The lookup finished and already registered the session
-                    # (websocket manager, self._conversations) as a side
-                    # effect before anyone claimed conv_id — adopt it here so
-                    # it gets cleaned up instead of leaking.
+                    # The lookup already registered the session/websocket
+                    # before anyone claimed conv_id — adopt it so it's
+                    # cleaned up instead of leaked.
                     conv_id = result[0]
             if conv_id:
                 self.logger.debug("Cleanup - removing WebSocket", conversation_id=conv_id)
                 await self._cleanup_connection(conv_id)
+            if cancelled_error is not None and init_task is not None and not init_task.cancelled():
+                # Not our own cancel() above — a real external cancellation,
+                # so propagate it now that cleanup ran.
+                raise cancelled_error
 
     def _merge_call_options(self, per_call: CallOptions | None) -> CallOptions | None:
         """Overlay ``per_call`` onto ``VoiceChannelConfig.default_call_options``.
