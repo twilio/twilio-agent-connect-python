@@ -2068,8 +2068,8 @@ class TestConversationInitializationFlow:
         assert "Expected exactly 1 conversation" in captured.out
         assert "but found 0" in captured.out
 
-        # Verify Conversation Orchestrator was polled (up to 5 attempts)
-        assert tac.conversation_orchestrator_client.list_conversations.call_count == 5
+        # Verify Conversation Orchestrator was polled (up to _POLL_ATTEMPTS)
+        assert tac.conversation_orchestrator_client.list_conversations.call_count == 10
 
         # Verify no conversation was initialized
         assert len(channel._conversations) == 0
@@ -2122,8 +2122,8 @@ class TestConversationInitializationFlow:
         assert "Expected exactly 1 conversation" in captured.out
         assert "but found 2" in captured.out
 
-        # Verify CO was polled (up to 5 attempts since count != 1)
-        assert co_client.list_conversations.call_count == 5
+        # Verify CO was polled (up to _POLL_ATTEMPTS since count != 1)
+        assert co_client.list_conversations.call_count == 10
 
         # Verify no conversation was initialized
         assert len(channel._conversations) == 0

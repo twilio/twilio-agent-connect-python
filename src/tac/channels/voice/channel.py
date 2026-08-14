@@ -45,8 +45,12 @@ from .config import (
     VoiceChannelConfig,
 )
 
-_POLL_ATTEMPTS = 5
+_POLL_ATTEMPTS = 10
 _POLL_BASE_DELAY = 0.25
+# Caps the exponential backoff so a higher _POLL_ATTEMPTS doesn't blow up the
+# total wait time — total worst case is comfortably bounded (~11s of sleep)
+# instead of growing exponentially with attempt count.
+_POLL_MAX_DELAY = 1.5
 
 DEFAULT_WELCOME_GREETING = "Hello! How can I assist you today?"
 
@@ -523,10 +527,8 @@ class VoiceChannel(BaseChannel):
     async def end_call(self, call_sid: str) -> bool:
         """Hang up a call and clean up its ConversationRelay session.
 
-        Works on ``call_sid`` alone, whether or not a session exists yet — safe
-        to call from a call-event handler that fires before the caller has
-        spoken (e.g. ``on_amd``). No-ops the session cleanup if none is
-        tracked.
+        Works on ``call_sid`` alone, whether or not a session exists yet.
+        No-ops the session cleanup if none is tracked.
 
         Does not raise — hanging up an already-ended call is routine (the callee
         hangs up while AMD is still resolving), and handlers shouldn't have to
@@ -631,7 +633,7 @@ class VoiceChannel(BaseChannel):
                     attempt=attempt + 1,
                     found=len(conversations),
                 )
-                await asyncio.sleep(_POLL_BASE_DELAY * (2**attempt))
+                await asyncio.sleep(min(_POLL_BASE_DELAY * (2**attempt), _POLL_MAX_DELAY))
 
         if len(conversations) != 1:
             raise RuntimeError(
@@ -754,8 +756,13 @@ class VoiceChannel(BaseChannel):
                     if msg_type == "prompt":
                         if not conv_id and call_sid:
                             if init_task is not None:
-                                conv_id, session_state = await init_task
+                                # Clear before awaiting so a failure here
+                                # doesn't leave `finally` re-awaiting (and
+                                # re-logging) this same task. If still
+                                # polling, this just waits it out.
+                                task_to_await = init_task
                                 init_task = None
+                                conv_id, session_state = await task_to_await
                             elif self.tac.is_orchestrator_enabled():
                                 conv_id, session_state = await self._initialize_conversation(
                                     call_sid, setup_msg, websocket
@@ -801,16 +808,20 @@ class VoiceChannel(BaseChannel):
             self.logger.error(f"WebSocket error: {str(e)}")
         finally:
             cancelled_error: asyncio.CancelledError | None = None
+            we_cancelled_it = False
             if init_task is not None:
                 # Call ended before any prompt arrived, so the background
                 # lookup was never awaited.
                 if not init_task.done():
                     init_task.cancel()
+                    we_cancelled_it = True
                 result: tuple[str, SessionState | None] | None
                 try:
                     result = await init_task
                 except asyncio.CancelledError as e:
-                    # Defer deciding whether to re-raise until after cleanup.
+                    # Defer re-raise decision until after cleanup below;
+                    # we_cancelled_it (not init_task.cancelled(), which can't
+                    # tell the two apart) decides whether to.
                     cancelled_error = e
                     result = None
                 except Exception as e:
@@ -829,9 +840,9 @@ class VoiceChannel(BaseChannel):
             if conv_id:
                 self.logger.debug("Cleanup - removing WebSocket", conversation_id=conv_id)
                 await self._cleanup_connection(conv_id)
-            if cancelled_error is not None and init_task is not None and not init_task.cancelled():
-                # Not our own cancel() above — a real external cancellation,
-                # so propagate it now that cleanup ran.
+            if cancelled_error is not None and not we_cancelled_it:
+                # A real external cancellation, not the one we caused above —
+                # propagate it now that cleanup ran.
                 raise cancelled_error
 
     def _merge_call_options(self, per_call: CallOptions | None) -> CallOptions | None:
