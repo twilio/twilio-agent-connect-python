@@ -61,7 +61,9 @@ class TestProfileLookupInMemoryRetrieval:
         )
 
         # Retrieve memory
-        result = await tac.retrieve_memory(session, query="test query")
+        result = await tac.retrieve_memory(
+            session, query="test query", conversation_id=session.conversation_id
+        )
 
         # Verify memory was retrieved without lookup - result is wrapped in TACMemoryResponse
         from tac.models.tac import TACMemoryResponse
@@ -114,7 +116,9 @@ class TestProfileLookupInMemoryRetrieval:
         )
 
         # Retrieve memory
-        result = await tac.retrieve_memory(session, query="test query")
+        result = await tac.retrieve_memory(
+            session, query="test query", conversation_id=session.conversation_id
+        )
 
         # Verify profile was looked up
         tac.conversation_memory_client.lookup_profile.assert_called_once_with(
@@ -175,7 +179,7 @@ class TestProfileLookupInMemoryRetrieval:
         )
 
         # Retrieve memory
-        await tac.retrieve_memory(session)
+        await tac.retrieve_memory(session, conversation_id=session.conversation_id)
 
         # Verify first profile was used
         assert session.profile_id == "mem_profile_00000000000000000000000001"
