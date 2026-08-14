@@ -759,14 +759,11 @@ class VoiceChannel(BaseChannel):
                                 # Clear before awaiting so a failure here
                                 # doesn't leave `finally` re-awaiting (and
                                 # re-logging) this same task. If still
-                                # polling, this just waits it out.
+                                # polling, this just waits it out. (None here
+                                # only means relay-only mode — see "setup".)
                                 task_to_await = init_task
                                 init_task = None
                                 conv_id, session_state = await task_to_await
-                            elif self.tac.is_orchestrator_enabled():
-                                conv_id, session_state = await self._initialize_conversation(
-                                    call_sid, setup_msg, websocket
-                                )
                             else:
                                 conv_id = call_sid
                                 self._websocket_manager.add_websocket(conv_id, websocket)
