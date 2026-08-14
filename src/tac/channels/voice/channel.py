@@ -45,8 +45,12 @@ from .config import (
     VoiceChannelConfig,
 )
 
-_POLL_ATTEMPTS = 5
+_POLL_ATTEMPTS = 10
 _POLL_BASE_DELAY = 0.25
+# Caps the exponential backoff so a higher _POLL_ATTEMPTS doesn't blow up the
+# total wait time — total worst case is comfortably bounded (~11s of sleep)
+# instead of growing exponentially with attempt count.
+_POLL_MAX_DELAY = 1.5
 
 DEFAULT_WELCOME_GREETING = "Hello! How can I assist you today?"
 
@@ -523,9 +527,8 @@ class VoiceChannel(BaseChannel):
     async def end_call(self, call_sid: str) -> bool:
         """Hang up a call and clean up its ConversationRelay session.
 
-        Works on ``call_sid`` alone, in any mode and before a session exists, so
-        it's safe from a call-event handler that fires before the first prompt.
-        Session cleanup no-ops if no tracked session matches.
+        Works on ``call_sid`` alone, whether or not a session exists yet.
+        No-ops the session cleanup if none is tracked.
 
         Does not raise — hanging up an already-ended call is routine (the callee
         hangs up while AMD is still resolving), and handlers shouldn't have to
@@ -565,11 +568,12 @@ class VoiceChannel(BaseChannel):
         which are keyed by conversation id: the Orchestrator conversation id in
         orchestrator mode, the CallSid only in ConversationRelay-only mode.
 
-        Sessions are created on the caller's first prompt, not at WebSocket
-        setup, so this returns ``None`` for a call that connected but hasn't been
-        spoken into. That includes ``on_amd`` under
-        ``machine_detection="Enable"``, which fires before the first prompt by
-        design — hang up with :meth:`end_call`, which needs no session.
+        Relay-only mode creates the session on the caller's first prompt.
+        Orchestrator mode creates it earlier — as soon as the background CO
+        lookup started at WebSocket setup finishes — so it may already exist
+        before the caller has said anything, including before ``on_amd``
+        fires. Either way, treat this as racy and use :meth:`end_call` to hang
+        up, which works whether or not a session exists yet.
 
         At the other end, orchestrator mode keeps the session until Conversation
         Orchestrator's CLOSED webhook, so it outlives the call and
@@ -592,9 +596,10 @@ class VoiceChannel(BaseChannel):
                 ``InitiateVoiceConversationResult.call_sid`` or a call event.
 
         Returns:
-            The session, or ``None`` — no first prompt yet, the call ended, or it
-            landed on another instance (see the horizontal-scaling note in
-            CLAUDE.md).
+            The session, or ``None`` — not created yet (relay-only mode, or
+            orchestrator mode where the background CO lookup hasn't finished),
+            the call ended, or it landed on another instance (see the
+            horizontal-scaling note in CLAUDE.md).
         """
         for session in self._conversations.values():
             if session.call_sid == call_sid:
@@ -628,7 +633,7 @@ class VoiceChannel(BaseChannel):
                     attempt=attempt + 1,
                     found=len(conversations),
                 )
-                await asyncio.sleep(_POLL_BASE_DELAY * (2**attempt))
+                await asyncio.sleep(min(_POLL_BASE_DELAY * (2**attempt), _POLL_MAX_DELAY))
 
         if len(conversations) != 1:
             raise RuntimeError(
@@ -718,6 +723,11 @@ class VoiceChannel(BaseChannel):
 
         conv_id: str | None = None
         session_state = None
+        # This call's background CO conversation lookup task (kicked off
+        # below on "setup"), consumed and reset to None on the first
+        # "prompt". Still non-None in `finally` means the call ended before
+        # any prompt arrived.
+        init_task: asyncio.Task[tuple[str, SessionState | None]] | None = None
 
         try:
             # First message should be 'setup'
@@ -726,8 +736,17 @@ class VoiceChannel(BaseChannel):
                 setup_msg = SetupMessage(**data)
                 call_sid = setup_msg.call_sid
 
-                # Don't initialize conversation yet - wait for first prompt
-                # when ConversationRelay has created the conversation
+                # Kick off the CO conversation lookup now, in the background,
+                # instead of waiting for the first prompt. ConversationRelay
+                # creates the CO conversation as soon as the call connects, not
+                # when the caller speaks, so this overlaps CO's
+                # list_conversations/list_participants polling with the wait
+                # for the caller's first utterance (transcription) rather than
+                # paying that latency serially once the first prompt lands.
+                if call_sid and self.tac.is_orchestrator_enabled():
+                    init_task = asyncio.create_task(
+                        self._initialize_conversation(call_sid, setup_msg, websocket)
+                    )
 
                 # Process all subsequent messages
                 while True:
@@ -736,10 +755,15 @@ class VoiceChannel(BaseChannel):
 
                     if msg_type == "prompt":
                         if not conv_id and call_sid:
-                            if self.tac.is_orchestrator_enabled():
-                                conv_id, session_state = await self._initialize_conversation(
-                                    call_sid, setup_msg, websocket
-                                )
+                            if init_task is not None:
+                                # Clear before awaiting so a failure here
+                                # doesn't leave `finally` re-awaiting (and
+                                # re-logging) this same task. If still
+                                # polling, this just waits it out. (None here
+                                # only means relay-only mode — see "setup".)
+                                task_to_await = init_task
+                                init_task = None
+                                conv_id, session_state = await task_to_await
                             else:
                                 conv_id = call_sid
                                 self._websocket_manager.add_websocket(conv_id, websocket)
@@ -780,9 +804,43 @@ class VoiceChannel(BaseChannel):
         except Exception as e:
             self.logger.error(f"WebSocket error: {str(e)}")
         finally:
+            cancelled_error: asyncio.CancelledError | None = None
+            we_cancelled_it = False
+            if init_task is not None:
+                # Call ended before any prompt arrived, so the background
+                # lookup was never awaited.
+                if not init_task.done():
+                    init_task.cancel()
+                    we_cancelled_it = True
+                result: tuple[str, SessionState | None] | None
+                try:
+                    result = await init_task
+                except asyncio.CancelledError as e:
+                    # Defer re-raise decision until after cleanup below;
+                    # we_cancelled_it (not init_task.cancelled(), which can't
+                    # tell the two apart) decides whether to.
+                    cancelled_error = e
+                    result = None
+                except Exception as e:
+                    # No prompt ever arrived to surface this failure via the
+                    # outer except Exception above, so log it here instead.
+                    self.logger.error(
+                        f"Background CO conversation lookup failed: {e}",
+                        call_sid=call_sid,
+                    )
+                    result = None
+                if result is not None and conv_id is None:
+                    # The lookup already registered the session/websocket
+                    # before anyone claimed conv_id — adopt it so it's
+                    # cleaned up instead of leaked.
+                    conv_id = result[0]
             if conv_id:
                 self.logger.debug("Cleanup - removing WebSocket", conversation_id=conv_id)
                 await self._cleanup_connection(conv_id)
+            if cancelled_error is not None and not we_cancelled_it:
+                # A real external cancellation, not the one we caused above —
+                # propagate it now that cleanup ran.
+                raise cancelled_error
 
     def _merge_call_options(self, per_call: CallOptions | None) -> CallOptions | None:
         """Overlay ``per_call`` onto ``VoiceChannelConfig.default_call_options``.
