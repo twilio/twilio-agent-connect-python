@@ -179,9 +179,13 @@ class TestProfileLookupInMemoryRetrieval:
 
         # Verify first profile was used
         assert session.profile_id == "mem_profile_00000000000000000000000001"
+        # conversation_id is omitted (not "conv_test_123") when query is None:
+        # passing conversation_id without a query triggers expensive
+        # server-side query expansion, which this call has no per-turn topic
+        # to justify anyway.
         tac.conversation_memory_client.retrieve_memory.assert_called_once_with(
             profile_id="mem_profile_00000000000000000000000001",
-            conversation_id="conv_test_123",
+            conversation_id=None,
             query=None,
             observations_limit=20,
             summaries_limit=5,

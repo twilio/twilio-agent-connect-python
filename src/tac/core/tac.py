@@ -190,33 +190,69 @@ class TAC:
                     )
                     raise ValueError("No profile_id or author_info available")
 
-            if conversation_context.profile_id and not conversation_context.profile:
-                try:
-                    profile_response = await self.conversation_memory_client.get_profile(
-                        profile_id=conversation_context.profile_id,
-                        trait_groups=self.config.memory_config.trait_groups,
-                    )
-                    conversation_context.profile = profile_response
-                except asyncio.CancelledError:
-                    raise
-                except Exception as e:
-                    self.logger.warning(
-                        f"Failed to fetch profile for {conversation_context.profile_id}: {e}. "
-                        "Continuing without profile data.",
-                        exc_info=True,
-                    )
+            # profile_id is guaranteed non-None here: the block above either
+            # already had it, resolved it via lookup, or raised. assert makes
+            # that explicit for type checkers that don't trace the if/raise
+            # control flow above (mypy does; not all do); pulled into a
+            # local so every use below is unambiguously `str`.
+            assert conversation_context.profile_id is not None
+            profile_id: str = conversation_context.profile_id
 
             # Get memory retrieval configuration
             cfg = self.config.memory_config
-            memory_response = await self.conversation_memory_client.retrieve_memory(
-                profile_id=conversation_context.profile_id,
-                conversation_id=conversation_context.conversation_id,
+            # Per Twilio Memory docs, passing conversation_id without a query
+            # triggers server-side "query expansion" — an LLM call to infer
+            # a query from the conversation's history — which is expensive
+            # (observed 3-10s) and, in this SDK, only ever happens on "once"
+            # mode's cache-priming fetch (query=None). That fetch has no
+            # per-turn topic to rank against anyway, so omit conversation_id
+            # too when query is None: this drops relevance-based ranking in
+            # favor of most-recent-first ordering (same memory types, no
+            # data lost, per the docs), trading conversation-aware ranking
+            # for skipping the expensive expansion call. "always" mode
+            # (real per-turn query) is unaffected — conversation_id still
+            # passed whenever query is provided.
+            memory_call = self.conversation_memory_client.retrieve_memory(
+                profile_id=profile_id,
+                conversation_id=(
+                    conversation_context.conversation_id if query is not None else None
+                ),
                 query=query,
                 observations_limit=cfg.observations_limit,
                 summaries_limit=cfg.summaries_limit,
                 communications_limit=cfg.communications_limit,
                 relevance_threshold=cfg.relevance_threshold,
             )
+
+            if not conversation_context.profile:
+                # get_profile only needs profile_id, which is already
+                # resolved above — it doesn't depend on memory_call's result
+                # (or vice versa), so run them concurrently instead of
+                # paying both round trips serially.
+                profile_call = self.conversation_memory_client.get_profile(
+                    profile_id=profile_id,
+                    trait_groups=cfg.trait_groups,
+                )
+                profile_result: Any
+                memory_response: Any
+                profile_result, memory_response = await asyncio.gather(
+                    profile_call, memory_call, return_exceptions=True
+                )
+                if isinstance(profile_result, BaseException):
+                    if isinstance(profile_result, asyncio.CancelledError):
+                        raise profile_result
+                    self.logger.warning(
+                        f"Failed to fetch profile for {profile_id}: "
+                        f"{profile_result}. Continuing without profile data.",
+                        exc_info=profile_result,
+                    )
+                else:
+                    conversation_context.profile = profile_result
+                if isinstance(memory_response, BaseException):
+                    raise memory_response
+            else:
+                memory_response = await memory_call
+
             return TACMemoryResponse(memory_response)
 
         except Exception as e:
