@@ -224,9 +224,7 @@ class TAC:
                 communications_limit=cfg.communications_limit,
                 relevance_threshold=cfg.relevance_threshold,
             )
-            self.logger.debug(
-                "Recall query_time", query_time_ms=memory_response.meta.query_time
-            )
+            self.logger.debug("Recall query_time", query_time_ms=memory_response.meta.query_time)
             return TACMemoryResponse(memory_response)
 
         except Exception as e:

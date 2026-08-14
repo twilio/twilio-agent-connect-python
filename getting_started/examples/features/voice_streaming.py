@@ -54,9 +54,7 @@ async def handle_message_ready(
     agent_input = history + [{"role": "user", "content": user_message}]
 
     # Inject retrieved memory and profile into this turn's instructions.
-    turn_instructions = MemoryPromptBuilder.compose(
-        SYSTEM_INSTRUCTIONS, memory_response, context
-    )
+    turn_instructions = MemoryPromptBuilder.compose(SYSTEM_INSTRUCTIONS, memory_response, context)
     turn_agent = agent.clone(instructions=turn_instructions)
 
     async def stream_tokens() -> AsyncGenerator[str, None]:
