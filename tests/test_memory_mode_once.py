@@ -158,6 +158,10 @@ async def test_once_mode_caches_memory_on_first_retrieval() -> None:
 
     # Verify retrieve_memory was only called once (on first message)
     assert retrieve_memory_mock.call_count == 1
+    # "once" mode's cache-priming fetch has no per-turn topic, so
+    # conversation_id is left unset to avoid triggering server-side
+    # query expansion.
+    assert retrieve_memory_mock.call_args.kwargs["conversation_id"] is None
 
     # Verify all callbacks received memory response
     assert len(captured_memory_responses) == 3

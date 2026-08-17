@@ -138,6 +138,7 @@ class TAC:
         self,
         conversation_context: ConversationSession,
         query: str | None = None,
+        conversation_id: str | None = None,
     ) -> TACMemoryResponse:
         """Retrieve memories from Memory Store with fallback to Conversation Orchestrator.
 
@@ -149,6 +150,12 @@ class TAC:
         Args:
             conversation_context: Session containing conversation and profile information.
             query: Optional search query to filter memories.
+            conversation_id: Passed through to the /Recall request as-is; the
+                caller decides whether (and which) conversation_id to send.
+                Passing one without a query makes Twilio Memory infer a query
+                from that conversation's history — an expensive server-side
+                step — so leave this unset for fetches with no per-turn topic
+                to justify that cost (e.g. "once" mode's cache-priming fetch).
 
         Returns:
             Memory response containing conversation history and profile data.
@@ -210,13 +217,14 @@ class TAC:
             cfg = self.config.memory_config
             memory_response = await self.conversation_memory_client.retrieve_memory(
                 profile_id=conversation_context.profile_id,
-                conversation_id=conversation_context.conversation_id,
+                conversation_id=conversation_id,
                 query=query,
                 observations_limit=cfg.observations_limit,
                 summaries_limit=cfg.summaries_limit,
                 communications_limit=cfg.communications_limit,
                 relevance_threshold=cfg.relevance_threshold,
             )
+            self.logger.debug("Recall query_time", query_time_ms=memory_response.meta.query_time)
             return TACMemoryResponse(memory_response)
 
         except Exception as e:

@@ -89,7 +89,9 @@ class TestMemoryFallback:
         )
 
         # Execute
-        result = await tac.retrieve_memory(context, query="test query")
+        result = await tac.retrieve_memory(
+            context, query="test query", conversation_id=context.conversation_id
+        )
 
         # Verify
         tac.conversation_memory_client.retrieve_memory.assert_called_once_with(

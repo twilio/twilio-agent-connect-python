@@ -302,7 +302,9 @@ class BaseChannel(ABC):
 
         if self.memory_mode == "always":
             try:
-                memory_response = await self.tac.retrieve_memory(session, query=query)
+                memory_response = await self.tac.retrieve_memory(
+                    session, query=query, conversation_id=session.conversation_id
+                )
                 self.logger.debug(
                     "Memory retrieved",
                     conversation_id=conv_id,
@@ -329,7 +331,9 @@ class BaseChannel(ABC):
                     )
                     memory_response = session.cached_memory
                 else:
-                    # First retrieval - use empty query and cache result
+                    # First retrieval - use empty query and cache result. No
+                    # per-turn topic here, so leave conversation_id unset too
+                    # (avoids an expensive server-side query-expansion step).
                     try:
                         memory_response = await self.tac.retrieve_memory(session, query=None)
                         session.cached_memory = memory_response
