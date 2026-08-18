@@ -76,7 +76,10 @@ members = ["tac"]
 tac = { workspace = true }
 
 [build-system]
-requires = ["hatchling"]
+# hatchling>=1.30 defaults to Metadata-Version 2.5, which the org-allowlisted
+# pypa/gh-action-pypi-publish pin (v1.14.0) can't validate yet. Cap below that
+# until a newer, allowlisted publish action pin is available.
+requires = ["hatchling<1.30"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
