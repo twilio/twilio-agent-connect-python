@@ -4,7 +4,9 @@ import asyncio
 from abc import ABC, abstractmethod
 from collections import OrderedDict
 from collections.abc import AsyncGenerator
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+import httpx
 
 from tac import TAC
 from tac.core.logging import get_logger
@@ -12,6 +14,9 @@ from tac.models.conversation import ParticipantResponse
 from tac.models.memory import MemoryMode
 from tac.models.session import ConversationSession
 from tac.models.tac import TACMemoryResponse
+
+if TYPE_CHECKING:
+    from tac.context.conversation import ConversationClient
 
 # Participant types that represent TAC itself at TAC's (channel, address).
 # `AI_AGENT` is the canonical type; `AGENT` is the legacy Conversation
@@ -64,6 +69,10 @@ class BaseChannel(ABC):
         # Webhook deduplication
         self._processed_tokens: OrderedDict[str, bool] = OrderedDict()
         self._max_tracked_tokens = dedup_capacity
+
+        # Background reconciliation of _conversations against Orchestrator.
+        # Started lazily on the first conversation (see _ensure_sweeper_started).
+        self._sweeper_task: asyncio.Task[None] | None = None
 
     @abstractmethod
     async def process_webhook(
@@ -248,7 +257,175 @@ class BaseChannel(ABC):
             conversation_id=conv_id,
             profile_id=profile_id,
         )
+        self._ensure_sweeper_started()
         return self._conversations[conv_id]
+
+    def _ensure_sweeper_started(self) -> None:
+        """Start the conversation sweeper on first use, if it's enabled.
+
+        Started here rather than at construction because channels are routinely
+        built at import time, before there's a running event loop to attach a
+        task to. `_start_conversation` always runs inside a request or WebSocket
+        handler, so by then there is one.
+        """
+        if self._sweeper_task is not None and not self._sweeper_task.done():
+            return
+        if self.tac.config.conversation_sweep_interval is None:
+            return
+        if self.tac.conversation_orchestrator_client is None:
+            # ConversationRelay-only mode: no Orchestrator to reconcile against.
+            return
+
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            self.logger.debug(
+                "No running event loop; conversation sweeper not started",
+                channel=self.get_channel_name(),
+            )
+            return
+
+        self._sweeper_task = asyncio.create_task(
+            self._sweeper_loop(),
+            name=f"tac-conversation-sweeper-{self.get_channel_name()}",
+        )
+        self.logger.debug(
+            "Conversation sweeper started",
+            channel=self.get_channel_name(),
+            interval_seconds=self.tac.config.conversation_sweep_interval,
+        )
+
+    async def _sweeper_loop(self) -> None:
+        """Sweep on a fixed interval until cancelled.
+
+        Sleeps before the first pass — a conversation that was just created has
+        nothing to reconcile. A failed pass is logged and the loop continues; only
+        cancellation stops it.
+        """
+        interval = self.tac.config.conversation_sweep_interval
+        if interval is None:
+            return
+
+        while True:
+            await asyncio.sleep(interval)
+            try:
+                await self._sweep_closed_conversations()
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                self.logger.error(
+                    "Conversation sweep failed",
+                    channel=self.get_channel_name(),
+                    error=str(e),
+                    exc_info=True,
+                )
+
+    async def _sweep_closed_conversations(self) -> None:
+        """Drop locally tracked conversations that Orchestrator no longer has open.
+
+        Backstops the `CONVERSATION_UPDATED`/`CLOSED` webhook, which in a
+        multi-instance deployment can land on an instance that never tracked the
+        conversation — leaving the instance that did hold it leaking the session.
+
+        Checks each tracked conversation individually. The Conversations API has
+        no way to filter a listing by a set of IDs and no batch-status endpoint,
+        so the alternative would be paging every open conversation in the whole
+        configuration and inferring closure from absence — which costs work
+        proportional to *account-wide* traffic this deployment doesn't control,
+        and isn't sound anyway: a paginated listing isn't a snapshot, so a
+        conversation can shift pages mid-walk and be wrongly declared gone. One
+        request per tracked conversation scales with this instance's own load,
+        which is self-limiting, and every answer is authoritative.
+
+        Evicts on `CLOSED` or `404` only. `ACTIVE` and `INACTIVE` are both live
+        states (`INACTIVE` conversations can return to `ACTIVE`), and any other
+        error is inconclusive and leaves the session alone — a transient
+        Orchestrator failure must not tear down live conversations.
+
+        Eviction goes through `_end_conversation`, so `on_conversation_ended`
+        fires just as it would have on the webhook.
+        """
+        co_client = self.tac.conversation_orchestrator_client
+        if co_client is None:
+            return
+
+        # Snapshot: the dict mutates while we await.
+        conv_ids = list(self._conversations)
+        if not conv_ids:
+            return
+
+        swept = 0
+        for conv_id in conv_ids:
+            closed = await self._is_conversation_closed(co_client, conv_id)
+            if not closed:
+                continue
+            # Re-check: the webhook may have cleaned this up while we awaited.
+            if conv_id not in self._conversations:
+                continue
+            self.logger.info(
+                "CONVERSATION | Sweeping conversation closed at Orchestrator",
+                conversation_id=conv_id,
+                channel=self.get_channel_name(),
+            )
+            await self._end_conversation(conv_id)
+            swept += 1
+
+        if swept:
+            self.logger.debug(
+                "Conversation sweep complete",
+                channel=self.get_channel_name(),
+                checked=len(conv_ids),
+                swept=swept,
+                remaining=len(self._conversations),
+            )
+
+    async def _is_conversation_closed(self, co_client: "ConversationClient", conv_id: str) -> bool:
+        """Whether Orchestrator reports `conv_id` as closed or unknown.
+
+        Returns False for anything inconclusive, so callers fail closed and keep
+        the session.
+        """
+        try:
+            conversation = await co_client.get_conversation(conv_id)
+        except httpx.HTTPStatusError as e:
+            if e.response is not None and e.response.status_code == 404:
+                return True
+            self.logger.warning(
+                "Conversation sweep could not check conversation; leaving it tracked",
+                conversation_id=conv_id,
+                status_code=getattr(e.response, "status_code", None),
+                error=str(e),
+            )
+            return False
+        except Exception as e:
+            self.logger.warning(
+                "Conversation sweep could not check conversation; leaving it tracked",
+                conversation_id=conv_id,
+                error=str(e),
+            )
+            return False
+
+        return conversation.status == "CLOSED"
+
+    async def stop_conversation_sweeper(self) -> None:
+        """Stop the background conversation sweeper, if running.
+
+        Called for deterministic teardown (tests, graceful shutdown). Safe to call
+        when the sweeper was never started or is already stopped.
+        """
+        task = self._sweeper_task
+        self._sweeper_task = None
+        if task is None or task.done():
+            return
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        self.logger.debug(
+            "Conversation sweeper stopped",
+            channel=self.get_channel_name(),
+        )
 
     async def _end_conversation(self, conv_id: str) -> None:
         """

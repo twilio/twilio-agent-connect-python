@@ -496,6 +496,66 @@ class TestConversationClient:
 
     @pytest.mark.asyncio
     @patch("httpx.AsyncClient")
+    async def test_get_conversation_success(self, mock_async_client_class):
+        """get_conversation addresses one conversation by ID and parses the response."""
+        mock_response = Mock()
+        mock_response.json.return_value = {
+            "id": "CH123456",
+            "accountId": "AC123456",
+            "configurationId": "conv_configuration_test123",
+            "status": "CLOSED",
+        }
+        mock_response.raise_for_status = Mock()
+
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(return_value=mock_response)
+        mock_async_client_class.return_value.__aenter__.return_value = mock_client
+
+        client = ConversationClient(
+            api_key="SK123456",
+            api_secret="test_token",
+            configuration_id="conv_configuration_test123",
+        )
+
+        result = await client.get_conversation("CH123456")
+
+        mock_client.get.assert_called_once_with(
+            "https://conversations.twilio.com/v2/Conversations/CH123456"
+        )
+        assert isinstance(result, ConversationResponse)
+        assert result.id == "CH123456"
+        assert result.status == "CLOSED"
+
+    @pytest.mark.asyncio
+    @patch("httpx.AsyncClient")
+    async def test_get_conversation_propagates_http_error(self, mock_async_client_class):
+        """A 404 surfaces as HTTPStatusError so callers can distinguish 'gone'."""
+        mock_response = Mock()
+        mock_response.status_code = 404
+        mock_response.text = "Not Found"
+        mock_response.raise_for_status = Mock(
+            side_effect=httpx.HTTPStatusError(
+                "404 Not Found", request=Mock(), response=mock_response
+            )
+        )
+
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(return_value=mock_response)
+        mock_async_client_class.return_value.__aenter__.return_value = mock_client
+
+        client = ConversationClient(
+            api_key="SK123456",
+            api_secret="test_token",
+            configuration_id="conv_configuration_test123",
+        )
+
+        with pytest.raises(httpx.HTTPStatusError) as exc_info:
+            await client.get_conversation("CHmissing")
+
+        assert exc_info.value.response.status_code == 404
+
+    @pytest.mark.asyncio
+    @patch("httpx.AsyncClient")
     async def test_update_participant_success(self, mock_async_client_class):
         """Test update_participant promotes to AI_AGENT and returns updated record."""
         mock_response = Mock()

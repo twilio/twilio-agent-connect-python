@@ -103,6 +103,46 @@ class ConversationClient(BaseAPIClient):
             )
             raise
 
+    async def get_conversation(self, conversation_id: str) -> ConversationResponse:
+        """
+        Fetch a single conversation by ID.
+
+        Unlike `list_conversations`, this addresses one conversation directly, so
+        callers holding a known ID don't have to page the whole collection. Used
+        by the channel conversation sweeper to check whether a locally tracked
+        conversation is still open.
+
+        Args:
+            conversation_id: The conversation ID to fetch
+
+        Returns:
+            ConversationResponse object containing the conversation details
+
+        Raises:
+            httpx.HTTPStatusError: If the conversation does not exist (404) or the
+                request otherwise fails
+            httpx.HTTPError: If the API request fails
+        """
+        url = f"{self.base_url}/v2/Conversations/{conversation_id}"
+
+        try:
+            async with self._get_client() as client:
+                response = await client.get(url)
+                response.raise_for_status()
+                conversation = ConversationResponse(**response.json())
+                return conversation
+
+        except httpx.HTTPError as e:
+            response_text = (
+                getattr(e.response, "text", "No response body")
+                if hasattr(e, "response")
+                else "No response"
+            )
+            self.logger.error(
+                f"Failed to get conversation: {e}\nURL: {url}\nResponse: {response_text}"
+            )
+            raise
+
     async def add_participant(
         self,
         conversation_id: str,

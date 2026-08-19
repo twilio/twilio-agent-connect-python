@@ -12,6 +12,12 @@ CallEventKind = Literal["status", "amd", "recording"]
 CALL_EVENT_KINDS: tuple[CallEventKind, ...] = get_args(CallEventKind)
 """Iterable form of :data:`CallEventKind`, for registering every route."""
 
+DEFAULT_CONVERSATION_SWEEP_INTERVAL = 300.0
+"""Default seconds between channel conversation-sweep passes (5 minutes)."""
+
+_SWEEP_DISABLED_VALUES = frozenset({"none", "off", "disabled", "0"})
+"""Env-var spellings that disable the conversation sweeper."""
+
 
 class ConversationIntelligenceConfig(BaseModel):
     """
@@ -214,6 +220,23 @@ class TACConfig(BaseModel):
         ),
     )
 
+    conversation_sweep_interval: float | None = Field(
+        default=DEFAULT_CONVERSATION_SWEEP_INTERVAL,
+        description=(
+            "How often (in seconds) each channel reconciles its locally tracked "
+            "conversations against Conversation Orchestrator, dropping any that "
+            "Orchestrator reports as `CLOSED` or no longer knows about.\n\n"
+            "This backstops the `CONVERSATION_UPDATED`/`CLOSED` webhook: in a "
+            "multi-instance deployment that webhook can land on an instance that "
+            "never tracked the conversation, so the instance holding it never "
+            "cleans up and leaks the session. Defaults to 300 seconds (5 minutes).\n\n"
+            "Set to `None` to disable the sweeper entirely. The sweeper is also "
+            "inert in ConversationRelay-only mode, which has no Orchestrator to "
+            "ask."
+        ),
+        gt=0,
+    )
+
     memory_config: TwilioMemoryConfig = Field(
         default_factory=TwilioMemoryConfig,
         description="Twilio Memory configuration for controlling retrieval limits, relevance "
@@ -377,6 +400,29 @@ class TACConfig(BaseModel):
         },
     )
 
+    @staticmethod
+    def _sweep_interval_from_env() -> float | None:
+        """Parse `TWILIO_CONVERSATION_SWEEP_INTERVAL` into a `float | None`.
+
+        Unset or blank falls back to the default; `none`/`off`/`disabled`/`0`
+        (case-insensitive) disables the sweeper.
+        """
+        raw = os.environ.get("TWILIO_CONVERSATION_SWEEP_INTERVAL")
+        if raw is None:
+            return DEFAULT_CONVERSATION_SWEEP_INTERVAL
+        raw = raw.strip()
+        if not raw:
+            return DEFAULT_CONVERSATION_SWEEP_INTERVAL
+        if raw.lower() in _SWEEP_DISABLED_VALUES:
+            return None
+        try:
+            return float(raw)
+        except ValueError as e:
+            raise ValueError(
+                "Invalid TWILIO_CONVERSATION_SWEEP_INTERVAL: expected a positive number of "
+                f"seconds, or one of {sorted(_SWEEP_DISABLED_VALUES)} to disable. Got {raw!r}."
+            ) from e
+
     @classmethod
     def from_env(cls) -> "TACConfig":
         """
@@ -396,6 +442,10 @@ class TACConfig(BaseModel):
           (when omitted, TAC runs in ConversationRelay-only mode)
 
         **Optional:**
+
+        - `TWILIO_CONVERSATION_SWEEP_INTERVAL`: Seconds between conversation-sweep
+          passes. Default: 300. Set to `none`, `off`, `disabled`, or `0` to disable
+          the sweeper.
 
         - `TWILIO_RCS_SENDER_ID`: RCS Sender ID for RCS channel
         - `TWILIO_WHATSAPP_NUMBER`: WhatsApp-enabled phone number
@@ -436,6 +486,7 @@ class TACConfig(BaseModel):
 
         return cls(
             conversation_configuration_id=os.environ.get("TWILIO_CONVERSATION_CONFIGURATION_ID"),
+            conversation_sweep_interval=cls._sweep_interval_from_env(),
             account_sid=os.environ["TWILIO_ACCOUNT_SID"],
             auth_token=os.environ["TWILIO_AUTH_TOKEN"],
             api_key=os.environ["TWILIO_API_KEY"],
