@@ -114,6 +114,12 @@ class TACFastAPIServer:
         self.voice_channel = voice_channel
         self.messaging_channels: list[MessagingChannel] = messaging_channels or []
 
+        if any(channel is None for channel in self.messaging_channels):
+            raise TypeError(
+                "messaging_channels must not contain None — filter out any "
+                "unbuilt/unconfigured channels before passing the list in."
+            )
+
         if self.voice_channel is not None:
             self._validate_voice_url_config()
 

@@ -178,6 +178,36 @@ class TestVoiceUrlConfigValidationAtStartup:
         )  # no raise: /twiml vs /twiml/status, /twiml/amd, /twiml/recording
 
 
+class TestMessagingChannelsValidationAtStartup:
+    """A None entry in messaging_channels (e.g. a channel a caller only
+    conditionally builds) must fail fast at construction, not surface later
+    as an AttributeError deep in webhook dispatch."""
+
+    def test_raises_when_messaging_channels_contains_none(self) -> None:
+        from tac.channels.sms import SMSChannel
+        from tac.server import TACFastAPIServer
+
+        tac = TAC(get_test_config())
+        sms = SMSChannel(tac)
+
+        with pytest.raises(TypeError, match="messaging_channels"):
+            TACFastAPIServer(tac=tac, messaging_channels=[sms, None])  # type: ignore[list-item]
+
+    def test_passes_with_no_none_entries(self) -> None:
+        from tac.channels.sms import SMSChannel
+        from tac.server import TACFastAPIServer
+
+        tac = TAC(get_test_config())
+        sms = SMSChannel(tac)
+        TACFastAPIServer(tac=tac, messaging_channels=[sms])  # no raise
+
+    def test_passes_with_none_messaging_channels(self) -> None:
+        from tac.server import TACFastAPIServer
+
+        tac = TAC(get_test_config())
+        TACFastAPIServer(tac=tac, messaging_channels=None)  # no raise
+
+
 class TestCallEventRoutes:
     """One route per Twilio callback; the route is the event discriminator."""
 
