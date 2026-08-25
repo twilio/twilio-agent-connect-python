@@ -90,7 +90,7 @@ def generate_twiml(
 
     This is a low-level function. Most users should call
     ``VoiceChannel.handle_incoming_call`` instead — it layers in TAC defaults,
-    static ``twiml_options`` from ``VoiceChannelConfig``, and any per-call
+    static default_twiml_options from ConversationRelayProviderConfig, and any per-call
     customizer output.
 
     The WebSocket URL may be passed positionally or as ``options.websocket_url``

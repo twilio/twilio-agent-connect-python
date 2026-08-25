@@ -23,7 +23,10 @@ RecordingHandler = Callable[[RecordingEvent], Awaitable[None]]
 
 class VoiceChannelConfig(BaseModel):
     """
-    Configuration for Voice channel.
+    Configuration for ``ConversationRelayProvider`` (the default
+    ``VoiceProvider``). Only this provider supports ``memory_mode``/
+    ``default_call_options`` — no other provider integrates with memory or
+    outbound Calls API parameters.
 
     TwiML configuration layers (highest precedence first):
 
@@ -101,3 +104,8 @@ class VoiceChannelConfig(BaseModel):
         "non-default paths; they override the URLs TAC would derive from "
         "voice_public_domain + voice_call_event_path.",
     )
+
+
+# ConversationRelayProvider's config is this same class under its new name —
+# not a separate model, so this alias is the only place the two names diverge.
+ConversationRelayProviderConfig = VoiceChannelConfig

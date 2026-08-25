@@ -6,7 +6,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from tac import TAC
-from tac.channels.voice import VoiceChannel, generate_twiml
+from tac.channels.voice import (
+    ConversationRelayProvider,
+    ConversationRelayProviderConfig,
+    VoiceChannel,
+    generate_twiml,
+)
 from tac.models.conversation import ConversationResponse
 from tac.models.handoff import PendingHandoffData
 from tac.models.memory import MemoryRetrievalResponse
@@ -42,8 +47,8 @@ class TestVoiceChannel:
         channel = VoiceChannel(tac)
 
         assert channel.tac == tac
-        assert channel._websocket_manager is not None
-        assert len(channel._websocket_manager) == 0
+        assert channel._provider._websocket_manager is not None
+        assert len(channel._provider._websocket_manager) == 0
 
     def test_get_channel_name(self) -> None:
         """Test get_channel_name returns 'voice'."""
@@ -69,7 +74,7 @@ class TestVoiceChannel:
         )
 
         # Call handler directly
-        await channel._handle_prompt("CALL123", prompt_msg)
+        await channel._provider._handle_prompt(channel, "CALL123", prompt_msg)
 
         # With memory_mode="never", memory is not fetched - test passes if no exception
 
@@ -103,7 +108,10 @@ class TestVoiceChannel:
         )
 
         # Create channel with memory_mode enabled (default is "never")
-        channel = VoiceChannel(tac, config={"memory_mode": "always"})
+        channel = VoiceChannel(
+            tac,
+            config=ConversationRelayProvider(ConversationRelayProviderConfig(memory_mode="always")),
+        )
 
         # Setup conversation with profile_id
         channel._start_conversation("CALL123", "profile_test_123")
@@ -116,7 +124,7 @@ class TestVoiceChannel:
         )
 
         # Call handler directly
-        await channel._handle_prompt("CALL123", prompt_msg)
+        await channel._provider._handle_prompt(channel, "CALL123", prompt_msg)
 
         # Verify memory retrieval was called
         tac.conversation_memory_client.retrieve_memory.assert_called_once()
@@ -163,7 +171,9 @@ class TestVoiceChannel:
 
         setup_msg = SetupMessage(type="setup", callSid="CALL123", **{"from": "+15559998888"})
 
-        conv_id, _ = await channel._initialize_conversation("CALL123", setup_msg, MagicMock())
+        conv_id, _ = await channel._provider._initialize_conversation(
+            channel, "CALL123", setup_msg, MagicMock()
+        )
 
         assert conv_id == "conv_abc"
         session = channel._conversations["conv_abc"]
@@ -215,7 +225,9 @@ class TestVoiceChannel:
 
         setup_msg = SetupMessage(type="setup", callSid="CALL456", **{"from": "+15559998888"})
 
-        conv_id, _ = await channel._initialize_conversation("CALL456", setup_msg, MagicMock())
+        conv_id, _ = await channel._provider._initialize_conversation(
+            channel, "CALL456", setup_msg, MagicMock()
+        )
 
         session = channel._conversations[conv_id]
         assert session.ai_agent_info is None
@@ -237,7 +249,7 @@ class TestVoiceChannel:
         )
 
         # Call handler directly
-        channel._handle_interrupt("CALL123", interrupt_msg)
+        channel._provider._handle_interrupt(channel, "CALL123", interrupt_msg)
 
         # Test passes if no exception is raised
 
@@ -252,7 +264,7 @@ class TestVoiceChannel:
 
         # Mock websocket and register it with the manager
         mock_websocket = AsyncMock()
-        channel._websocket_manager.add_websocket("CALL123", mock_websocket)
+        channel._provider._websocket_manager.add_websocket("CALL123", mock_websocket)
 
         # Send response without role
         await channel.send_response("CALL123", "Hello there")
@@ -282,7 +294,7 @@ class TestVoiceChannel:
         )
 
         mock_websocket = AsyncMock()
-        channel._websocket_manager.add_websocket("CALL123", mock_websocket)
+        channel._provider._websocket_manager.add_websocket("CALL123", mock_websocket)
 
         await channel.send_response("CALL123", "Transferring you now.")
 
@@ -320,17 +332,17 @@ class TestVoiceChannel:
 
         # Add a mock websocket to the manager
         mock_websocket = MagicMock()
-        channel._websocket_manager.add_websocket("CALL123", mock_websocket)
+        channel._provider._websocket_manager.add_websocket("CALL123", mock_websocket)
 
         # Verify websocket is registered
-        assert channel._websocket_manager.has_websocket("CALL123")
+        assert channel._provider._websocket_manager.has_websocket("CALL123")
         assert "CALL123" in channel._conversations
 
         # Clean up connection (WebSocket only)
-        await channel._cleanup_connection("CALL123")
+        await channel._provider._cleanup_connection(channel, "CALL123")
 
         # Verify WebSocket cleanup but conversation still tracked
-        assert not channel._websocket_manager.has_websocket("CALL123")
+        assert not channel._provider._websocket_manager.has_websocket("CALL123")
         assert "CALL123" in channel._conversations
 
     @pytest.mark.asyncio
@@ -357,11 +369,12 @@ class TestVoiceChannel:
     async def test_process_webhook_conversation_inactive(self) -> None:
         """Test that INACTIVE invalidates cached memory when memory_mode='once'."""
 
-        from tac.channels.voice.config import VoiceChannelConfig
-
         tac = TAC(get_test_config())
         # Enable "once" mode to trigger cache invalidation
-        channel = VoiceChannel(tac, config=VoiceChannelConfig(memory_mode="once"))
+        channel = VoiceChannel(
+            tac,
+            config=ConversationRelayProvider(ConversationRelayProviderConfig(memory_mode="once")),
+        )
 
         # Start a conversation
         session = channel._start_conversation("CONV123", "profile_123")
@@ -466,7 +479,7 @@ class TestVoiceChannel:
             conversationId="CALL123",
             voicePrompt="Test message",
         )
-        await channel._handle_prompt("CALL123", prompt_msg)
+        await channel._provider._handle_prompt(channel, "CALL123", prompt_msg)
 
         # Verify callback was invoked
         assert captured_context is not None
@@ -498,7 +511,7 @@ class TestVoiceChannel:
 
         # Mock websocket and register it
         mock_websocket = AsyncMock()
-        channel._websocket_manager.add_websocket("CALL_AUTO_SEND", mock_websocket)
+        channel._provider._websocket_manager.add_websocket("CALL_AUTO_SEND", mock_websocket)
 
         # Create and handle prompt message
         prompt_msg = PromptMessage(
@@ -506,7 +519,7 @@ class TestVoiceChannel:
             conversationId="CALL_AUTO_SEND",
             voicePrompt="Test message",
         )
-        await channel._handle_prompt("CALL_AUTO_SEND", prompt_msg)
+        await channel._provider._handle_prompt(channel, "CALL_AUTO_SEND", prompt_msg)
 
         # Verify websocket.send_text was called once with the auto-sent response
         assert mock_websocket.send_text.call_count == 1
@@ -535,7 +548,7 @@ class TestVoiceChannel:
 
         # Mock websocket and register it
         mock_websocket = AsyncMock()
-        channel._websocket_manager.add_websocket("CALL_NO_AUTO", mock_websocket)
+        channel._provider._websocket_manager.add_websocket("CALL_NO_AUTO", mock_websocket)
 
         # Create and handle prompt message
         prompt_msg = PromptMessage(
@@ -543,7 +556,7 @@ class TestVoiceChannel:
             conversationId="CALL_NO_AUTO",
             voicePrompt="Test message",
         )
-        await channel._handle_prompt("CALL_NO_AUTO", prompt_msg)
+        await channel._provider._handle_prompt(channel, "CALL_NO_AUTO", prompt_msg)
 
         # Verify websocket.send_text was NOT called (callback returned None)
         assert mock_websocket.send_text.call_count == 0
@@ -551,13 +564,15 @@ class TestVoiceChannel:
     @pytest.mark.asyncio
     async def test_handle_incoming_call(self) -> None:
         """Test handle_incoming_call generates valid TwiML with conversation_configuration."""
-        from tac.channels.voice import VoiceChannelConfig
+        from tac.channels.voice import ConversationRelayProvider, ConversationRelayProviderConfig
 
         tac = TAC(get_test_config())
         channel = VoiceChannel(
             tac,
-            config=VoiceChannelConfig(
-                default_twiml_options=TwiMLOptions(welcome_greeting="Welcome!"),
+            config=ConversationRelayProvider(
+                ConversationRelayProviderConfig(
+                    default_twiml_options=TwiMLOptions(welcome_greeting="Welcome!"),
+                )
             ),
         )
 
@@ -593,14 +608,16 @@ class TestVoiceChannel:
         case (e.g. Azure Hosted Agents) appending a per-call token to the
         upgrade URL — done through the existing customizer, no new API surface.
         """
-        from tac.channels.voice import VoiceChannelConfig
+        from tac.channels.voice import ConversationRelayProvider, ConversationRelayProviderConfig
         from tac.models.voice import TwiMLRequest
 
         tac = TAC(get_test_config())
         channel = VoiceChannel(
             tac,
-            config=VoiceChannelConfig(
-                default_twiml_options=TwiMLOptions(welcome_greeting="Welcome!"),
+            config=ConversationRelayProvider(
+                ConversationRelayProviderConfig(
+                    default_twiml_options=TwiMLOptions(welcome_greeting="Welcome!"),
+                )
             ),
         )
 
@@ -628,14 +645,16 @@ class TestVoiceChannel:
     @pytest.mark.asyncio
     async def test_handle_incoming_call_websocket_url_via_default_options(self) -> None:
         """Test default_twiml_options.websocket_url overrides the derived URL."""
-        from tac.channels.voice import VoiceChannelConfig
+        from tac.channels.voice import ConversationRelayProvider, ConversationRelayProviderConfig
 
         tac = TAC(get_test_config())
         override = "wss://static.example.com/socket"
         channel = VoiceChannel(
             tac,
-            config=VoiceChannelConfig(
-                default_twiml_options=TwiMLOptions(websocket_url=override),
+            config=ConversationRelayProvider(
+                ConversationRelayProviderConfig(
+                    default_twiml_options=TwiMLOptions(websocket_url=override),
+                )
             ),
         )
 
@@ -647,14 +666,18 @@ class TestVoiceChannel:
     @pytest.mark.asyncio
     async def test_handle_incoming_call_customizer_beats_default_options(self) -> None:
         """Test customizer websocket_url wins over default_twiml_options (precedence)."""
-        from tac.channels.voice import VoiceChannelConfig
+        from tac.channels.voice import ConversationRelayProvider, ConversationRelayProviderConfig
         from tac.models.voice import TwiMLRequest
 
         tac = TAC(get_test_config())
         channel = VoiceChannel(
             tac,
-            config=VoiceChannelConfig(
-                default_twiml_options=TwiMLOptions(websocket_url="wss://static.example.com/socket"),
+            config=ConversationRelayProvider(
+                ConversationRelayProviderConfig(
+                    default_twiml_options=TwiMLOptions(
+                        websocket_url="wss://static.example.com/socket"
+                    ),
+                )
             ),
         )
 
@@ -697,7 +720,7 @@ class TestVoiceChannel:
         )
 
         # Call handler directly
-        await channel._handle_prompt("CALL111", prompt_msg)
+        await channel._provider._handle_prompt(channel, "CALL111", prompt_msg)
 
         # Voice channel doesn't fetch memory - test passes if no exception raised
 
@@ -718,16 +741,16 @@ class TestVoiceChannel:
         mock_ws_3 = AsyncMock()
 
         # Register websockets with the manager
-        channel._websocket_manager.add_websocket("CALL_001", mock_ws_1)
-        channel._websocket_manager.add_websocket("CALL_002", mock_ws_2)
-        channel._websocket_manager.add_websocket("CALL_003", mock_ws_3)
+        channel._provider._websocket_manager.add_websocket("CALL_001", mock_ws_1)
+        channel._provider._websocket_manager.add_websocket("CALL_002", mock_ws_2)
+        channel._provider._websocket_manager.add_websocket("CALL_003", mock_ws_3)
 
         # Verify all conversations and websockets are tracked
         assert len(channel._conversations) == 3
-        assert len(channel._websocket_manager) == 3
-        assert channel._websocket_manager.has_websocket("CALL_001")
-        assert channel._websocket_manager.has_websocket("CALL_002")
-        assert channel._websocket_manager.has_websocket("CALL_003")
+        assert len(channel._provider._websocket_manager) == 3
+        assert channel._provider._websocket_manager.has_websocket("CALL_001")
+        assert channel._provider._websocket_manager.has_websocket("CALL_002")
+        assert channel._provider._websocket_manager.has_websocket("CALL_003")
 
         # Send responses to each conversation independently
         await channel.send_response("CALL_001", "Response to call 1")
@@ -760,35 +783,35 @@ class TestVoiceChannel:
         channel._start_conversation("CALL_C", "profile_C")
 
         # Register websockets
-        channel._websocket_manager.add_websocket("CALL_A", AsyncMock())
-        channel._websocket_manager.add_websocket("CALL_B", AsyncMock())
-        channel._websocket_manager.add_websocket("CALL_C", AsyncMock())
+        channel._provider._websocket_manager.add_websocket("CALL_A", AsyncMock())
+        channel._provider._websocket_manager.add_websocket("CALL_B", AsyncMock())
+        channel._provider._websocket_manager.add_websocket("CALL_C", AsyncMock())
 
         # Verify initial state
         assert len(channel._conversations) == 3
-        assert len(channel._websocket_manager) == 3
+        assert len(channel._provider._websocket_manager) == 3
 
         # Clean up CALL_B WebSocket only
-        await channel._cleanup_connection("CALL_B")
+        await channel._provider._cleanup_connection(channel, "CALL_B")
 
         # Verify CALL_B WebSocket is cleaned up but conversation still tracked
-        assert not channel._websocket_manager.has_websocket("CALL_B")
+        assert not channel._provider._websocket_manager.has_websocket("CALL_B")
         assert "CALL_B" in channel._conversations
         assert len(channel._conversations) == 3
-        assert len(channel._websocket_manager) == 2
+        assert len(channel._provider._websocket_manager) == 2
 
         # Verify CALL_A and CALL_C are still active
         assert "CALL_A" in channel._conversations
         assert "CALL_C" in channel._conversations
-        assert channel._websocket_manager.has_websocket("CALL_A")
-        assert channel._websocket_manager.has_websocket("CALL_C")
+        assert channel._provider._websocket_manager.has_websocket("CALL_A")
+        assert channel._provider._websocket_manager.has_websocket("CALL_C")
 
         # Clean up remaining WebSockets
-        await channel._cleanup_connection("CALL_A")
-        await channel._cleanup_connection("CALL_C")
+        await channel._provider._cleanup_connection(channel, "CALL_A")
+        await channel._provider._cleanup_connection(channel, "CALL_C")
 
         # Verify WebSockets cleaned up but conversations still tracked
-        assert len(channel._websocket_manager) == 0
+        assert len(channel._provider._websocket_manager) == 0
         assert len(channel._conversations) == 3
 
     @pytest.mark.asyncio
@@ -798,15 +821,15 @@ class TestVoiceChannel:
         channel = VoiceChannel(tac)
 
         # Initially empty
-        assert channel._websocket_manager.get_all_conversation_ids() == []
+        assert channel._provider._websocket_manager.get_all_conversation_ids() == []
 
         # Add multiple websockets
-        channel._websocket_manager.add_websocket("CONV_1", AsyncMock())
-        channel._websocket_manager.add_websocket("CONV_2", AsyncMock())
-        channel._websocket_manager.add_websocket("CONV_3", AsyncMock())
+        channel._provider._websocket_manager.add_websocket("CONV_1", AsyncMock())
+        channel._provider._websocket_manager.add_websocket("CONV_2", AsyncMock())
+        channel._provider._websocket_manager.add_websocket("CONV_3", AsyncMock())
 
         # Get all conversation IDs
-        conv_ids = channel._websocket_manager.get_all_conversation_ids()
+        conv_ids = channel._provider._websocket_manager.get_all_conversation_ids()
 
         # Verify all IDs are returned
         assert len(conv_ids) == 3
@@ -828,8 +851,8 @@ class TestVoiceChannel:
         mock_ws_x = AsyncMock()
         mock_ws_y = AsyncMock()
 
-        channel._websocket_manager.add_websocket("CONV_X", mock_ws_x)
-        channel._websocket_manager.add_websocket("CONV_Y", mock_ws_y)
+        channel._provider._websocket_manager.add_websocket("CONV_X", mock_ws_x)
+        channel._provider._websocket_manager.add_websocket("CONV_Y", mock_ws_y)
 
         # Send multiple messages to each conversation
         await channel.send_response("CONV_X", "Message 1 to X")
@@ -859,19 +882,19 @@ class TestVoiceChannel:
         channel = VoiceChannel(tac)
 
         # Add a websocket
-        channel._websocket_manager.add_websocket("CONV_Z", AsyncMock())
-        assert channel._websocket_manager.has_websocket("CONV_Z")
+        channel._provider._websocket_manager.add_websocket("CONV_Z", AsyncMock())
+        assert channel._provider._websocket_manager.has_websocket("CONV_Z")
 
         # Remove it once
-        channel._websocket_manager.remove_websocket("CONV_Z")
-        assert not channel._websocket_manager.has_websocket("CONV_Z")
+        channel._provider._websocket_manager.remove_websocket("CONV_Z")
+        assert not channel._provider._websocket_manager.has_websocket("CONV_Z")
 
         # Remove it again (should not raise error)
-        channel._websocket_manager.remove_websocket("CONV_Z")
-        assert not channel._websocket_manager.has_websocket("CONV_Z")
+        channel._provider._websocket_manager.remove_websocket("CONV_Z")
+        assert not channel._provider._websocket_manager.has_websocket("CONV_Z")
 
         # Remove non-existent websocket (should not raise error)
-        channel._websocket_manager.remove_websocket("NON_EXISTENT")
+        channel._provider._websocket_manager.remove_websocket("NON_EXISTENT")
 
     @pytest.mark.asyncio
     async def test_websocket_replacement(self) -> None:
@@ -881,23 +904,23 @@ class TestVoiceChannel:
 
         # Add first websocket
         first_ws = AsyncMock()
-        channel._websocket_manager.add_websocket("CONV_REPLACE", first_ws)
+        channel._provider._websocket_manager.add_websocket("CONV_REPLACE", first_ws)
 
         # Verify first websocket is registered
-        retrieved_ws = channel._websocket_manager.get_websocket("CONV_REPLACE")
+        retrieved_ws = channel._provider._websocket_manager.get_websocket("CONV_REPLACE")
         assert retrieved_ws is first_ws
 
         # Add second websocket with same conversation ID
         second_ws = AsyncMock()
-        channel._websocket_manager.add_websocket("CONV_REPLACE", second_ws)
+        channel._provider._websocket_manager.add_websocket("CONV_REPLACE", second_ws)
 
         # Verify second websocket replaced the first
-        retrieved_ws = channel._websocket_manager.get_websocket("CONV_REPLACE")
+        retrieved_ws = channel._provider._websocket_manager.get_websocket("CONV_REPLACE")
         assert retrieved_ws is second_ws
         assert retrieved_ws is not first_ws
 
         # Verify still only one websocket tracked
-        assert len(channel._websocket_manager) == 1
+        assert len(channel._provider._websocket_manager) == 1
 
     @pytest.mark.asyncio
     async def test_send_response_with_invalid_type_raises_error(self) -> None:
@@ -910,7 +933,7 @@ class TestVoiceChannel:
 
         # Mock websocket
         mock_websocket = AsyncMock()
-        channel._websocket_manager.add_websocket("CALL_INVALID", mock_websocket)
+        channel._provider._websocket_manager.add_websocket("CALL_INVALID", mock_websocket)
 
         # Test with integer (invalid type)
         with pytest.raises(TypeError, match="Voice channel requires string or async generator"):
@@ -937,7 +960,7 @@ class TestVoiceChannel:
 
         # Mock websocket
         mock_websocket = AsyncMock()
-        channel._websocket_manager.add_websocket("CALL_STREAM", mock_websocket)
+        channel._provider._websocket_manager.add_websocket("CALL_STREAM", mock_websocket)
 
         # Create async generator
         async def stream_response() -> AsyncGenerator[str, None]:
@@ -966,16 +989,16 @@ class TestVoiceChannel:
         # Start conversation and add a mock websocket
         channel._start_conversation("CALL_CB1", "prof_cb1")
         mock_ws = MagicMock()
-        channel._websocket_manager.add_websocket("CALL_CB1", mock_ws)
+        channel._provider._websocket_manager.add_websocket("CALL_CB1", mock_ws)
 
-        await channel._cleanup_connection("CALL_CB1")
+        await channel._provider._cleanup_connection(channel, "CALL_CB1")
 
         # Callback should NOT be called (conversation still tracked for webhook)
         assert len(captured) == 0
         # Conversation should still be tracked
         assert "CALL_CB1" in channel._conversations
         # WebSocket should be removed
-        assert not channel._websocket_manager.has_websocket("CALL_CB1")
+        assert not channel._provider._websocket_manager.has_websocket("CALL_CB1")
 
     @pytest.mark.asyncio
     async def test_cleanup_connection_removes_websocket_only(self) -> None:
@@ -985,14 +1008,14 @@ class TestVoiceChannel:
 
         channel._start_conversation("CALL_CB2", "prof_cb2")
         mock_ws = MagicMock()
-        channel._websocket_manager.add_websocket("CALL_CB2", mock_ws)
+        channel._provider._websocket_manager.add_websocket("CALL_CB2", mock_ws)
 
-        await channel._cleanup_connection("CALL_CB2")
+        await channel._provider._cleanup_connection(channel, "CALL_CB2")
 
         # Conversation still tracked (waiting for webhook)
         assert "CALL_CB2" in channel._conversations
         # WebSocket removed
-        assert not channel._websocket_manager.has_websocket("CALL_CB2")
+        assert not channel._provider._websocket_manager.has_websocket("CALL_CB2")
 
     @pytest.mark.asyncio
     async def test_webhook_triggers_conversation_ended_callback(self) -> None:
@@ -1030,15 +1053,15 @@ class TestVoiceChannel:
 
         channel._start_conversation("CALL_NOCB", "prof_nocb")
         mock_ws = MagicMock()
-        channel._websocket_manager.add_websocket("CALL_NOCB", mock_ws)
+        channel._provider._websocket_manager.add_websocket("CALL_NOCB", mock_ws)
 
-        await channel._cleanup_connection("CALL_NOCB")
+        await channel._provider._cleanup_connection(channel, "CALL_NOCB")
         # Second cleanup should be a no-op (websocket already removed)
-        await channel._cleanup_connection("CALL_NOCB")
+        await channel._provider._cleanup_connection(channel, "CALL_NOCB")
 
         # Conversation still tracked (only webhook removes it)
         assert "CALL_NOCB" in channel._conversations
-        assert not channel._websocket_manager.has_websocket("CALL_NOCB")
+        assert not channel._provider._websocket_manager.has_websocket("CALL_NOCB")
 
     @pytest.mark.asyncio
     async def test_task_cancellation_with_unified_workflow(self) -> None:
@@ -1085,8 +1108,12 @@ class TestVoiceChannel:
 
         # Create session manager and voice channel
         session_manager = ThreadSafeSessionManager()
+
         voice_channel = VoiceChannel(
-            tac=tac, config={"session_manager": session_manager, "memory_mode": "never"}
+            tac=tac,
+            config=ConversationRelayProvider(
+                {"memory_mode": "never", "session_manager": session_manager}
+            ),
         )
 
         # Setup conversation
@@ -1094,7 +1121,7 @@ class TestVoiceChannel:
 
         # Mock websocket
         mock_websocket = AsyncMock()
-        voice_channel._websocket_manager.add_websocket("CONV_CANCEL_TEST", mock_websocket)
+        voice_channel._provider._websocket_manager.add_websocket("CONV_CANCEL_TEST", mock_websocket)
 
         # Create prompt message
         prompt_data = {
@@ -1107,7 +1134,9 @@ class TestVoiceChannel:
         session_state = session_manager.get_or_create_session("CONV_CANCEL_TEST")
 
         # Start processing prompt (creates task but doesn't await it)
-        await voice_channel._handle_prompt_async("CONV_CANCEL_TEST", prompt_data, session_state)
+        await voice_channel._provider._handle_prompt_async(
+            voice_channel, "CONV_CANCEL_TEST", prompt_data, session_state
+        )
 
         # Verify task was created
         assert session_state.stream_task is not None
@@ -1140,7 +1169,9 @@ class TestVoiceChannel:
         assert chunks_sent > 0, "Should have sent some chunks before cancellation"
 
         # Now process new prompt
-        await voice_channel._handle_prompt_async("CONV_CANCEL_TEST", prompt_data2, session_state)
+        await voice_channel._provider._handle_prompt_async(
+            voice_channel, "CONV_CANCEL_TEST", prompt_data2, session_state
+        )
 
         # Verify new task was created
         assert session_state.stream_task is not None
@@ -1556,15 +1587,17 @@ class TestHandleIncomingCallMerge:
 
     @pytest.mark.asyncio
     async def test_static_options_override_conversation_configuration(self) -> None:
-        from tac.channels.voice import VoiceChannelConfig
+        from tac.channels.voice import ConversationRelayProvider, ConversationRelayProviderConfig
 
         tac = TAC(get_test_config())
         channel = VoiceChannel(
             tac,
-            config=VoiceChannelConfig(
-                default_twiml_options=TwiMLOptions(
-                    conversation_configuration="conv_configuration_custom"
-                ),
+            config=ConversationRelayProvider(
+                ConversationRelayProviderConfig(
+                    default_twiml_options=TwiMLOptions(
+                        conversation_configuration="conv_configuration_custom"
+                    ),
+                )
             ),
         )
         twiml = await channel.handle_incoming_call()
@@ -1614,13 +1647,15 @@ class TestHandleIncomingCallMerge:
     async def test_static_options_action_url_beats_derived_default(self) -> None:
         """A static action_url on default_twiml_options is an explicit user
         choice and wins over the derived cleanup URL."""
-        from tac.channels.voice import VoiceChannelConfig
+        from tac.channels.voice import ConversationRelayProvider, ConversationRelayProviderConfig
 
         tac = TAC(get_test_config())
         channel = VoiceChannel(
             tac,
-            config=VoiceChannelConfig(
-                default_twiml_options=TwiMLOptions(action_url="https://static.example.com/end"),
+            config=ConversationRelayProvider(
+                ConversationRelayProviderConfig(
+                    default_twiml_options=TwiMLOptions(action_url="https://static.example.com/end"),
+                )
             ),
         )
         twiml = await channel.handle_incoming_call()
@@ -1633,7 +1668,7 @@ class TestHandleIncomingCallMerge:
         default_twiml_options.action_url. Verifies the _overlay_fields skip
         invariant — every layer's action_url is funneled through
         _resolve_action_url, never via the field overlay."""
-        from tac.channels.voice import VoiceChannelConfig
+        from tac.channels.voice import ConversationRelayProvider, ConversationRelayProviderConfig
         from tac.models.voice import TwiMLRequest
 
         async def customizer(req: TwiMLRequest) -> TwiMLOptions:
@@ -1642,8 +1677,10 @@ class TestHandleIncomingCallMerge:
         tac = TAC(get_test_config())
         channel = VoiceChannel(
             tac,
-            config=VoiceChannelConfig(
-                default_twiml_options=TwiMLOptions(action_url="https://static.example.com/end"),
+            config=ConversationRelayProvider(
+                ConversationRelayProviderConfig(
+                    default_twiml_options=TwiMLOptions(action_url="https://static.example.com/end"),
+                )
             ),
         )
         channel.on_inbound_call_twiml(customizer)
@@ -1656,7 +1693,7 @@ class TestHandleIncomingCallMerge:
         """Explicit action_url=None on the customizer suppresses the
         <Connect action=...> attribute, even if Studio handoff or a channel
         default would otherwise populate it."""
-        from tac.channels.voice import VoiceChannelConfig
+        from tac.channels.voice import ConversationRelayProvider, ConversationRelayProviderConfig
         from tac.models.voice import TwiMLRequest
 
         async def customizer(req: TwiMLRequest) -> TwiMLOptions:
@@ -1666,8 +1703,10 @@ class TestHandleIncomingCallMerge:
         tac = TAC({**get_test_config(), "studio_handoff_flow_sid": flow_sid})
         channel = VoiceChannel(
             tac,
-            config=VoiceChannelConfig(
-                default_twiml_options=TwiMLOptions(action_url="https://static.example.com/end"),
+            config=ConversationRelayProvider(
+                ConversationRelayProviderConfig(
+                    default_twiml_options=TwiMLOptions(action_url="https://static.example.com/end"),
+                )
             ),
         )
         channel.on_inbound_call_twiml(customizer)
@@ -1678,14 +1717,16 @@ class TestHandleIncomingCallMerge:
     async def test_default_options_action_url_none_suppresses(self) -> None:
         """Explicit action_url=None on default_twiml_options suppresses
         <Connect action=...> channel-wide, even with Studio handoff configured."""
-        from tac.channels.voice import VoiceChannelConfig
+        from tac.channels.voice import ConversationRelayProvider, ConversationRelayProviderConfig
 
         flow_sid = "FW" + "a" * 32
         tac = TAC({**get_test_config(), "studio_handoff_flow_sid": flow_sid})
         channel = VoiceChannel(
             tac,
-            config=VoiceChannelConfig(
-                default_twiml_options=TwiMLOptions(action_url=None),
+            config=ConversationRelayProvider(
+                ConversationRelayProviderConfig(
+                    default_twiml_options=TwiMLOptions(action_url=None),
+                )
             ),
         )
         twiml = await channel.handle_incoming_call()
@@ -1717,14 +1758,13 @@ class TestHandleIncomingCallMerge:
         """Precedence: the application's on_inbound_call_twiml customizer sits
         ABOVE host_twiml_options — a developer's explicit choice wins over the
         host's per-call values (for fields the dev sets)."""
-        from tac.channels.voice import VoiceChannelConfig
         from tac.models.voice import TwiMLRequest
 
         async def app_customizer(req: TwiMLRequest) -> TwiMLOptions:
             return TwiMLOptions(welcome_greeting="App wins")
 
         tac = TAC(get_test_config())
-        channel = VoiceChannel(tac, config=VoiceChannelConfig())
+        channel = VoiceChannel(tac)
         channel.on_inbound_call_twiml(app_customizer)
 
         twiml = await channel.handle_incoming_call(
@@ -1744,13 +1784,15 @@ class TestHandleIncomingCallMerge:
     @pytest.mark.asyncio
     async def test_default_options_beats_host_twiml_options(self) -> None:
         """default_twiml_options sits above host_twiml_options."""
-        from tac.channels.voice import VoiceChannelConfig
+        from tac.channels.voice import ConversationRelayProvider, ConversationRelayProviderConfig
 
         tac = TAC(get_test_config())
         channel = VoiceChannel(
             tac,
-            config=VoiceChannelConfig(
-                default_twiml_options=TwiMLOptions(welcome_greeting="Channel default"),
+            config=ConversationRelayProvider(
+                ConversationRelayProviderConfig(
+                    default_twiml_options=TwiMLOptions(welcome_greeting="Channel default"),
+                )
             ),
         )
 
@@ -1763,17 +1805,20 @@ class TestHandleIncomingCallMerge:
 
 
 class TestStaticTwiMLOptions:
-    """VoiceChannelConfig.twiml_options applies to every call without a callback."""
+    """ConversationRelayProviderConfig.default_twiml_options applies to every call
+    without a callback."""
 
     @pytest.mark.asyncio
     async def test_static_options_applied(self) -> None:
-        from tac.channels.voice import VoiceChannelConfig
+        from tac.channels.voice import ConversationRelayProvider, ConversationRelayProviderConfig
 
         tac = TAC(get_test_config())
         channel = VoiceChannel(
             tac,
-            config=VoiceChannelConfig(
-                default_twiml_options=TwiMLOptions(voice="en-US-Journey-D", language="en-US"),
+            config=ConversationRelayProvider(
+                ConversationRelayProviderConfig(
+                    default_twiml_options=TwiMLOptions(voice="en-US-Journey-D", language="en-US"),
+                )
             ),
         )
         twiml = await channel.handle_incoming_call()
@@ -1782,13 +1827,15 @@ class TestStaticTwiMLOptions:
 
     @pytest.mark.asyncio
     async def test_welcome_greeting_via_twiml_options(self) -> None:
-        from tac.channels.voice import VoiceChannelConfig
+        from tac.channels.voice import ConversationRelayProvider, ConversationRelayProviderConfig
 
         tac = TAC(get_test_config())
         channel = VoiceChannel(
             tac,
-            config=VoiceChannelConfig(
-                default_twiml_options=TwiMLOptions(welcome_greeting="Bonjour!"),
+            config=ConversationRelayProvider(
+                ConversationRelayProviderConfig(
+                    default_twiml_options=TwiMLOptions(welcome_greeting="Bonjour!"),
+                )
             ),
         )
         twiml = await channel.handle_incoming_call()
@@ -1841,7 +1888,7 @@ class TestCustomizeTwiMLOptions:
 
     @pytest.mark.asyncio
     async def test_customizer_output_beats_static(self) -> None:
-        from tac.channels.voice import VoiceChannelConfig
+        from tac.channels.voice import ConversationRelayProvider, ConversationRelayProviderConfig
         from tac.models.voice import TwiMLRequest
 
         async def customizer(ctx: TwiMLRequest) -> TwiMLOptions:
@@ -1850,8 +1897,10 @@ class TestCustomizeTwiMLOptions:
         tac = TAC(get_test_config())
         channel = VoiceChannel(
             tac,
-            config=VoiceChannelConfig(
-                default_twiml_options=TwiMLOptions(voice="en-US-Journey-D"),
+            config=ConversationRelayProvider(
+                ConversationRelayProviderConfig(
+                    default_twiml_options=TwiMLOptions(voice="en-US-Journey-D"),
+                )
             ),
         )
         channel.on_inbound_call_twiml(customizer)
@@ -1862,7 +1911,7 @@ class TestCustomizeTwiMLOptions:
 
     @pytest.mark.asyncio
     async def test_customizer_unset_fields_keep_lower_layers(self) -> None:
-        from tac.channels.voice import VoiceChannelConfig
+        from tac.channels.voice import ConversationRelayProvider, ConversationRelayProviderConfig
         from tac.models.voice import TwiMLRequest
 
         async def customizer(ctx: TwiMLRequest) -> TwiMLOptions:
@@ -1871,8 +1920,10 @@ class TestCustomizeTwiMLOptions:
         tac = TAC(get_test_config())
         channel = VoiceChannel(
             tac,
-            config=VoiceChannelConfig(
-                default_twiml_options=TwiMLOptions(welcome_greeting="Channel default"),
+            config=ConversationRelayProvider(
+                ConversationRelayProviderConfig(
+                    default_twiml_options=TwiMLOptions(welcome_greeting="Channel default"),
+                )
             ),
         )
         channel.on_inbound_call_twiml(customizer)
@@ -2038,7 +2089,7 @@ class TestConversationInitializationFlow:
         assert profile_id == "profile_voice_correct"
 
     @pytest.mark.asyncio
-    @patch("tac.channels.voice.channel._POLL_BASE_DELAY", 0)
+    @patch("tac.channels.voice.conversation_relay._POLL_BASE_DELAY", 0)
     async def test_error_when_no_conversations_found(self, capsys: pytest.CaptureFixture) -> None:
         """Test RuntimeError when ConversationRelay creates 0 conversations."""
         from tac.channels.websocket_protocol import WebSocketDisconnectError
@@ -2075,7 +2126,7 @@ class TestConversationInitializationFlow:
         assert len(channel._conversations) == 0
 
     @pytest.mark.asyncio
-    @patch("tac.channels.voice.channel._POLL_BASE_DELAY", 0)
+    @patch("tac.channels.voice.conversation_relay._POLL_BASE_DELAY", 0)
     async def test_error_when_multiple_conversations_found(
         self, capsys: pytest.CaptureFixture
     ) -> None:
@@ -2198,7 +2249,7 @@ class TestConversationInitializationFlow:
 
         # The websocket registration is cleaned up (not leaked) even though
         # no prompt ever arrived to claim conv_id itself.
-        assert not channel._websocket_manager.has_websocket("CH_setup_test")
+        assert not channel._provider._websocket_manager.has_websocket("CH_setup_test")
         # The conversation entry legitimately stays until CO's CLOSED
         # webhook — same as any other orchestrator-mode call.
         assert list(channel._conversations.keys()) == ["CH_setup_test"]
@@ -2278,7 +2329,7 @@ class TestConversationInitializationFlow:
 
 
 class TestSessionManagerDefaults:
-    """Test session_manager default behavior in VoiceChannelConfig."""
+    """Test session_manager default behavior in ConversationRelayProviderConfig."""
 
     def test_default_session_manager_is_created(self) -> None:
         """Test that VoiceChannel creates a session_manager by default."""
@@ -2288,27 +2339,29 @@ class TestSessionManagerDefaults:
         channel = VoiceChannel(tac)
 
         # Verify session_manager is created by default
-        assert channel.session_manager is not None
-        assert isinstance(channel.session_manager, ThreadSafeSessionManager)
+        assert channel._provider.config.session_manager is not None
+        assert isinstance(channel._provider.config.session_manager, ThreadSafeSessionManager)
 
     def test_session_manager_can_be_set_to_none(self) -> None:
         """Test that session_manager can be explicitly disabled."""
-        from tac.channels.voice import VoiceChannelConfig
+        from tac.channels.voice import ConversationRelayProvider, ConversationRelayProviderConfig
 
         tac = TAC(get_test_config())
-        config = VoiceChannelConfig(session_manager=None)
-        channel = VoiceChannel(tac, config=config)
+        provider = ConversationRelayProvider(ConversationRelayProviderConfig(session_manager=None))
+        channel = VoiceChannel(tac, config=provider)
 
         # Verify session_manager is None when explicitly disabled
-        assert channel.session_manager is None
+        assert channel._provider.config.session_manager is None
 
     def test_session_manager_can_be_dict_none(self) -> None:
-        """Test that session_manager can be disabled via config dict."""
+        """Test that session_manager can be disabled via a config dict."""
+        from tac.channels.voice import ConversationRelayProvider
+
         tac = TAC(get_test_config())
-        channel = VoiceChannel(tac, config={"session_manager": None})
+        channel = VoiceChannel(tac, config=ConversationRelayProvider({"session_manager": None}))
 
         # Verify session_manager is None when explicitly disabled via dict
-        assert channel.session_manager is None
+        assert channel._provider.config.session_manager is None
 
     @pytest.mark.asyncio
     async def test_cleanup_cancels_running_task(self) -> None:
@@ -2332,16 +2385,20 @@ class TestSessionManagerDefaults:
         # Start conversation
         channel._start_conversation("CONV_CLEANUP_TEST", None)
         mock_websocket = AsyncMock()
-        channel._websocket_manager.add_websocket("CONV_CLEANUP_TEST", mock_websocket)
+        channel._provider._websocket_manager.add_websocket("CONV_CLEANUP_TEST", mock_websocket)
 
         # Create and start a task
-        session_state = channel.session_manager.get_or_create_session("CONV_CLEANUP_TEST")
+        session_state = channel._provider.config.session_manager.get_or_create_session(
+            "CONV_CLEANUP_TEST"
+        )
         prompt_data = {
             "type": "prompt",
             "conversationId": "CONV_CLEANUP_TEST",
             "voicePrompt": "Test",
         }
-        await channel._handle_prompt_async("CONV_CLEANUP_TEST", prompt_data, session_state)
+        await channel._provider._handle_prompt_async(
+            channel, "CONV_CLEANUP_TEST", prompt_data, session_state
+        )
 
         # Give task time to start
         await asyncio.sleep(0.05)
@@ -2349,7 +2406,7 @@ class TestSessionManagerDefaults:
         assert not session_state.stream_task.done()
 
         # Cleanup should cancel the task
-        await channel._cleanup_connection("CONV_CLEANUP_TEST")
+        await channel._provider._cleanup_connection(channel, "CONV_CLEANUP_TEST")
 
         # Verify task was cancelled
         assert task_cancelled == [True]

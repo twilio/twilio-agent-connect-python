@@ -10,7 +10,11 @@ from tac import TAC
 from tac.channels.chat import ChatChannel
 from tac.channels.rcs import RCSChannel
 from tac.channels.sms import SMSChannel
-from tac.channels.voice import VoiceChannel, VoiceChannelConfig
+from tac.channels.voice import (
+    ConversationRelayProvider,
+    ConversationRelayProviderConfig,
+    VoiceChannel,
+)
 from tac.channels.whatsapp import WhatsAppChannel
 from tac.core.config import TwilioMemoryConfig
 from tac.models.conversation import (
@@ -711,7 +715,11 @@ class TestDefaultCallOptions:
         config = {**get_test_config(), "voice_public_domain": "example.com"}
         return VoiceChannel(
             TAC(config),
-            config=VoiceChannelConfig(default_call_options=CallOptions(**default_call_options)),
+            config=ConversationRelayProvider(
+                ConversationRelayProviderConfig(
+                    default_call_options=CallOptions(**default_call_options),
+                )
+            ),
         )
 
     @pytest.mark.asyncio
@@ -1071,15 +1079,19 @@ class TestVoiceOutboundErrors:
 
     @pytest.mark.asyncio
     async def test_channel_twiml_options_applied(self) -> None:
-        """VoiceChannelConfig.twiml_options flows into outbound TwiML."""
-        from tac.channels.voice import VoiceChannelConfig
+        """ConversationRelayProviderConfig.default_twiml_options flows into outbound TwiML."""
+        from tac.channels.voice import ConversationRelayProvider, ConversationRelayProviderConfig
         from tac.models.voice import TwiMLOptions
 
         tac = TAC(get_test_config())
         channel = VoiceChannel(
             tac,
-            config=VoiceChannelConfig(
-                default_twiml_options=TwiMLOptions(voice="en-US-Journey-D", interruptible="speech"),
+            config=ConversationRelayProvider(
+                ConversationRelayProviderConfig(
+                    default_twiml_options=TwiMLOptions(
+                        voice="en-US-Journey-D", interruptible="speech"
+                    ),
+                )
             ),
         )
 
@@ -1103,14 +1115,16 @@ class TestVoiceOutboundErrors:
     @pytest.mark.asyncio
     async def test_per_call_twiml_options_override_channel(self) -> None:
         """Per-call twiml_options win over channel-static twiml_options."""
-        from tac.channels.voice import VoiceChannelConfig
+        from tac.channels.voice import ConversationRelayProvider, ConversationRelayProviderConfig
         from tac.models.voice import TwiMLOptions
 
         tac = TAC(get_test_config())
         channel = VoiceChannel(
             tac,
-            config=VoiceChannelConfig(
-                default_twiml_options=TwiMLOptions(voice="en-US-Journey-D"),
+            config=ConversationRelayProvider(
+                ConversationRelayProviderConfig(
+                    default_twiml_options=TwiMLOptions(voice="en-US-Journey-D"),
+                )
             ),
         )
 

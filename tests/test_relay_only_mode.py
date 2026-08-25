@@ -88,14 +88,16 @@ class TestRelayOnlyMode:
     @pytest.mark.asyncio
     async def test_handle_incoming_call_twiml_omits_conversation_configuration(self) -> None:
         """TwiML does not include conversationConfiguration in relay-only mode."""
-        from tac.channels.voice import VoiceChannelConfig
+        from tac.channels.voice import ConversationRelayProvider, ConversationRelayProviderConfig
         from tac.models.voice import TwiMLOptions
 
         tac = TAC(relay_only_config())
         channel = VoiceChannel(
             tac,
-            config=VoiceChannelConfig(
-                default_twiml_options=TwiMLOptions(welcome_greeting="Hello"),
+            config=ConversationRelayProvider(
+                ConversationRelayProviderConfig(
+                    default_twiml_options=TwiMLOptions(welcome_greeting="Hello"),
+                )
             ),
         )
 
@@ -209,7 +211,8 @@ class TestRelayOnlyMode:
 
         from tac.models.voice import InterruptMessage
 
-        channel._handle_interrupt(
+        channel._provider._handle_interrupt(
+            channel,
             "CA_relay_int",
             InterruptMessage(
                 type="interrupt",
