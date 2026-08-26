@@ -23,12 +23,8 @@ if TYPE_CHECKING:
 class VoiceProvider:
     """Base class for a ``VoiceChannel``'s real-time media provider.
 
-    Holds the owning ``channel`` so a provider can reach the generic,
-    transport-agnostic functionality ``VoiceChannel`` still owns directly
-    (Calls API lifecycle, conversation bookkeeping, ``TAC``). Has its own
-    ``logger`` (named after the concrete provider's module, same convention
-    as ``BaseChannel``) rather than borrowing ``channel.logger``, so log
-    lines are attributed to the provider that actually emitted them.
+    Holds the owning ``channel`` (Calls API lifecycle, conversation
+    bookkeeping, ``TAC``).
     """
 
     def __init__(self, channel: VoiceChannel) -> None:
