@@ -164,7 +164,7 @@ class TestRelayOnlyMode:
         ).model_dump(by_alias=True, exclude_none=True)
         payload = {k: str(v) for k, v in payload.items()}
 
-        await channel.handle_conversation_relay_callback(payload)
+        await channel.handle_twilio_provider_callback(payload)
 
         assert "CA_relay_xyz" not in channel._conversations
         assert ended == ["CA_relay_xyz"]
@@ -187,7 +187,7 @@ class TestRelayOnlyMode:
         ).model_dump(by_alias=True, exclude_none=True)
         payload = {k: str(v) for k, v in payload.items()}
 
-        await channel.handle_conversation_relay_callback(payload)
+        await channel.handle_twilio_provider_callback(payload)
 
         assert "CA_relay_mismatch" in channel._conversations
 
@@ -209,7 +209,7 @@ class TestRelayOnlyMode:
 
         from tac.models.voice import InterruptMessage
 
-        channel._handle_interrupt(
+        channel._provider._handle_interrupt(
             "CA_relay_int",
             InterruptMessage(
                 type="interrupt",

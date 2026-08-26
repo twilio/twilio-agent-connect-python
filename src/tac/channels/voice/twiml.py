@@ -1,6 +1,8 @@
 """TwiML generation for voice channel."""
 
-from typing import Any
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
 from twilio.twiml.voice_response import VoiceResponse
@@ -9,7 +11,8 @@ from tac.core.config import TACConfig
 from tac.models.voice import TwiMLOptions
 from tac.tools.handoff import studio_voice_handoff_url
 
-from .config import VoiceChannelConfig
+if TYPE_CHECKING:
+    from .config import VoiceChannelConfig
 
 # Fields on TwiMLOptions that map to <ConversationRelay> attributes and are
 # emitted via the snake_case → camelCase conversion done by twilio's SDK.
