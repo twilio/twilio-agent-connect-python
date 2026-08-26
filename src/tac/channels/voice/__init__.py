@@ -21,6 +21,8 @@ from tac.models.voice import (
     RecordingEvent,
     TwiMLOptions,
     TwiMLRequest,
+    VoiceTwiMLOptions,
+    VoiceTwiMLOptionsConversationRelay,
 )
 
 __all__ = [
@@ -42,5 +44,7 @@ __all__ = [
     "VoiceChannelConfig",
     "VoiceProvider",
     "VoiceProviderConfig",
+    "VoiceTwiMLOptions",
+    "VoiceTwiMLOptionsConversationRelay",
     "generate_twiml",
 ]

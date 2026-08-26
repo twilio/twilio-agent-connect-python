@@ -16,7 +16,7 @@ from tac.core.config import TACConfig
 from tac.core.logging import get_logger
 from tac.models.memory import MemoryMode
 from tac.models.outbound import InitiateVoiceConversationOptions, InitiateVoiceConversationResult
-from tac.models.voice import TwiMLOptions, TwiMLRequest
+from tac.models.voice import TwiMLRequest, VoiceTwiMLOptions
 
 if TYPE_CHECKING:
     from tac.channels.voice.channel import VoiceChannel
@@ -46,7 +46,7 @@ class VoiceProvider:
         self,
         twiml_request: TwiMLRequest | None = None,
         *,
-        host_twiml_options: TwiMLOptions | None = None,
+        host_twiml_options: VoiceTwiMLOptions | None = None,
     ) -> str:
         """Build the response for an inbound call. Default: not supported."""
         raise NotImplementedError(f"{type(self).__name__} does not support inbound calls.")

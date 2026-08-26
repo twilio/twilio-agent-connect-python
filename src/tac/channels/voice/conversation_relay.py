@@ -28,8 +28,9 @@ from tac.models.voice import (
     InterruptMessage,
     PromptMessage,
     SetupMessage,
-    TwiMLOptions,
     TwiMLRequest,
+    VoiceTwiMLOptions,
+    VoiceTwiMLOptionsConversationRelay,
 )
 from tac.session import SessionState
 from tac.utils.redaction import mask_phone, redact_twiml_parameters
@@ -83,7 +84,7 @@ class ConversationRelayProvider(VoiceProvider):
         self,
         twiml_request: TwiMLRequest | None = None,
         *,
-        host_twiml_options: TwiMLOptions | None = None,
+        host_twiml_options: VoiceTwiMLOptions | None = None,
     ) -> str:
         """
         Generate TwiML response for incoming voice calls.
@@ -136,7 +137,16 @@ class ConversationRelayProvider(VoiceProvider):
         Returns:
             TwiML XML string for call connection.
         """
-        customized: TwiMLOptions | None = None
+        if host_twiml_options is not None and not isinstance(
+            host_twiml_options, VoiceTwiMLOptionsConversationRelay
+        ):
+            raise TypeError(
+                "ConversationRelayProvider.handle_incoming_call requires host_twiml_options "
+                f"to be a VoiceTwiMLOptionsConversationRelay, got "
+                f"{type(host_twiml_options).__name__}"
+            )
+
+        customized: VoiceTwiMLOptionsConversationRelay | None = None
         if self.channel._on_inbound_call_twiml is not None and twiml_request is not None:
             customized = await self.channel._on_inbound_call_twiml(twiml_request)
 
