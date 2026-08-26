@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import AsyncGenerator, Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     from twilio.rest import Client
@@ -43,6 +43,7 @@ from .config import (
     RecordingHandler,
     VoiceChannelConfig,
 )
+from .provider import VoiceProviderConfig
 
 _POLL_ATTEMPTS = 10
 _POLL_BASE_DELAY = 0.25
@@ -70,30 +71,39 @@ class VoiceChannel(BaseChannel):
     def __init__(
         self,
         tac: TAC,
-        config: VoiceChannelConfig | dict[str, Any] | None = None,
+        config: VoiceProviderConfig | dict[str, Any] | None = None,
     ):
         """
         Initialize Voice channel for websocket protocol handling.
 
         Args:
             tac: TAC instance for memory/context operations
-            config: Voice channel configuration (VoiceChannelConfig or dict).
-                If None, uses default configuration.
+            config: Voice channel configuration (a ``VoiceProviderConfig`` —
+                ``VoiceChannelConfig`` today — or dict). If None, uses default
+                configuration.
 
         Examples:
             >>> channel = VoiceChannel(tac, config={"memory_mode": "always"})
             >>> channel = VoiceChannel(tac, config=VoiceChannelConfig(session_manager=sm))
             >>> channel = VoiceChannel(tac)  # Use defaults
         """
-        # Convert dict to config model or use defaults
+        # Convert dict to config model or use defaults. VoiceChannelConfig is
+        # the only VoiceProviderConfig implementation today, so this cast is
+        # accurate — it'll need to become an isinstance check once a second
+        # one exists.
         if isinstance(config, dict):
             config = VoiceChannelConfig(**config)
         elif config is None:
             config = VoiceChannelConfig()
+        config = cast(VoiceChannelConfig, config)
 
         super().__init__(tac, memory_mode=config.memory_mode)
         self.config = config
         self.session_manager = config.session_manager
+        # TODO: not used yet — VoiceChannel still owns ConversationRelay logic
+        # directly. A follow-up PR moves that logic onto self._provider and
+        # drops the cast above in favor of self._provider's own attributes.
+        self._provider = config.create_provider()
         self._on_inbound_call_twiml: InboundCallTwiMLHandler | None = None
         self._on_call_status: CallStatusHandler | None = None
         self._on_amd: AmdHandler | None = None
