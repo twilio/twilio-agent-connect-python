@@ -6,6 +6,7 @@ from pydantic import Field
 
 from tac.channels.voice.conversation_relay import ConversationRelayProvider
 from tac.channels.voice.provider import VoiceProvider, VoiceProviderConfig
+from tac.core.config import TACConfig
 from tac.models.memory import MemoryMode
 from tac.models.outbound import CallOptions
 from tac.models.voice import (
@@ -105,8 +106,8 @@ class ConversationRelayProviderConfig(VoiceProviderConfig):
         "voice_public_domain + voice_call_event_path.",
     )
 
-    def create_provider(self) -> VoiceProvider:
-        return ConversationRelayProvider(self)
+    def create_provider(self, tac_config: TACConfig) -> VoiceProvider:
+        return ConversationRelayProvider(tac_config, self)
 
 
 # VoiceChannelConfig is this same class under its pre-provider-split name —

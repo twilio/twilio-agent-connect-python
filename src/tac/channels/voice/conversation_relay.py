@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from tac.channels.voice.provider import VoiceProvider
+from tac.core.config import TACConfig
 
 if TYPE_CHECKING:
     from tac.channels.voice.config import ConversationRelayProviderConfig
@@ -24,5 +25,5 @@ class ConversationRelayProvider(VoiceProvider):
     explicitly.
     """
 
-    def __init__(self, config: ConversationRelayProviderConfig) -> None:
+    def __init__(self, tac_config: TACConfig, config: ConversationRelayProviderConfig) -> None:
         self.config = config
