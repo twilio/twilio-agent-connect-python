@@ -1,12 +1,18 @@
 """Voice channel configuration."""
 
+from __future__ import annotations
+
 from collections.abc import Awaitable, Callable
+from typing import TYPE_CHECKING
 
 from pydantic import Field
 
 from tac.channels.voice.conversation_relay import ConversationRelayProvider
 from tac.channels.voice.provider import VoiceProvider, VoiceProviderConfig
 from tac.core.config import TACConfig
+
+if TYPE_CHECKING:
+    from tac.channels.voice.channel import VoiceChannel
 from tac.models.memory import MemoryMode
 from tac.models.outbound import CallOptions
 from tac.models.voice import (
@@ -106,8 +112,8 @@ class ConversationRelayProviderConfig(VoiceProviderConfig):
         "voice_public_domain + voice_call_event_path.",
     )
 
-    def create_provider(self, tac_config: TACConfig) -> VoiceProvider:
-        return ConversationRelayProvider(tac_config, self)
+    def create_provider(self, channel: VoiceChannel, tac_config: TACConfig) -> VoiceProvider:
+        return ConversationRelayProvider(channel, tac_config, self)
 
 
 # VoiceChannelConfig is this same class under its pre-provider-split name —

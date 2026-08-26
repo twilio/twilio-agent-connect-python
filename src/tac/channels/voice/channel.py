@@ -103,7 +103,7 @@ class VoiceChannel(BaseChannel):
         # TODO: not used yet — VoiceChannel still owns ConversationRelay logic
         # directly. A follow-up PR moves that logic onto self._provider and
         # drops the cast above in favor of self._provider's own attributes.
-        self._provider = config.create_provider(tac.config)
+        self._provider = config.create_provider(self, tac.config)
         self._on_inbound_call_twiml: InboundCallTwiMLHandler | None = None
         self._on_call_status: CallStatusHandler | None = None
         self._on_amd: AmdHandler | None = None

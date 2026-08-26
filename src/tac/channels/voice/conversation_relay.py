@@ -14,6 +14,7 @@ from tac.channels.voice.provider import VoiceProvider
 from tac.core.config import TACConfig
 
 if TYPE_CHECKING:
+    from tac.channels.voice.channel import VoiceChannel
     from tac.channels.voice.config import ConversationRelayProviderConfig
 
 
@@ -25,5 +26,11 @@ class ConversationRelayProvider(VoiceProvider):
     explicitly.
     """
 
-    def __init__(self, tac_config: TACConfig, config: ConversationRelayProviderConfig) -> None:
+    def __init__(
+        self,
+        channel: VoiceChannel,
+        tac_config: TACConfig,
+        config: ConversationRelayProviderConfig,
+    ) -> None:
+        super().__init__(channel)
         self.config = config
