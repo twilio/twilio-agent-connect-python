@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from tac.channels.websocket_protocol import WebSocketProtocol
 from tac.core.config import TACConfig
@@ -41,14 +41,6 @@ class VoiceProvider:
         ``ConversationSession`` this provider creates.
         """
         return "VOICE"
-
-    @property
-    def memory_mode(self) -> MemoryMode:
-        """Memory retrieval mode for this provider. Default: ``"never"``.
-
-        ``ConversationRelayProvider`` overrides this to read from its config.
-        """
-        return "never"
 
     async def handle_incoming_call(
         self,
@@ -106,6 +98,10 @@ class VoiceProviderConfig(BaseModel):
     here (not in ``config.py``) so a future provider's config only needs to
     import this module, not anything ConversationRelay-specific.
     """
+
+    memory_mode: MemoryMode = Field(
+        default="never", description="Memory retrieval mode for this channel"
+    )
 
     def create_provider(self, channel: VoiceChannel, tac_config: TACConfig) -> VoiceProvider:
         """Build the ``VoiceProvider`` this config configures.

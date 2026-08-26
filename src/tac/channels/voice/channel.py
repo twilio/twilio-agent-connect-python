@@ -73,8 +73,8 @@ class VoiceChannel(BaseChannel):
         elif config is None:
             config = VoiceChannelConfig()
 
+        super().__init__(tac, memory_mode=config.memory_mode)
         self._provider = config.create_provider(self, tac.config)
-        super().__init__(tac, memory_mode=self._provider.memory_mode)
         self._on_inbound_call_twiml: InboundCallTwiMLHandler | None = None
         self._on_call_status: CallStatusHandler | None = None
         self._on_amd: AmdHandler | None = None

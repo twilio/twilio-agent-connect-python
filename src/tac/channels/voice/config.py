@@ -13,7 +13,6 @@ from tac.core.config import TACConfig
 
 if TYPE_CHECKING:
     from tac.channels.voice.channel import VoiceChannel
-from tac.models.memory import MemoryMode
 from tac.models.outbound import CallOptions
 from tac.models.voice import (
     AmdEvent,
@@ -89,10 +88,6 @@ class ConversationRelayProviderConfig(VoiceProviderConfig):
             "SessionManager for task cancellation. Defaults to ThreadSafeSessionManager. "
             "Set to None only for debugging/testing."
         ),
-    )
-    memory_mode: MemoryMode = Field(
-        default="never",
-        description="Memory retrieval mode for this channel",
     )
     default_twiml_options: TwiMLOptions | None = Field(
         default=None,

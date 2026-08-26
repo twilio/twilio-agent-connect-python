@@ -17,7 +17,6 @@ from tac.channels.voice.provider import VoiceProvider
 from tac.channels.websocket_manager import WebSocketManager
 from tac.channels.websocket_protocol import WebSocketDisconnectError, WebSocketProtocol
 from tac.core.config import CallEventKind, TACConfig
-from tac.models.memory import MemoryMode
 from tac.models.outbound import (
     CallOptions,
     InitiateVoiceConversationOptions,
@@ -72,10 +71,6 @@ class ConversationRelayProvider(VoiceProvider):
     @property
     def channel_name(self) -> str:
         return "VOICE"
-
-    @property
-    def memory_mode(self) -> MemoryMode:
-        return self.config.memory_mode
 
     @staticmethod
     def _caller_address(setup_msg: SetupMessage) -> str | None:
