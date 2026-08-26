@@ -242,24 +242,17 @@ class TwiMLBuilderConversationRelay:
             resolved_websocket_url = websocket_url
         elif merged.websocket_url is not None:
             resolved_websocket_url = merged.websocket_url
-        else:
-            resolved_websocket_url = self._resolve_websocket_url(caller)
-
-        return generate_twiml(resolved_websocket_url, merged)
-
-    def _resolve_websocket_url(self, action: str) -> str:
-        """Resolve the public WebSocket URL from
-        ``TACConfig.voice_public_domain`` + ``TACConfig.voice_websocket_path``.
-        Raises if ``voice_public_domain`` isn't set.
-        """
-        if self.tac_config.voice_public_domain:
-            return (
+        elif self.tac_config.voice_public_domain:
+            resolved_websocket_url = (
                 f"wss://{self.tac_config.voice_public_domain}{self.tac_config.voice_websocket_path}"
             )
-        raise ValueError(
-            f"{action} needs a WebSocket URL. Set TWILIO_VOICE_PUBLIC_DOMAIN "
-            "(or TACConfig.voice_public_domain)."
-        )
+        else:
+            raise ValueError(
+                f"{caller} needs a WebSocket URL. Set TWILIO_VOICE_PUBLIC_DOMAIN "
+                "(or TACConfig.voice_public_domain)."
+            )
+
+        return generate_twiml(resolved_websocket_url, merged)
 
     def _build_twiml_options(
         self,
@@ -345,15 +338,8 @@ class TwiMLBuilderConversationRelay:
                 self.tac_config.account_sid,
                 self.tac_config.studio_handoff_flow_sid,
             )
-        return self._resolve_default_action_url()
-
-    def _resolve_default_action_url(self) -> str | None:
-        """Resolve the default ``<Connect action=...>`` cleanup URL.
-
-        Returns None if ``voice_public_domain`` isn't set; that's fine because
-        action_url has higher-priority layers (customizer, twiml_options,
-        Studio handoff) above this fallback.
-        """
+        # Channel default. None if voice_public_domain isn't set; that's fine
+        # because every layer above this one is already exhausted.
         if self.tac_config.voice_public_domain:
             return (
                 f"https://{self.tac_config.voice_public_domain}{self.tac_config.voice_action_path}"

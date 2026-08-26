@@ -92,7 +92,7 @@ class VoiceChannelConfig(BaseModel):
         "customization is registered via VoiceChannel.on_inbound_call_twiml(...). "
         "Note: ``custom_parameters`` and ``languages`` replace wholesale when a "
         "higher-priority layer sets them — see "
-        "twiml.TwiMLBuilderConversationRelay._overlay_fields.",
+        "tac.channels.voice.twiml.TwiMLBuilderConversationRelay._overlay_fields.",
     )
     default_call_options: CallOptions | None = Field(
         default=None,
