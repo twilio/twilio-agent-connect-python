@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 from pydantic import BaseModel
 
 from tac.core.config import TACConfig
+from tac.core.logging import get_logger
 
 if TYPE_CHECKING:
     from tac.channels.voice.channel import VoiceChannel
@@ -24,11 +25,15 @@ class VoiceProvider:
 
     Holds the owning ``channel`` so a provider can reach the generic,
     transport-agnostic functionality ``VoiceChannel`` still owns directly
-    (Calls API lifecycle, conversation bookkeeping, ``TAC``).
+    (Calls API lifecycle, conversation bookkeeping, ``TAC``). Has its own
+    ``logger`` (named after the concrete provider's module, same convention
+    as ``BaseChannel``) rather than borrowing ``channel.logger``, so log
+    lines are attributed to the provider that actually emitted them.
     """
 
     def __init__(self, channel: VoiceChannel) -> None:
         self.channel = channel
+        self.logger = get_logger(self.__class__.__module__)
 
 
 class VoiceProviderConfig(BaseModel):
