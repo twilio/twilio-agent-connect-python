@@ -1021,6 +1021,32 @@ class TestVoiceOutboundErrors:
             )
 
     @pytest.mark.asyncio
+    async def test_twiml_options_wrong_type_raises(self) -> None:
+        """twiml_options is typed against the VoiceTwiMLOptions base, but
+        ConversationRelayProvider needs the concrete
+        VoiceTwiMLOptionsConversationRelay to build TwiML."""
+        from tac.models.voice import VoiceTwiMLOptions
+
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+
+        mock_client = MagicMock()
+
+        with (
+            patch.object(channel, "_get_twilio_client", return_value=mock_client),
+            pytest.raises(TypeError, match="VoiceTwiMLOptionsConversationRelay"),
+        ):
+            await channel.initiate_outbound_conversation(
+                InitiateVoiceConversationOptions(
+                    to="+15559876543",
+                    websocket_url="wss://example.com/ws",
+                    twiml_options=VoiceTwiMLOptions(),
+                )
+            )
+
+        mock_client.calls.create.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_custom_parameters_in_twiml(self) -> None:
         from tac.models.voice import TwiMLOptions
 

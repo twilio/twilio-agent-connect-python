@@ -1,14 +1,13 @@
 """Voice channel for handling voice-based conversations."""
 
-from tac.channels.voice.channel import VoiceChannel
-from tac.channels.voice.config import (
+from tac.channels.voice.channel import (
     AmdHandler,
     CallStatusHandler,
-    ConversationRelayProviderConfig,
     InboundCallTwiMLHandler,
     RecordingHandler,
-    VoiceChannelConfig,
+    VoiceChannel,
 )
+from tac.channels.voice.config import ConversationRelayProviderConfig, VoiceChannelConfig
 from tac.channels.voice.conversation_relay import ConversationRelayProvider
 from tac.channels.voice.provider import VoiceProvider, VoiceProviderConfig
 from tac.channels.voice.twiml import generate_twiml

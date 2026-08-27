@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 
 from pydantic import Field
@@ -14,19 +13,8 @@ from tac.core.config import TACConfig
 if TYPE_CHECKING:
     from tac.channels.voice.channel import VoiceChannel
 from tac.models.outbound import CallOptions
-from tac.models.voice import (
-    AmdEvent,
-    CallStatusEvent,
-    RecordingEvent,
-    TwiMLOptions,
-    TwiMLRequest,
-)
+from tac.models.voice import VoiceTwiMLOptionsConversationRelay
 from tac.session import SessionManager, ThreadSafeSessionManager
-
-InboundCallTwiMLHandler = Callable[[TwiMLRequest], Awaitable[TwiMLOptions]]
-CallStatusHandler = Callable[[CallStatusEvent], Awaitable[None]]
-AmdHandler = Callable[[AmdEvent], Awaitable[None]]
-RecordingHandler = Callable[[RecordingEvent], Awaitable[None]]
 
 
 class ConversationRelayProviderConfig(VoiceProviderConfig):
@@ -66,7 +54,7 @@ class ConversationRelayProviderConfig(VoiceProviderConfig):
             - "once": Retrieve memory once at conversation start with empty query and cache it.
                      Cache is invalidated when conversation becomes INACTIVE.
             - "never": Skip memory retrieval
-        default_twiml_options: Static ``TwiMLOptions`` applied to every call
+        default_twiml_options: Static ``VoiceTwiMLOptionsConversationRelay`` applied to every call
             (inbound and outbound). Controls the TwiML inside
             ``<ConversationRelay>`` — voice, language, transcription provider,
             welcome_greeting, ``<Language>`` children, etc. Use this when the
@@ -89,9 +77,10 @@ class ConversationRelayProviderConfig(VoiceProviderConfig):
             "Set to None only for debugging/testing."
         ),
     )
-    default_twiml_options: TwiMLOptions | None = Field(
+    default_twiml_options: VoiceTwiMLOptionsConversationRelay | None = Field(
         default=None,
-        description="Static TwiMLOptions for the TwiML inside <ConversationRelay>, "
+        description="Static VoiceTwiMLOptionsConversationRelay for the TwiML inside "
+        "<ConversationRelay>, "
         "applied to every call (inbound and outbound). Per-call inbound "
         "customization is registered via VoiceChannel.on_inbound_call_twiml(...). "
         "Note: ``custom_parameters`` and ``languages`` replace wholesale when a "
