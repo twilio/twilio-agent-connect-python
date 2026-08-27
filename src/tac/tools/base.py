@@ -258,6 +258,24 @@ class TACTool:
             },
         }
 
+    def to_realtime_format(self) -> dict[str, object]:
+        """
+        Get tool schema in OpenAI Realtime API function-calling format.
+
+        Unlike ``to_openai_format`` (Chat Completions, which nests the schema
+        under a ``"function"`` key), Realtime's ``session.tools`` expects the
+        fields flat on the tool object.
+
+        Returns:
+            Dictionary in Realtime tool format
+        """
+        return {
+            "type": "function",
+            "name": self.name,
+            "description": self.description,
+            "parameters": self.params_json_schema,
+        }
+
     def to_anthropic_format(self) -> dict[str, object]:
         """
         Get tool schema in Anthropic tool calling format.
