@@ -12,10 +12,13 @@ from tac.channels.voice.channel import (
     RecordingHandler,
     VoiceChannel,
 )
-from tac.channels.voice.config import ConversationRelayProviderConfig, VoiceChannelConfig
-from tac.channels.voice.conversation_relay import ConversationRelayProvider
+from tac.channels.voice.conversation_relay import (
+    ConversationRelayProvider,
+    ConversationRelayProviderConfig,
+    VoiceChannelConfig,
+    generate_twiml,
+)
 from tac.channels.voice.provider import VoiceProvider, VoiceProviderConfig
-from tac.channels.voice.twiml import generate_twiml
 from tac.models.outbound import CallOptions
 from tac.models.voice import (
     AmdEvent,

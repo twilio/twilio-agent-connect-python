@@ -23,7 +23,7 @@ from tac.models.voice import (
     VoiceTwiMLOptions,
 )
 
-from .config import VoiceChannelConfig
+from .conversation_relay import VoiceChannelConfig
 from .provider import VoiceProviderConfig
 
 InboundCallTwiMLHandler = Callable[[TwiMLRequest], Awaitable[VoiceTwiMLOptions]]

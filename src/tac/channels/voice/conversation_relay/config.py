@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import Field
 
-from tac.channels.voice.conversation_relay import ConversationRelayProvider
+from tac.channels.voice.conversation_relay.provider import ConversationRelayProvider
 from tac.channels.voice.provider import VoiceProvider, VoiceProviderConfig
 from tac.core.config import TACConfig
 
@@ -85,7 +85,7 @@ class ConversationRelayProviderConfig(VoiceProviderConfig):
         "customization is registered via VoiceChannel.on_inbound_call_twiml(...). "
         "Note: ``custom_parameters`` and ``languages`` replace wholesale when a "
         "higher-priority layer sets them — see "
-        "tac.channels.voice.twiml.TwiMLBuilderConversationRelay._overlay_fields.",
+        "tac.channels.voice.conversation_relay.twiml.TwiMLBuilderConversationRelay._overlay_fields.",
     )
     default_call_options: CallOptions | None = Field(
         default=None,

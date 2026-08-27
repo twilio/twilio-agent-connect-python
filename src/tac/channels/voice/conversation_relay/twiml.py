@@ -12,7 +12,7 @@ from tac.models.voice import VoiceTwiMLOptionsConversationRelay
 from tac.tools.handoff import studio_voice_handoff_url
 
 if TYPE_CHECKING:
-    from .config import VoiceChannelConfig
+    from tac.channels.voice.conversation_relay.config import VoiceChannelConfig
 
 # Fields on VoiceTwiMLOptionsConversationRelay that map to <ConversationRelay> attributes
 # and are emitted via the snake_case → camelCase conversion done by twilio's SDK.
