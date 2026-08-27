@@ -271,7 +271,13 @@ class VoiceTwiMLOptions(BaseModel):
     future subclass for ``<Stream>``), so ``VoiceProvider.handle_incoming_call``'s
     ``host_twiml_options`` is typed against this base rather than a specific
     provider's options.
+
+    Rejects unknown fields (inherited by subclasses) — this base has none of
+    its own, so a dict passed where a ``VoiceTwiMLOptions`` is expected would
+    otherwise silently validate into an empty instance.
     """
+
+    model_config = {"extra": "forbid"}
 
 
 class VoiceTwiMLOptionsConversationRelay(VoiceTwiMLOptions):

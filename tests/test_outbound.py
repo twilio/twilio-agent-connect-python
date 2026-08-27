@@ -802,6 +802,17 @@ class TestInitiateVoiceConversationOptionsForbidsExtra:
         with pytest.raises(ValidationError, match="custom_parameters"):
             InitiateVoiceConversationOptions(to="+15551234567", custom_parameters={"k": "v"})  # type: ignore[call-arg]
 
+    def test_twiml_options_dict_raises_instead_of_silently_dropping(self) -> None:
+        """twiml_options is typed against the VoiceTwiMLOptions base, which has
+        no fields of its own and forbids extras — so a dict raises instead of
+        silently validating into an empty VoiceTwiMLOptions()."""
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError, match="welcome_greeting"):
+            InitiateVoiceConversationOptions(
+                to="+15551234567", twiml_options={"welcome_greeting": "Hi!"}
+            )
+
 
 # =============================================================================
 # isOwnMessage 2-tier
