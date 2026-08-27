@@ -217,6 +217,16 @@ class InitiateVoiceConversationOptions(BaseModel):
     model_config = {"populate_by_name": True, "extra": "forbid"}
 
 
+class InitiateVoiceConversationOptionsOpenAIRealtime(InitiateVoiceConversationOptions):
+    """Outbound options for ``OpenAIRealtimeProvider``, adding a per-call ``session_config``."""
+
+    session_config: dict[str, Any] | None = Field(
+        default=None,
+        description="Used verbatim in place of "
+        "OpenAIRealtimeProviderConfig.default_session_config for this call.",
+    )
+
+
 class InitiateVoiceConversationResult(BaseModel):
     """Result of initiating an outbound voice conversation."""
 

@@ -30,6 +30,7 @@ from tac.core.config import CallEventKind, TACConfig
 from tac.models.outbound import (
     CallOptions,
     InitiateVoiceConversationOptions,
+    InitiateVoiceConversationOptionsOpenAIRealtime,
     InitiateVoiceConversationResult,
 )
 from tac.models.session import ConversationSession
@@ -56,7 +57,7 @@ class OpenAIRealtimeProvider(VoiceProvider):
 
     Example:
         ```python
-        channel = VoiceChannel(tac, config=OpenAIRealtimeProviderConfig(session_config=...))
+        channel = VoiceChannel(tac, config=OpenAIRealtimeProviderConfig(default_session_config=...))
         ```
     """
 
@@ -68,22 +69,13 @@ class OpenAIRealtimeProvider(VoiceProvider):
     ) -> None:
         super().__init__(channel)
 
-        if not config.openai_api_key:
-            raise ValueError(
-                "openai_api_key is required. Set the OPENAI_API_KEY environment "
-                "variable or provide openai_api_key in OpenAIRealtimeProviderConfig."
-            )
-        if not config.session_config.get("model"):
-            raise ValueError(
-                "session_config must include a 'model' field — it's used as the "
-                "?model= query param when opening the OpenAI Realtime WebSocket."
-            )
-
         self.config = config
         self.tac_config = tac_config
         self._tools_by_name: dict[str, TACTool] = {tool.name: tool for tool in config.tools}
         self._calls: dict[str, _CallState] = {}
         self._twiml = TwiMLBuilderMediaStreams(tac_config, config)
+        # Keyed by call_sid; set in handle_incoming_call, popped in _connect_model.
+        self._call_session_configs: dict[str, dict[str, Any]] = {}
 
     @property
     def channel_name(self) -> str:
@@ -120,6 +112,9 @@ class OpenAIRealtimeProvider(VoiceProvider):
           3. ``host_twiml_options`` — per-call transport facts supplied by the host.
           4. TAC defaults: the WebSocket URL derived from
              ``TACConfig.voice_public_domain`` + ``voice_websocket_path``.
+
+        Also runs ``on_inbound_call_session_config`` (if set) and stashes its
+        result for ``_connect_model`` to pick up once the call connects.
         """
         if host_twiml_options is not None and not isinstance(
             host_twiml_options, VoiceTwiMLOptionsMediaStreams
@@ -139,6 +134,15 @@ class OpenAIRealtimeProvider(VoiceProvider):
                     f"VoiceTwiMLOptionsMediaStreams, got {type(result).__name__}"
                 )
             customized = result
+
+        if (
+            self.config.on_inbound_call_session_config is not None
+            and twiml_request is not None
+            and twiml_request.call_sid is not None
+        ):
+            session_config = await self.config.on_inbound_call_session_config(twiml_request)
+            if session_config is not None:
+                self._call_session_configs[twiml_request.call_sid] = session_config
 
         return self._twiml.build(
             "handle_incoming_call", host=host_twiml_options, per_call=customized
@@ -182,6 +186,9 @@ class OpenAIRealtimeProvider(VoiceProvider):
         The WebSocket URL is derived from ``TACConfig.voice_public_domain`` +
         ``TACConfig.voice_websocket_path``, unless overridden per-call via
         ``options.websocket_url``.
+
+        Pass ``InitiateVoiceConversationOptionsOpenAIRealtime`` with
+        ``session_config`` set to override the default for this call.
         """
         twiml_options = options.twiml_options
         if twiml_options is not None and not isinstance(
@@ -226,6 +233,12 @@ class OpenAIRealtimeProvider(VoiceProvider):
                 call_sid=call.sid,
                 to=mask_phone(options.to),
             )
+
+            if (
+                isinstance(options, InitiateVoiceConversationOptionsOpenAIRealtime)
+                and options.session_config is not None
+            ):
+                self._call_session_configs[call.sid] = options.session_config
 
             return InitiateVoiceConversationResult(call_sid=call.sid)
 
@@ -323,9 +336,28 @@ class OpenAIRealtimeProvider(VoiceProvider):
         return conv_id
 
     async def _connect_model(self, conv_id: str) -> None:
-        """Open the OpenAI Realtime WebSocket and send the session config."""
+        """Open the OpenAI Realtime WebSocket and send the session config.
+
+        Uses this call's ``_call_session_configs`` entry if one was stashed
+        (by ``handle_incoming_call`` or ``initiate_outbound_conversation``),
+        else falls back to ``default_session_config``.
+        """
+        session_config = (
+            self._call_session_configs.pop(conv_id, None) or self.config.default_session_config
+        )
+        if session_config is None:
+            raise ValueError(
+                f"No session_config available for call {conv_id} — this call supplied none "
+                "and default_session_config isn't set either."
+            )
+        if not session_config.get("model"):
+            raise ValueError(
+                f"session_config for call {conv_id} must include a 'model' field — it's "
+                "used as the ?model= query param when opening the OpenAI Realtime WebSocket."
+            )
+
         model_ws = await websockets.connect(
-            f"wss://api.openai.com/v1/realtime?model={self.config.session_config['model']}",
+            f"wss://api.openai.com/v1/realtime?model={session_config['model']}",
             additional_headers={"Authorization": f"Bearer {self.config.openai_api_key}"},
         )
         call = self._calls.get(conv_id)
@@ -333,9 +365,7 @@ class OpenAIRealtimeProvider(VoiceProvider):
             call.model_ws = model_ws
         self.logger.info("Connected to OpenAI Realtime", conversation_id=conv_id)
 
-        await self._model_send(
-            conv_id, {"type": "session.update", "session": self.config.session_config}
-        )
+        await self._model_send(conv_id, {"type": "session.update", "session": session_config})
 
         # VAD waits for the caller to speak first; request a response to greet.
         response = self.config.welcome_greeting_response

@@ -2,8 +2,10 @@
 Example (POC): OpenAI Realtime API voice calls via Twilio Media Streams.
 
 Twilio streams call audio to our own WebSocket, and this provider relays it
-to/from the OpenAI Realtime WebSocket. The session config (model, voice, turn
-detection, instructions) is static, set once on the provider's config.
+to/from the OpenAI Realtime WebSocket. ``default_session_config`` applies to
+every call unless overridden — per inbound call via
+``on_inbound_call_session_config``, or per outbound call via
+``InitiateVoiceConversationOptionsOpenAIRealtime``.
 
 Unlike the ConversationRelay examples, this runs in relay-only mode
 regardless of TAC's Conversation Orchestrator configuration — there's no
@@ -29,14 +31,15 @@ Install the extra dependencies this example needs:
     pip install "tac[server,openai-realtime]"
 
 Usage:
-    python media_stream_openai_realtime.py                    # inbound only
-    python media_stream_openai_realtime.py --to +16505551234  # also place an outbound call
+    python openai_realtime.py                    # inbound only
+    python openai_realtime.py --to +16505551234   # also place an outbound call
 """
 
 import argparse
 import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Any
 
 from dotenv import load_dotenv
 from fastapi import FastAPI
@@ -47,8 +50,9 @@ from tac.channels.voice.media_streams.openai_realtime import (
     TWILIO_MEDIA_STREAM_AUDIO_FORMAT,
     OpenAIRealtimeProviderConfig,
 )
-from tac.models.outbound import InitiateVoiceConversationOptions
+from tac.models.outbound import InitiateVoiceConversationOptionsOpenAIRealtime
 from tac.models.session import ConversationSession
+from tac.models.voice import TwiMLRequest
 from tac.server import TACFastAPIServer
 from tac.tools import function_tool
 
@@ -63,7 +67,7 @@ def get_weather(city: str) -> str:
     return f"It's sunny and 72F in {city}."
 
 
-SESSION_CONFIG = {
+DEFAULT_SESSION_CONFIG = {
     "type": "realtime",
     "model": "gpt-realtime-2.1",
     "output_modalities": ["audio"],
@@ -84,12 +88,24 @@ SESSION_CONFIG = {
     "tool_choice": "auto",
 }
 
+
+async def customize_session_config(req: TwiMLRequest) -> dict[str, Any] | None:
+    """Per-call override for inbound calls. None falls back to DEFAULT_SESSION_CONFIG."""
+    if req.caller_country == "US":
+        return {
+            **DEFAULT_SESSION_CONFIG,
+            "instructions": "你是一个友好的语音助手。请用中文回答。",
+        }
+    return None
+
+
 voice_channel = VoiceChannel(
     tac,
     config=OpenAIRealtimeProviderConfig(
         tools=[get_weather],
         welcome_greeting_response={"instructions": "Hello! How can I help you today?"},
-        session_config=SESSION_CONFIG,
+        default_session_config=DEFAULT_SESSION_CONFIG,
+        on_inbound_call_session_config=customize_session_config,
     ),
 )
 
@@ -104,8 +120,16 @@ async def handle_conversation_ended(context: ConversationSession) -> None:
 
 
 async def place_outbound_call(to: str) -> None:
+    """Per-outbound-call session_config override — a direct value, since
+    outbound has no webhook to hang a customizer off of."""
     result = await voice_channel.initiate_outbound_conversation(
-        InitiateVoiceConversationOptions(to=to)
+        InitiateVoiceConversationOptionsOpenAIRealtime(
+            to=to,
+            session_config={
+                **DEFAULT_SESSION_CONFIG,
+                "instructions": "Tu es un assistant vocal amical. Réponds en français.",
+            },
+        )
     )
     print(f"Call placed to {to} (SID: {result.call_sid})")
 

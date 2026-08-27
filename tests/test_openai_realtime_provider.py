@@ -2,7 +2,7 @@
 
 import asyncio
 import json
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -10,6 +10,11 @@ from tac import TAC
 from tac.channels.voice import VoiceChannel
 from tac.channels.voice.media_streams.openai_realtime import OpenAIRealtimeProviderConfig
 from tac.channels.voice.media_streams.openai_realtime.models import _BargeInState, _CallState
+from tac.models.outbound import (
+    InitiateVoiceConversationOptions,
+    InitiateVoiceConversationOptionsOpenAIRealtime,
+)
+from tac.models.voice import TwiMLRequest
 from tac.tools import function_tool
 
 
@@ -29,7 +34,7 @@ def make_channel(**config_kwargs: object) -> VoiceChannel:
     tac = TAC(get_test_tac_config())
     config = OpenAIRealtimeProviderConfig(
         openai_api_key="sk-test",
-        session_config={"model": "gpt-realtime-test"},
+        default_session_config={"model": "gpt-realtime-test"},
         **config_kwargs,
     )
     return VoiceChannel(tac, config=config)
@@ -377,3 +382,205 @@ class TestToolCalls:
         result = await provider._run_tool_call("CA8", "add", json.dumps({"a": 2, "b": 3}))
 
         assert result == 5
+
+
+class TestConfigValidation:
+    """OpenAIRealtimeProviderConfig fails fast on unusable combinations."""
+
+    def test_requires_openai_api_key(self) -> None:
+        with pytest.raises(ValueError, match="openai_api_key is required"):
+            OpenAIRealtimeProviderConfig(openai_api_key=None, default_session_config={"model": "x"})
+
+    def test_on_inbound_call_session_config_alone_is_valid(self) -> None:
+        async def customizer(req: TwiMLRequest) -> dict | None:
+            return {"model": "gpt-realtime-test"}
+
+        # Must not raise — a customizer alone is a legitimate session_config source.
+        OpenAIRealtimeProviderConfig(
+            openai_api_key="sk-test", on_inbound_call_session_config=customizer
+        )
+
+    def test_neither_source_alone_is_also_valid(self) -> None:
+        """Legitimate for an outbound-only provider supplying session_config
+        per-call via InitiateVoiceConversationOptionsOpenAIRealtime."""
+        OpenAIRealtimeProviderConfig(openai_api_key="sk-test")
+
+
+class TestInboundCallSessionConfig:
+    """Per-inbound-call session_config via on_inbound_call_session_config."""
+
+    @pytest.mark.asyncio
+    async def test_customizer_result_used_verbatim_for_that_call(self) -> None:
+
+        async def customizer(req: TwiMLRequest) -> dict | None:
+            if req.caller_country == "MX":
+                return {"model": "gpt-realtime-mx", "instructions": "Habla en español."}
+            return None
+
+        channel = make_channel(on_inbound_call_session_config=customizer)
+        provider = channel._provider
+
+        await provider.handle_incoming_call(
+            twiml_request=TwiMLRequest(call_sid="CA_MX", caller_country="MX")
+        )
+        assert provider._call_session_configs["CA_MX"] == {
+            "model": "gpt-realtime-mx",
+            "instructions": "Habla en español.",
+        }
+
+        twilio_ws = FakeTwilioWebSocket(
+            events=[{"event": "start", "start": {"callSid": "CA_MX", "streamSid": "MZ_MX"}}]
+        )
+        model_ws = FakeModelWebSocket(events=[], stay_open=False)
+
+        with patch(
+            "tac.channels.voice.media_streams.openai_realtime.provider.websockets.connect",
+            new=AsyncMock(return_value=model_ws),
+        ) as mock_connect:
+            await asyncio.wait_for(provider.handle_websocket(twilio_ws), timeout=5)
+
+        assert "model=gpt-realtime-mx" in mock_connect.call_args.args[0]
+        sent_session = next(m for m in model_ws.sent if m["type"] == "session.update")
+        assert sent_session["session"] == {
+            "model": "gpt-realtime-mx",
+            "instructions": "Habla en español.",
+        }
+        assert "CA_MX" not in provider._call_session_configs
+
+    @pytest.mark.asyncio
+    async def test_customizer_returning_none_falls_back_to_default(self) -> None:
+        async def customizer(req: TwiMLRequest) -> dict | None:
+            return None
+
+        channel = make_channel(on_inbound_call_session_config=customizer)
+        provider = channel._provider
+
+        await provider.handle_incoming_call(
+            twiml_request=TwiMLRequest(call_sid="CA_US", caller_country="US")
+        )
+        assert "CA_US" not in provider._call_session_configs
+
+        twilio_ws = FakeTwilioWebSocket(
+            events=[{"event": "start", "start": {"callSid": "CA_US", "streamSid": "MZ_US"}}]
+        )
+        model_ws = FakeModelWebSocket(events=[], stay_open=False)
+
+        with patch(
+            "tac.channels.voice.media_streams.openai_realtime.provider.websockets.connect",
+            new=AsyncMock(return_value=model_ws),
+        ):
+            await asyncio.wait_for(provider.handle_websocket(twilio_ws), timeout=5)
+
+        sent_session = next(m for m in model_ws.sent if m["type"] == "session.update")
+        assert sent_session["session"] == {"model": "gpt-realtime-test"}
+
+    @pytest.mark.asyncio
+    async def test_no_call_sid_skips_customizer(self) -> None:
+        customizer = AsyncMock(return_value={"model": "should-not-be-used"})
+
+        channel = make_channel(on_inbound_call_session_config=customizer)
+        provider = channel._provider
+
+        await provider.handle_incoming_call(twiml_request=TwiMLRequest(caller_country="MX"))
+
+        customizer.assert_not_called()
+        assert provider._call_session_configs == {}
+
+    @pytest.mark.asyncio
+    async def test_missing_model_field_raises_at_connect_time(self) -> None:
+        """Calls _connect_model directly — handle_websocket swallows
+        exceptions into a log line."""
+        channel = make_channel()
+        provider = channel._provider
+        provider._call_session_configs["CA_BAD"] = {"instructions": "no model field here"}
+
+        with pytest.raises(ValueError, match="must include a 'model' field"):
+            await provider._connect_model("CA_BAD")
+
+    @pytest.mark.asyncio
+    async def test_missing_session_config_entirely_raises_at_connect_time(self) -> None:
+        async def customizer(req: TwiMLRequest) -> dict | None:
+            return None
+
+        tac = TAC(get_test_tac_config())
+        config = OpenAIRealtimeProviderConfig(
+            openai_api_key="sk-test", on_inbound_call_session_config=customizer
+        )
+        provider = VoiceChannel(tac, config=config)._provider
+
+        with pytest.raises(ValueError, match="No session_config available"):
+            await provider._connect_model("CA_NONE")
+
+
+class TestOutboundCallSessionConfig:
+    """Per-outbound-call session_config via InitiateVoiceConversationOptionsOpenAIRealtime."""
+
+    @pytest.mark.asyncio
+    async def test_session_config_stashed_under_the_placed_call_sid(self) -> None:
+        channel = make_channel()
+        provider = channel._provider
+
+        mock_call = MagicMock(sid="CA_OUT")
+        mock_client = MagicMock()
+        mock_client.calls.create.return_value = mock_call
+
+        with patch.object(channel, "_get_twilio_client", return_value=mock_client):
+            result = await provider.initiate_outbound_conversation(
+                InitiateVoiceConversationOptionsOpenAIRealtime(
+                    to="+15551234567",
+                    session_config={"model": "gpt-realtime-outbound"},
+                )
+            )
+
+        assert result.call_sid == "CA_OUT"
+        assert provider._call_session_configs["CA_OUT"] == {"model": "gpt-realtime-outbound"}
+
+    @pytest.mark.asyncio
+    async def test_plain_options_type_ignored_falls_back_to_default(self) -> None:
+        channel = make_channel()
+        provider = channel._provider
+
+        mock_call = MagicMock(sid="CA_OUT2")
+        mock_client = MagicMock()
+        mock_client.calls.create.return_value = mock_call
+
+        with patch.object(channel, "_get_twilio_client", return_value=mock_client):
+            await provider.initiate_outbound_conversation(
+                InitiateVoiceConversationOptions(to="+15551234567")
+            )
+
+        assert provider._call_session_configs == {}
+
+    @pytest.mark.asyncio
+    async def test_outbound_only_config_with_no_default_connects_via_per_call_override(
+        self,
+    ) -> None:
+        tac = TAC(get_test_tac_config())
+        config = OpenAIRealtimeProviderConfig(openai_api_key="sk-test")
+        channel = VoiceChannel(tac, config=config)
+        provider = channel._provider
+
+        mock_call = MagicMock(sid="CA_OUT3")
+        mock_client = MagicMock()
+        mock_client.calls.create.return_value = mock_call
+
+        with patch.object(channel, "_get_twilio_client", return_value=mock_client):
+            await provider.initiate_outbound_conversation(
+                InitiateVoiceConversationOptionsOpenAIRealtime(
+                    to="+15551234567",
+                    session_config={"model": "gpt-realtime-outbound-only"},
+                )
+            )
+
+        twilio_ws = FakeTwilioWebSocket(
+            events=[{"event": "start", "start": {"callSid": "CA_OUT3", "streamSid": "MZ_OUT3"}}]
+        )
+        model_ws = FakeModelWebSocket(events=[], stay_open=False)
+
+        with patch(
+            "tac.channels.voice.media_streams.openai_realtime.provider.websockets.connect",
+            new=AsyncMock(return_value=model_ws),
+        ) as mock_connect:
+            await asyncio.wait_for(provider.handle_websocket(twilio_ws), timeout=5)
+
+        assert "model=gpt-realtime-outbound-only" in mock_connect.call_args.args[0]
