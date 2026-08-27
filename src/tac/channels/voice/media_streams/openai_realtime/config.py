@@ -17,13 +17,6 @@ from tac.tools import TACTool
 if TYPE_CHECKING:
     from tac.channels.voice.channel import VoiceChannel
 
-#: Twilio Media Streams always sends 8kHz G.711 u-law audio — this is a fact
-#: about Twilio's stream, not a provider choice, so ``default_session_config``
-#: should use this same audio format for both input and output. No ``rate`` field —
-#: OpenAI's Realtime ``session.audio.*.format`` schema rejects it as an
-#: unknown parameter (g711 is inherently fixed-rate, so it isn't settable).
-TWILIO_MEDIA_STREAM_AUDIO_FORMAT: dict[str, Any] = {"type": "audio/pcmu"}
-
 
 class OpenAIRealtimeProviderConfig(VoiceProviderConfig):
     """Configuration for ``OpenAIRealtimeProvider``."""

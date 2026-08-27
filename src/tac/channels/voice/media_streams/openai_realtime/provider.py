@@ -14,6 +14,7 @@ import asyncio
 import base64
 import contextlib
 import json
+import uuid
 from collections.abc import AsyncGenerator, Callable
 from typing import TYPE_CHECKING, Any
 
@@ -37,7 +38,7 @@ from tac.models.session import ConversationSession
 from tac.models.stream import StreamStartMessage
 from tac.models.voice import TwiMLRequest, VoiceTwiMLOptions
 from tac.tools import TACTool
-from tac.utils.redaction import mask_phone
+from tac.utils.redaction import mask_phone, redact_twiml_parameters
 
 if TYPE_CHECKING:
     from tac.channels.voice.channel import VoiceChannel
@@ -46,10 +47,25 @@ if TYPE_CHECKING:
     )
 
 
+#: Twilio Media Streams always sends/expects 8kHz G.711 u-law audio — per
+#: https://www.twilio.com/docs/voice/media-streams/websocket-messages, this
+#: isn't a provider choice or a default, it's the only format Twilio's
+#: bidirectional Stream supports. No ``rate`` field — OpenAI's Realtime
+#: ``session.audio.*.format`` schema rejects it as unknown (g711 is
+#: inherently fixed-rate, so it isn't settable).
+TWILIO_MEDIA_STREAM_AUDIO_FORMAT: dict[str, Any] = {"type": "audio/pcmu"}
+
 #: G.711 u-law at 8kHz is 1 byte/sample, 8000 samples/sec — a fixed,
 #: non-configurable rate, so audio byte count converts to milliseconds by
 #: this constant alone, regardless of session_config.
 _PCMU_BYTES_PER_MS = 8
+
+#: Reserved <Stream> custom_parameters key used to correlate an outbound
+#: call's session_config override to its WebSocket start event. calls.create()
+#: returning call.sid doesn't happen-before Twilio connecting the stream, so
+#: call.sid can't be the correlation key — this token, embedded in the TwiML
+#: before the call is placed, can.
+_SESSION_CONFIG_TOKEN_PARAM = "_tac_session_config_token"
 
 
 class OpenAIRealtimeProvider(VoiceProvider):
@@ -200,6 +216,30 @@ class OpenAIRealtimeProvider(VoiceProvider):
                 f"{type(twiml_options).__name__}"
             )
 
+        # A token embedded in the TwiML below correlates this override to its
+        # WebSocket start event — not call.sid, since Twilio connecting the
+        # stream doesn't happen-after calls.create() returning call.sid.
+        # Building the token/TwiML here doesn't touch _call_session_configs
+        # yet; that's deferred until right before the call is placed (below),
+        # so a failure in _twiml.build() has nothing to leak.
+        session_config = (
+            options.session_config
+            if isinstance(options, InitiateVoiceConversationOptionsOpenAIRealtime)
+            else None
+        )
+        session_config_token: str | None = None
+        if session_config is not None:
+            session_config_token = uuid.uuid4().hex
+            existing_params = (twiml_options.custom_parameters or {}) if twiml_options else {}
+            twiml_options = (twiml_options or VoiceTwiMLOptionsMediaStreams()).model_copy(
+                update={
+                    "custom_parameters": {
+                        **existing_params,
+                        _SESSION_CONFIG_TOKEN_PARAM: session_config_token,
+                    }
+                }
+            )
+
         from_number = self.channel.tac.config.phone_number
 
         self.logger.info(
@@ -216,8 +256,15 @@ class OpenAIRealtimeProvider(VoiceProvider):
 
         call_kwargs = self._build_call_kwargs(options.call_options)
 
+        if session_config_token is not None and session_config is not None:
+            self._call_session_configs[session_config_token] = session_config
+
         try:
-            self.logger.debug("Outbound call TwiML", twiml=twiml_xml, to=mask_phone(options.to))
+            self.logger.debug(
+                "Outbound call TwiML",
+                twiml=redact_twiml_parameters(twiml_xml),
+                to=mask_phone(options.to),
+            )
 
             client = self.channel._get_twilio_client()
             call = await asyncio.to_thread(
@@ -234,15 +281,11 @@ class OpenAIRealtimeProvider(VoiceProvider):
                 to=mask_phone(options.to),
             )
 
-            if (
-                isinstance(options, InitiateVoiceConversationOptionsOpenAIRealtime)
-                and options.session_config is not None
-            ):
-                self._call_session_configs[call.sid] = options.session_config
-
             return InitiateVoiceConversationResult(call_sid=call.sid)
 
         except Exception as e:
+            if session_config_token is not None:
+                self._call_session_configs.pop(session_config_token, None)
             self.logger.error(
                 "Failed to initiate outbound call",
                 to=mask_phone(options.to),
@@ -324,6 +367,12 @@ class OpenAIRealtimeProvider(VoiceProvider):
         message = StreamStartMessage(**start)
         conv_id = message.conversation_id
 
+        token = message.custom_parameters.get(_SESSION_CONFIG_TOKEN_PARAM)
+        if token is not None:
+            session_config = self._call_session_configs.pop(token, None)
+            if session_config is not None:
+                self._call_session_configs[conv_id] = session_config
+
         self._calls[conv_id] = _CallState(twilio_ws=websocket)
 
         session = self.channel._start_conversation(conv_id, profile_id=None)
@@ -342,9 +391,9 @@ class OpenAIRealtimeProvider(VoiceProvider):
         (by ``handle_incoming_call`` or ``initiate_outbound_conversation``),
         else falls back to ``default_session_config``.
         """
-        session_config = (
-            self._call_session_configs.pop(conv_id, None) or self.config.default_session_config
-        )
+        session_config = self._call_session_configs.pop(conv_id, None)
+        if session_config is None:
+            session_config = self.config.default_session_config
         if session_config is None:
             raise ValueError(
                 f"No session_config available for call {conv_id} — this call supplied none "
@@ -355,6 +404,15 @@ class OpenAIRealtimeProvider(VoiceProvider):
                 f"session_config for call {conv_id} must include a 'model' field — it's "
                 "used as the ?model= query param when opening the OpenAI Realtime WebSocket."
             )
+        for direction in ("input", "output"):
+            fmt = ((session_config.get("audio") or {}).get(direction) or {}).get("format")
+            if fmt != TWILIO_MEDIA_STREAM_AUDIO_FORMAT:
+                raise ValueError(
+                    f"session_config for call {conv_id} has audio.{direction}.format={fmt!r} — "
+                    f"Twilio Media Streams always sends/expects "
+                    f"{TWILIO_MEDIA_STREAM_AUDIO_FORMAT!r}, this isn't configurable. Set "
+                    f"audio.{direction}.format to TWILIO_MEDIA_STREAM_AUDIO_FORMAT."
+                )
 
         model_ws = await websockets.connect(
             f"wss://api.openai.com/v1/realtime?model={session_config['model']}",
@@ -529,9 +587,26 @@ class OpenAIRealtimeProvider(VoiceProvider):
         barge_in.current_item_audio_ms = 0
 
     async def _handle_function_call(self, conv_id: str, item: dict[str, Any]) -> None:
-        """Run a model-requested tool call and hand the result back."""
+        """Run a model-requested tool call and hand the result back.
+
+        Always sends a function_call_output — even a tool that ran
+        successfully can return a non-JSON-serializable object (a datetime,
+        a Pydantic model, ...), and the model would otherwise be left
+        waiting on a call_id it never gets a result for.
+        """
         call_id = item.get("call_id")
-        output = await self._run_tool_call(conv_id, item.get("name"), item.get("arguments"))
+        name = item.get("name")
+        output = await self._run_tool_call(conv_id, name, item.get("arguments"))
+        try:
+            output_json = json.dumps(output)
+        except TypeError as e:
+            self.logger.error(
+                f"Tool '{name}' returned a non-JSON-serializable result: {e}",
+                conversation_id=conv_id,
+            )
+            output_json = json.dumps(
+                {"error": f"Tool '{name}' returned a non-serializable result."}
+            )
 
         await self._model_send(
             conv_id,
@@ -540,7 +615,7 @@ class OpenAIRealtimeProvider(VoiceProvider):
                 "item": {
                     "type": "function_call_output",
                     "call_id": call_id,
-                    "output": json.dumps(output),
+                    "output": output_json,
                 },
             },
         )

@@ -1,5 +1,5 @@
 """
-Example (POC): OpenAI Realtime API voice calls via Twilio Media Streams.
+Example: OpenAI Realtime API voice calls via Twilio Media Streams.
 
 Twilio streams call audio to our own WebSocket, and this provider relays it
 to/from the OpenAI Realtime WebSocket. ``default_session_config`` applies to

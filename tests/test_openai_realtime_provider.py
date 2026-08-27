@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import re
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -10,12 +11,28 @@ from tac import TAC
 from tac.channels.voice import VoiceChannel
 from tac.channels.voice.media_streams.openai_realtime import OpenAIRealtimeProviderConfig
 from tac.channels.voice.media_streams.openai_realtime.models import _BargeInState, _CallState
+from tac.channels.voice.media_streams.openai_realtime.provider import (
+    _SESSION_CONFIG_TOKEN_PARAM,
+    TWILIO_MEDIA_STREAM_AUDIO_FORMAT,
+)
 from tac.models.outbound import (
     InitiateVoiceConversationOptions,
     InitiateVoiceConversationOptionsOpenAIRealtime,
 )
 from tac.models.voice import TwiMLRequest
 from tac.tools import function_tool
+
+_VALID_AUDIO = {
+    "input": {"format": TWILIO_MEDIA_STREAM_AUDIO_FORMAT},
+    "output": {"format": TWILIO_MEDIA_STREAM_AUDIO_FORMAT},
+}
+
+
+def _extract_custom_parameter(twiml: str, name: str) -> str:
+    """Pull a <Parameter name="..." value="..."> value out of generated TwiML."""
+    match = re.search(rf'<Parameter name="{re.escape(name)}" value="([^"]*)"', twiml)
+    assert match, f"parameter {name!r} not found in TwiML: {twiml}"
+    return match.group(1)
 
 
 def get_test_tac_config() -> dict:
@@ -34,7 +51,7 @@ def make_channel(**config_kwargs: object) -> VoiceChannel:
     tac = TAC(get_test_tac_config())
     config = OpenAIRealtimeProviderConfig(
         openai_api_key="sk-test",
-        default_session_config={"model": "gpt-realtime-test"},
+        default_session_config={"model": "gpt-realtime-test", "audio": _VALID_AUDIO},
         **config_kwargs,
     )
     return VoiceChannel(tac, config=config)
@@ -383,6 +400,33 @@ class TestToolCalls:
 
         assert result == 5
 
+    @pytest.mark.asyncio
+    async def test_non_serializable_output_still_sends_function_call_output(self) -> None:
+        """A tool that runs successfully but returns something json.dumps
+        can't handle must still produce a function_call_output — otherwise
+        the model is left waiting on a call_id it never gets a result for."""
+
+        @function_tool()
+        def broken_output() -> object:
+            """Return a value json.dumps can't serialize."""
+            return object()
+
+        channel = make_channel(tools=[broken_output])
+        provider = channel._provider
+
+        model_ws = FakeModelWebSocket()
+        provider._calls["CA9"] = _CallState(model_ws=model_ws)
+
+        await provider._handle_function_call(
+            "CA9", {"call_id": "call_1", "name": "broken_output", "arguments": "{}"}
+        )
+
+        outputs = [m for m in model_ws.sent if m["type"] == "conversation.item.create"]
+        assert len(outputs) == 1
+        payload = json.loads(outputs[0]["item"]["output"])
+        assert "error" in payload
+        assert {"type": "response.create"} in model_ws.sent
+
 
 class TestConfigValidation:
     """OpenAIRealtimeProviderConfig fails fast on unusable combinations."""
@@ -414,7 +458,11 @@ class TestInboundCallSessionConfig:
 
         async def customizer(req: TwiMLRequest) -> dict | None:
             if req.caller_country == "MX":
-                return {"model": "gpt-realtime-mx", "instructions": "Habla en español."}
+                return {
+                    "model": "gpt-realtime-mx",
+                    "instructions": "Habla en español.",
+                    "audio": _VALID_AUDIO,
+                }
             return None
 
         channel = make_channel(on_inbound_call_session_config=customizer)
@@ -426,6 +474,7 @@ class TestInboundCallSessionConfig:
         assert provider._call_session_configs["CA_MX"] == {
             "model": "gpt-realtime-mx",
             "instructions": "Habla en español.",
+            "audio": _VALID_AUDIO,
         }
 
         twilio_ws = FakeTwilioWebSocket(
@@ -444,6 +493,7 @@ class TestInboundCallSessionConfig:
         assert sent_session["session"] == {
             "model": "gpt-realtime-mx",
             "instructions": "Habla en español.",
+            "audio": _VALID_AUDIO,
         }
         assert "CA_MX" not in provider._call_session_configs
 
@@ -472,7 +522,7 @@ class TestInboundCallSessionConfig:
             await asyncio.wait_for(provider.handle_websocket(twilio_ws), timeout=5)
 
         sent_session = next(m for m in model_ws.sent if m["type"] == "session.update")
-        assert sent_session["session"] == {"model": "gpt-realtime-test"}
+        assert sent_session["session"] == {"model": "gpt-realtime-test", "audio": _VALID_AUDIO}
 
     @pytest.mark.asyncio
     async def test_no_call_sid_skips_customizer(self) -> None:
@@ -516,7 +566,10 @@ class TestOutboundCallSessionConfig:
     """Per-outbound-call session_config via InitiateVoiceConversationOptionsOpenAIRealtime."""
 
     @pytest.mark.asyncio
-    async def test_session_config_stashed_under_the_placed_call_sid(self) -> None:
+    async def test_session_config_stashed_under_a_token_before_call_is_placed(self) -> None:
+        """Stashed under a token embedded in the TwiML, not call.sid — Twilio
+        connecting the stream doesn't happen-after calls.create() returning
+        call.sid, so keying by call.sid can race _register_call."""
         channel = make_channel()
         provider = channel._provider
 
@@ -533,7 +586,102 @@ class TestOutboundCallSessionConfig:
             )
 
         assert result.call_sid == "CA_OUT"
-        assert provider._call_session_configs["CA_OUT"] == {"model": "gpt-realtime-outbound"}
+        assert "CA_OUT" not in provider._call_session_configs
+        twiml = mock_client.calls.create.call_args.kwargs["twiml"]
+        token = _extract_custom_parameter(twiml, _SESSION_CONFIG_TOKEN_PARAM)
+        assert provider._call_session_configs[token] == {"model": "gpt-realtime-outbound"}
+
+    @pytest.mark.asyncio
+    async def test_session_config_token_rekeyed_to_call_sid_on_connect(self) -> None:
+        """Once the WebSocket start event arrives, the token entry is
+        rekeyed to call_sid and consumed by _connect_model."""
+        channel = make_channel()
+        provider = channel._provider
+
+        mock_call = MagicMock(sid="CA_OUT4")
+        mock_client = MagicMock()
+        mock_client.calls.create.return_value = mock_call
+
+        with patch.object(channel, "_get_twilio_client", return_value=mock_client):
+            await provider.initiate_outbound_conversation(
+                InitiateVoiceConversationOptionsOpenAIRealtime(
+                    to="+15551234567",
+                    session_config={"model": "gpt-realtime-outbound4", "audio": _VALID_AUDIO},
+                )
+            )
+
+        twiml = mock_client.calls.create.call_args.kwargs["twiml"]
+        token = _extract_custom_parameter(twiml, _SESSION_CONFIG_TOKEN_PARAM)
+
+        twilio_ws = FakeTwilioWebSocket(
+            events=[
+                {
+                    "event": "start",
+                    "start": {
+                        "callSid": "CA_OUT4",
+                        "streamSid": "MZ_OUT4",
+                        "customParameters": {_SESSION_CONFIG_TOKEN_PARAM: token},
+                    },
+                }
+            ]
+        )
+        model_ws = FakeModelWebSocket(events=[], stay_open=False)
+
+        with patch(
+            "tac.channels.voice.media_streams.openai_realtime.provider.websockets.connect",
+            new=AsyncMock(return_value=model_ws),
+        ) as mock_connect:
+            await asyncio.wait_for(provider.handle_websocket(twilio_ws), timeout=5)
+
+        assert "model=gpt-realtime-outbound4" in mock_connect.call_args.args[0]
+        sent_session = next(m for m in model_ws.sent if m["type"] == "session.update")
+        assert sent_session["session"] == {
+            "model": "gpt-realtime-outbound4",
+            "audio": _VALID_AUDIO,
+        }
+        assert provider._call_session_configs == {}
+
+    @pytest.mark.asyncio
+    async def test_session_config_token_cleaned_up_if_call_creation_fails(self) -> None:
+        channel = make_channel()
+        provider = channel._provider
+
+        mock_client = MagicMock()
+        mock_client.calls.create.side_effect = RuntimeError("boom")
+
+        with patch.object(channel, "_get_twilio_client", return_value=mock_client):
+            with pytest.raises(RuntimeError):
+                await provider.initiate_outbound_conversation(
+                    InitiateVoiceConversationOptionsOpenAIRealtime(
+                        to="+15551234567",
+                        session_config={"model": "gpt-realtime-outbound"},
+                    )
+                )
+
+        assert provider._call_session_configs == {}
+
+    @pytest.mark.asyncio
+    async def test_session_config_token_not_leaked_if_twiml_build_fails(self) -> None:
+        """A failure building the TwiML itself (e.g. no resolvable WebSocket
+        URL) happens before calls.create() is ever attempted — the token
+        must not be stashed until that succeeds, or it's never cleaned up."""
+        tac = TAC(get_test_tac_config())
+        config = OpenAIRealtimeProviderConfig(
+            openai_api_key="sk-test", default_session_config={"model": "x", "audio": _VALID_AUDIO}
+        )
+        channel = VoiceChannel(tac, config=config)
+        provider = channel._provider
+        channel.tac.config.voice_public_domain = None  # no fallback WebSocket URL
+
+        with pytest.raises(ValueError, match="needs a WebSocket URL"):
+            await provider.initiate_outbound_conversation(
+                InitiateVoiceConversationOptionsOpenAIRealtime(
+                    to="+15551234567",
+                    session_config={"model": "gpt-realtime-outbound"},
+                )
+            )
+
+        assert provider._call_session_configs == {}
 
     @pytest.mark.asyncio
     async def test_plain_options_type_ignored_falls_back_to_default(self) -> None:
@@ -568,12 +716,27 @@ class TestOutboundCallSessionConfig:
             await provider.initiate_outbound_conversation(
                 InitiateVoiceConversationOptionsOpenAIRealtime(
                     to="+15551234567",
-                    session_config={"model": "gpt-realtime-outbound-only"},
+                    session_config={
+                        "model": "gpt-realtime-outbound-only",
+                        "audio": _VALID_AUDIO,
+                    },
                 )
             )
 
+        twiml = mock_client.calls.create.call_args.kwargs["twiml"]
+        token = _extract_custom_parameter(twiml, _SESSION_CONFIG_TOKEN_PARAM)
+
         twilio_ws = FakeTwilioWebSocket(
-            events=[{"event": "start", "start": {"callSid": "CA_OUT3", "streamSid": "MZ_OUT3"}}]
+            events=[
+                {
+                    "event": "start",
+                    "start": {
+                        "callSid": "CA_OUT3",
+                        "streamSid": "MZ_OUT3",
+                        "customParameters": {_SESSION_CONFIG_TOKEN_PARAM: token},
+                    },
+                }
+            ]
         )
         model_ws = FakeModelWebSocket(events=[], stay_open=False)
 
