@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 import json
 from collections.abc import AsyncGenerator, Callable
 from typing import TYPE_CHECKING, Any
@@ -238,7 +239,13 @@ class OpenAIRealtimeProvider(VoiceProvider):
             raise
 
     async def handle_websocket(self, websocket: WebSocketProtocol) -> None:
-        """Drive one Twilio Media Stream connection from accept to disconnect."""
+        """Drive one Twilio Media Stream connection from accept to disconnect.
+
+        Races the Twilio read against the OpenAI model-event reader so that
+        if the model side disconnects first, we stop pumping caller audio
+        into a dead socket and tear the call down immediately instead of
+        leaving the caller connected to silence.
+        """
         await websocket.accept()
 
         conv_id: str | None = None
@@ -246,7 +253,23 @@ class OpenAIRealtimeProvider(VoiceProvider):
 
         try:
             while True:
-                data = await websocket.receive_json()
+                recv_task: asyncio.Task[dict[str, Any]] = asyncio.create_task(
+                    websocket.receive_json()
+                )
+                waiters: list[asyncio.Task[Any]] = [recv_task]
+                if model_reader is not None:
+                    waiters.append(model_reader)
+
+                done, _pending = await asyncio.wait(waiters, return_when=asyncio.FIRST_COMPLETED)
+
+                if model_reader is not None and model_reader in done:
+                    recv_task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await recv_task
+                    self.logger.info("Model connection ended", conversation_id=conv_id)
+                    break
+
+                data = recv_task.result()
                 event = data.get("event")
 
                 if event == "start":
@@ -275,8 +298,11 @@ class OpenAIRealtimeProvider(VoiceProvider):
         except Exception as e:
             self.logger.error(f"Media stream WebSocket error: {e}", exc_info=True)
         finally:
-            if model_reader is not None:
+            if model_reader is not None and not model_reader.done():
                 model_reader.cancel()
+            if model_reader is not None:
+                with contextlib.suppress(asyncio.CancelledError):
+                    await model_reader
             if conv_id is not None:
                 await self._cleanup_call(conv_id)
 
@@ -356,9 +382,19 @@ class OpenAIRealtimeProvider(VoiceProvider):
             return
 
         if event_type == "error":
-            self.logger.error(
-                "OpenAI Realtime error event", conversation_id=conv_id, error=event.get("error")
-            )
+            error = event.get("error") or {}
+            if error.get("code") == "response_cancel_not_active":
+                # Benign race: our response.cancel (sent while
+                # barge_in.response_active was true) lost to the model's own
+                # response.done arriving first. Nothing to cancel anymore,
+                # which is exactly what we wanted.
+                self.logger.debug(
+                    "response.cancel raced response.done", conversation_id=conv_id, error=error
+                )
+            else:
+                self.logger.error(
+                    "OpenAI Realtime error event", conversation_id=conv_id, error=error
+                )
 
         elif event_type == "input_audio_buffer.speech_started":
             self.logger.debug("Caller speech detected (VAD)", conversation_id=conv_id)

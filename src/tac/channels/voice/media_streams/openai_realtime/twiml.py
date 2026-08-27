@@ -46,7 +46,7 @@ def generate_twiml(
         options = VoiceTwiMLOptionsMediaStreams(**options)
 
     resolved_websocket_url = websocket_url if websocket_url is not None else options.websocket_url
-    if not resolved_websocket_url:
+    if not resolved_websocket_url or not resolved_websocket_url.strip():
         raise ValueError(
             "generate_twiml requires a WebSocket URL — pass it positionally or "
             "set options.websocket_url."

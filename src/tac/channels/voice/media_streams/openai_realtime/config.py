@@ -35,7 +35,11 @@ class OpenAIRealtimeProviderConfig(VoiceProviderConfig):
     )
     tools: list[TACTool] = Field(
         default_factory=list,
-        description="TACTool functions the model can call mid-call.",
+        description=(
+            "Executable TACTool implementations, looked up by name to run mid-call tool "
+            "requests. This alone does not tell the model these tools exist — also add each "
+            "tool's `to_realtime_format()` schema to `session_config['tools']`."
+        ),
     )
     welcome_greeting_response: dict[str, Any] | None = Field(
         default=None,
@@ -47,7 +51,9 @@ class OpenAIRealtimeProviderConfig(VoiceProviderConfig):
         ...,
         description="The session.update payload's 'session' body, sent once the "
         "model connects. See https://developers.openai.com/api/reference/resources/"
-        "realtime/client-events#session.update for the schema.",
+        "realtime/client-events#session.update for the schema. If using `tools`, its "
+        "'tools' entry must separately list each tool's `to_realtime_format()` schema — "
+        "this config is passed to OpenAI as-is, with no tool schemas merged in.",
     )
     default_twiml_options: VoiceTwiMLOptionsMediaStreams | None = Field(
         default=None,

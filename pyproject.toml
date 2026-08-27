@@ -37,7 +37,7 @@ server = [
     "python-multipart>=0.0.20,<1",
 ]
 openai-realtime = [
-    "websockets>=13,<17",
+    "websockets>=14,<17",
 ]
 
 [dependency-groups]

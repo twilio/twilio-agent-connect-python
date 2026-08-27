@@ -8,8 +8,8 @@ from pydantic import BaseModel, Field
 class StreamStartMessage(BaseModel):
     """The ``start`` field of Twilio's Media Stream ``start`` event."""
 
-    stream_sid: str | None = Field(None, alias="streamSid")
-    call_sid: str | None = Field(None, alias="callSid")
+    stream_sid: str = Field(alias="streamSid")
+    call_sid: str = Field(alias="callSid")
     media_format: dict[str, Any] | None = Field(None, alias="mediaFormat")
     custom_parameters: dict[str, str] = Field(default_factory=dict, alias="customParameters")
 
@@ -17,4 +17,4 @@ class StreamStartMessage(BaseModel):
 
     @property
     def conversation_id(self) -> str:
-        return self.call_sid or self.stream_sid or "unknown-call"
+        return self.call_sid

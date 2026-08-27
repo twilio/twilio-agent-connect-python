@@ -25,8 +25,8 @@ Env vars required:
 - TWILIO_VOICE_PUBLIC_DOMAIN (your ngrok domain or similar)
 - OPENAI_API_KEY
 
-Install the extra dependency this example needs:
-    pip install "tac[openai-realtime]"
+Install the extra dependencies this example needs:
+    pip install "tac[server,openai-realtime]"
 
 Usage:
     python media_stream_openai_realtime.py                    # inbound only
@@ -42,10 +42,10 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 
 from tac import TAC, TACConfig
-from tac.channels.voice import (
+from tac.channels.voice import VoiceChannel
+from tac.channels.voice.media_streams.openai_realtime import (
     TWILIO_MEDIA_STREAM_AUDIO_FORMAT,
     OpenAIRealtimeProviderConfig,
-    VoiceChannel,
 )
 from tac.models.outbound import InitiateVoiceConversationOptions
 from tac.models.session import ConversationSession

@@ -134,10 +134,11 @@ def generate_twiml(
         options = VoiceTwiMLOptionsConversationRelay(**options)
 
     # Positional arg wins when both are set; fall back to options.websocket_url.
-    # (VoiceTwiMLOptionsConversationRelay rejects an empty websocket_url, so any value
-    # here is real.)
+    # (VoiceTwiMLOptionsConversationRelay rejects an empty options.websocket_url, but
+    # the positional arg bypasses that pydantic validation entirely, so it still
+    # needs its own whitespace check below.)
     resolved_websocket_url = websocket_url if websocket_url is not None else options.websocket_url
-    if not resolved_websocket_url:
+    if not resolved_websocket_url or not resolved_websocket_url.strip():
         raise ValueError(
             "generate_twiml requires a WebSocket URL — pass it positionally or "
             "set options.websocket_url."
