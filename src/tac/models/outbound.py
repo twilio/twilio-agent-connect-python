@@ -177,7 +177,7 @@ class InitiateVoiceConversationOptions(BaseModel):
     TwiML for the outbound call is built by merging per-field, highest
     precedence first:
       1. This call's ``twiml_options`` (per-call overrides)
-      2. ``VoiceChannelConfig.default_twiml_options`` (channel-wide defaults)
+      2. ``ConversationRelayProviderConfig.default_twiml_options`` (channel-wide defaults)
       3. TAC defaults (welcome greeting, conversation_configuration,
          action_url resolved via Studio handoff if configured)
 
@@ -187,7 +187,7 @@ class InitiateVoiceConversationOptions(BaseModel):
     channel config still apply.
 
     Set ``voice``, ``language``, ``interruptible``, etc. on the channel's
-    ``VoiceChannelConfig.default_twiml_options`` to apply them to every call
+    ``ConversationRelayProviderConfig.default_twiml_options`` to apply them to every call
     (both inbound and outbound). Use this model's ``twiml_options`` for
     per-call overrides (e.g. campaign-specific ``custom_parameters``).
     """
@@ -205,7 +205,7 @@ class InitiateVoiceConversationOptions(BaseModel):
         default=None,
         description="Per-call overrides for the outbound TwiML — a "
         "VoiceTwiMLOptionsConversationRelay for the default ConversationRelay provider. "
-        "Merged over VoiceChannelConfig.default_twiml_options and TAC defaults.",
+        "Merged over ConversationRelayProviderConfig.default_twiml_options and TAC defaults.",
     )
     call_options: CallOptions | None = Field(
         default=None,

@@ -32,7 +32,9 @@ Install the extra dependencies this example needs:
 
 Usage:
     python openai_realtime.py                    # inbound only
-    python openai_realtime.py --to +16505551234   # also place an outbound call
+    # also place an outbound call — make sure you have permission to call
+    # this number; unsolicited calls risk the number being flagged as spam
+    python openai_realtime.py --to +16505551234
 """
 
 import argparse

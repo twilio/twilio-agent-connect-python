@@ -16,7 +16,7 @@ from tac.models.voice import (
     InterruptMessage,
     PromptMessage,
     SetupMessage,
-    TwiMLOptions,
+    VoiceTwiMLOptionsConversationRelay,
 )
 
 
@@ -361,11 +361,11 @@ class TestVoiceChannel:
     async def test_process_webhook_conversation_inactive(self) -> None:
         """Test that INACTIVE invalidates cached memory when memory_mode='once'."""
 
-        from tac.channels.voice.conversation_relay import VoiceChannelConfig
+        from tac.channels.voice.conversation_relay import ConversationRelayProviderConfig
 
         tac = TAC(get_test_config())
         # Enable "once" mode to trigger cache invalidation
-        channel = VoiceChannel(tac, config=VoiceChannelConfig(memory_mode="once"))
+        channel = VoiceChannel(tac, config=ConversationRelayProviderConfig(memory_mode="once"))
 
         # Start a conversation
         session = channel._start_conversation("CONV123", "profile_123")
@@ -555,13 +555,15 @@ class TestVoiceChannel:
     @pytest.mark.asyncio
     async def test_handle_incoming_call(self) -> None:
         """Test handle_incoming_call generates valid TwiML with conversation_configuration."""
-        from tac.channels.voice import VoiceChannelConfig
+        from tac.channels.voice import ConversationRelayProviderConfig
 
         tac = TAC(get_test_config())
         channel = VoiceChannel(
             tac,
-            config=VoiceChannelConfig(
-                default_twiml_options=TwiMLOptions(welcome_greeting="Welcome!"),
+            config=ConversationRelayProviderConfig(
+                default_twiml_options=VoiceTwiMLOptionsConversationRelay(
+                    welcome_greeting="Welcome!"
+                ),
             ),
         )
 
@@ -592,26 +594,28 @@ class TestVoiceChannel:
     async def test_handle_incoming_call_websocket_url_via_customizer(self) -> None:
         """Test an on_inbound_call_twiml customizer can override websocket_url per call.
 
-        websocket_url is a normal TwiMLOptions field, so it rides the same
+        websocket_url is a normal VoiceTwiMLOptionsConversationRelay field, so it rides the same
         layered merge as every other attribute. This is the affinity-routed-host
         case (e.g. Azure Hosted Agents) appending a per-call token to the
         upgrade URL — done through the existing customizer, no new API surface.
         """
-        from tac.channels.voice import VoiceChannelConfig
+        from tac.channels.voice import ConversationRelayProviderConfig
         from tac.models.voice import TwiMLRequest
 
         tac = TAC(get_test_config())
         channel = VoiceChannel(
             tac,
-            config=VoiceChannelConfig(
-                default_twiml_options=TwiMLOptions(welcome_greeting="Welcome!"),
+            config=ConversationRelayProviderConfig(
+                default_twiml_options=VoiceTwiMLOptionsConversationRelay(
+                    welcome_greeting="Welcome!"
+                ),
             ),
         )
 
         override = "wss://example.com/ws?agent_session_id=CA123"
 
-        async def customize(req: TwiMLRequest) -> TwiMLOptions:
-            return TwiMLOptions(
+        async def customize(req: TwiMLRequest) -> VoiceTwiMLOptionsConversationRelay:
+            return VoiceTwiMLOptionsConversationRelay(
                 websocket_url=f"wss://example.com/ws?agent_session_id={req.call_sid}"
             )
 
@@ -632,14 +636,14 @@ class TestVoiceChannel:
     @pytest.mark.asyncio
     async def test_handle_incoming_call_websocket_url_via_default_options(self) -> None:
         """Test default_twiml_options.websocket_url overrides the derived URL."""
-        from tac.channels.voice import VoiceChannelConfig
+        from tac.channels.voice import ConversationRelayProviderConfig
 
         tac = TAC(get_test_config())
         override = "wss://static.example.com/socket"
         channel = VoiceChannel(
             tac,
-            config=VoiceChannelConfig(
-                default_twiml_options=TwiMLOptions(websocket_url=override),
+            config=ConversationRelayProviderConfig(
+                default_twiml_options=VoiceTwiMLOptionsConversationRelay(websocket_url=override),
             ),
         )
 
@@ -651,19 +655,21 @@ class TestVoiceChannel:
     @pytest.mark.asyncio
     async def test_handle_incoming_call_customizer_beats_default_options(self) -> None:
         """Test customizer websocket_url wins over default_twiml_options (precedence)."""
-        from tac.channels.voice import VoiceChannelConfig
+        from tac.channels.voice import ConversationRelayProviderConfig
         from tac.models.voice import TwiMLRequest
 
         tac = TAC(get_test_config())
         channel = VoiceChannel(
             tac,
-            config=VoiceChannelConfig(
-                default_twiml_options=TwiMLOptions(websocket_url="wss://static.example.com/socket"),
+            config=ConversationRelayProviderConfig(
+                default_twiml_options=VoiceTwiMLOptionsConversationRelay(
+                    websocket_url="wss://static.example.com/socket"
+                ),
             ),
         )
 
-        async def customize(req: TwiMLRequest) -> TwiMLOptions:
-            return TwiMLOptions(websocket_url="wss://per-call.example.com/ws")
+        async def customize(req: TwiMLRequest) -> VoiceTwiMLOptionsConversationRelay:
+            return VoiceTwiMLOptionsConversationRelay(websocket_url="wss://per-call.example.com/ws")
 
         channel.on_inbound_call_twiml(customize)
 
@@ -1180,7 +1186,7 @@ class TestVoiceChannel:
         """URL supplied only via options.websocket_url (no positional arg) is
         emitted on <ConversationRelay> — the channel-less caller path."""
         twiml = generate_twiml(
-            options=TwiMLOptions(
+            options=VoiceTwiMLOptionsConversationRelay(
                 websocket_url="wss://example.com/ws?agent_session_id=CA1",
                 conversation_configuration="cc",
             )
@@ -1193,7 +1199,7 @@ class TestVoiceChannel:
         """When both are given, the positional websocket_url wins."""
         twiml = generate_twiml(
             "wss://positional.example.com/ws",
-            TwiMLOptions(websocket_url="wss://options.example.com/ws"),
+            VoiceTwiMLOptionsConversationRelay(websocket_url="wss://options.example.com/ws"),
         )
 
         assert 'url="wss://positional.example.com/ws"' in twiml
@@ -1202,23 +1208,23 @@ class TestVoiceChannel:
     def test_generate_twiml_requires_a_url(self) -> None:
         """No URL via either source raises ValueError."""
         with pytest.raises(ValueError, match="requires a WebSocket URL"):
-            generate_twiml(options=TwiMLOptions(welcome_greeting="hi"))
+            generate_twiml(options=VoiceTwiMLOptionsConversationRelay(welcome_greeting="hi"))
 
     def test_twiml_options_rejects_empty_websocket_url(self) -> None:
         """An empty/whitespace websocket_url is a misconfiguration — reject it
         at the model rather than silently emitting <ConversationRelay url="">."""
         with pytest.raises(ValueError, match="websocket_url cannot be empty"):
-            TwiMLOptions(websocket_url="")
+            VoiceTwiMLOptionsConversationRelay(websocket_url="")
         with pytest.raises(ValueError, match="websocket_url cannot be empty"):
-            TwiMLOptions(websocket_url="   ")
+            VoiceTwiMLOptionsConversationRelay(websocket_url="   ")
         # None (the default) is fine — falls through to the derived URL.
-        assert TwiMLOptions(websocket_url=None).websocket_url is None
+        assert VoiceTwiMLOptionsConversationRelay(websocket_url=None).websocket_url is None
 
     def test_generate_twiml_with_welcome_greeting(self) -> None:
         """Test TwiML generation with welcome greeting."""
         twiml = generate_twiml(
             "wss://example.com/voice",
-            TwiMLOptions(
+            VoiceTwiMLOptionsConversationRelay(
                 welcome_greeting="Hello! How can I help you?",
             ),
         )
@@ -1229,7 +1235,7 @@ class TestVoiceChannel:
         """Test TwiML generation with action URL."""
         twiml = generate_twiml(
             "wss://example.com/voice",
-            TwiMLOptions(
+            VoiceTwiMLOptionsConversationRelay(
                 action_url="https://example.com/callback",
             ),
         )
@@ -1240,7 +1246,7 @@ class TestVoiceChannel:
         """Test TwiML generation with standard TAC custom parameters."""
         twiml = generate_twiml(
             "wss://example.com/voice",
-            TwiMLOptions(
+            VoiceTwiMLOptionsConversationRelay(
                 custom_parameters={
                     "conversationId": "CH123",
                     "profileId": "mem_profile_123",
@@ -1259,7 +1265,7 @@ class TestVoiceChannel:
         """Test TwiML generation with arbitrary custom parameters."""
         twiml = generate_twiml(
             "wss://example.com/voice",
-            TwiMLOptions(
+            VoiceTwiMLOptionsConversationRelay(
                 custom_parameters={
                     "custom_field_1": "value1",
                     "custom_field_2": "value2",
@@ -1276,7 +1282,7 @@ class TestVoiceChannel:
         """Test that None values are excluded from parameters."""
         twiml = generate_twiml(
             "wss://example.com/voice",
-            TwiMLOptions(
+            VoiceTwiMLOptionsConversationRelay(
                 custom_parameters={
                     "field1": "value1",
                     "field2": None,
@@ -1293,7 +1299,7 @@ class TestVoiceChannel:
         """Test complete TwiML generation with all options."""
         twiml = generate_twiml(
             "wss://example.ngrok.io/voice",
-            TwiMLOptions(
+            VoiceTwiMLOptionsConversationRelay(
                 custom_parameters={
                     "conversationId": "CH_abc123",
                     "profileId": "mem_profile_xyz",
@@ -1317,7 +1323,7 @@ class TestVoiceChannel:
         """Test TwiML generation with conversation_configuration."""
         twiml = generate_twiml(
             "wss://example.com/voice",
-            TwiMLOptions(
+            VoiceTwiMLOptionsConversationRelay(
                 conversation_configuration="conv_configuration_test_service_123",
             ),
         )
@@ -1327,19 +1333,20 @@ class TestVoiceChannel:
 
     def test_generate_twiml_without_conversation_configuration(self) -> None:
         """Test TwiML generation without conversation_configuration."""
-        twiml = generate_twiml("wss://example.com/voice", TwiMLOptions())
+        twiml = generate_twiml("wss://example.com/voice", VoiceTwiMLOptionsConversationRelay())
 
         # Should not have conversation_configuration in output
         assert "conversationConfiguration" not in twiml
 
 
 class TestGenerateTwiMLConversationRelayAttrs:
-    """The widened TwiMLOptions surface should emit every documented attribute."""
+    """The widened VoiceTwiMLOptionsConversationRelay surface should emit every
+    documented attribute."""
 
     def test_voice_and_language_attrs(self) -> None:
         twiml = generate_twiml(
             "wss://example.com/ws",
-            TwiMLOptions(
+            VoiceTwiMLOptionsConversationRelay(
                 voice="en-US-Journey-D",
                 language="en-US",
                 transcription_provider="deepgram",
@@ -1354,7 +1361,7 @@ class TestGenerateTwiMLConversationRelayAttrs:
     def test_interruptible_dtmf_debug(self) -> None:
         twiml = generate_twiml(
             "wss://example.com/ws",
-            TwiMLOptions(
+            VoiceTwiMLOptionsConversationRelay(
                 interruptible="speech",
                 dtmf_detection=True,
                 debug="speaker-events",
@@ -1367,8 +1374,12 @@ class TestGenerateTwiMLConversationRelayAttrs:
     def test_interruptible_bool_normalized_to_enum(self) -> None:
         """Twilio accepts True/False on interruptible for backward-compat,
         but the documented enum values are 'any'/'none'. Normalize."""
-        twiml_true = generate_twiml("wss://example.com/ws", TwiMLOptions(interruptible=True))
-        twiml_false = generate_twiml("wss://example.com/ws", TwiMLOptions(interruptible=False))
+        twiml_true = generate_twiml(
+            "wss://example.com/ws", VoiceTwiMLOptionsConversationRelay(interruptible=True)
+        )
+        twiml_false = generate_twiml(
+            "wss://example.com/ws", VoiceTwiMLOptionsConversationRelay(interruptible=False)
+        )
         assert 'interruptible="any"' in twiml_true
         assert 'interruptible="none"' in twiml_false
 
@@ -1377,7 +1388,7 @@ class TestGenerateTwiMLConversationRelayAttrs:
 
         twiml = generate_twiml(
             "wss://example.com/ws",
-            TwiMLOptions(
+            VoiceTwiMLOptionsConversationRelay(
                 languages=[
                     LanguageConfig(
                         code="es-MX",
@@ -1399,7 +1410,7 @@ class TestGenerateTwiMLConversationRelayAttrs:
     def test_welcome_greeting_interruptible(self) -> None:
         twiml = generate_twiml(
             "wss://example.com/ws",
-            TwiMLOptions(
+            VoiceTwiMLOptionsConversationRelay(
                 welcome_greeting="Hi",
                 welcome_greeting_interruptible="dtmf",
             ),
@@ -1409,7 +1420,7 @@ class TestGenerateTwiMLConversationRelayAttrs:
     def test_language_override_attrs(self) -> None:
         twiml = generate_twiml(
             "wss://example.com/ws",
-            TwiMLOptions(
+            VoiceTwiMLOptionsConversationRelay(
                 tts_language="en-US",
                 transcription_language="fr-FR",
             ),
@@ -1420,7 +1431,7 @@ class TestGenerateTwiMLConversationRelayAttrs:
     def test_speech_model_and_elevenlabs_normalization(self) -> None:
         twiml = generate_twiml(
             "wss://example.com/ws",
-            TwiMLOptions(
+            VoiceTwiMLOptionsConversationRelay(
                 speech_model="nova-3-general",
                 elevenlabs_text_normalization="on",
             ),
@@ -1431,7 +1442,7 @@ class TestGenerateTwiMLConversationRelayAttrs:
     def test_turn_detection_attrs(self) -> None:
         twiml = generate_twiml(
             "wss://example.com/ws",
-            TwiMLOptions(
+            VoiceTwiMLOptionsConversationRelay(
                 eot_threshold=0.75,
                 partial_prompts=True,
                 deepgram_smart_format=False,
@@ -1446,7 +1457,7 @@ class TestGenerateTwiMLConversationRelayAttrs:
     def test_interrupt_sensitivity_and_report_input(self) -> None:
         twiml = generate_twiml(
             "wss://example.com/ws",
-            TwiMLOptions(
+            VoiceTwiMLOptionsConversationRelay(
                 interrupt_sensitivity="medium",
                 report_input_during_agent_speech="speech",
             ),
@@ -1457,7 +1468,7 @@ class TestGenerateTwiMLConversationRelayAttrs:
     def test_ignore_backchannel_and_preemptible(self) -> None:
         twiml = generate_twiml(
             "wss://example.com/ws",
-            TwiMLOptions(ignore_backchannel=True, preemptible=True),
+            VoiceTwiMLOptionsConversationRelay(ignore_backchannel=True, preemptible=True),
         )
         assert 'ignoreBackchannel="true"' in twiml
         assert 'preemptible="true"' in twiml
@@ -1465,7 +1476,7 @@ class TestGenerateTwiMLConversationRelayAttrs:
     def test_hints_events_intelligence_service(self) -> None:
         twiml = generate_twiml(
             "wss://example.com/ws",
-            TwiMLOptions(
+            VoiceTwiMLOptionsConversationRelay(
                 hints="TwiML,ConversationRelay",
                 events="speaker-events tokens-played",
                 intelligence_service="GAaabbcc",
@@ -1476,7 +1487,7 @@ class TestGenerateTwiMLConversationRelayAttrs:
         assert 'intelligenceService="GAaabbcc"' in twiml
 
     def test_speech_timeout_accepts_auto(self) -> None:
-        opts = TwiMLOptions(speech_timeout="auto")
+        opts = VoiceTwiMLOptionsConversationRelay(speech_timeout="auto")
         assert opts.speech_timeout == "auto"
         twiml = generate_twiml("wss://example.com/ws", opts)
         assert 'speechTimeout="auto"' in twiml
@@ -1486,7 +1497,7 @@ class TestGenerateTwiMLConversationRelayAttrs:
         from pydantic import ValidationError
 
         with pytest.raises(ValidationError):
-            TwiMLOptions(speech_timeout="fast")  # type: ignore[arg-type]
+            VoiceTwiMLOptionsConversationRelay(speech_timeout="fast")  # type: ignore[arg-type]
 
     def test_omitted_fields_absent_from_output(self) -> None:
         twiml = generate_twiml("wss://example.com/ws")
@@ -1525,7 +1536,9 @@ class TestTwiMLOptionsExtra:
     def test_extra_attrs_emitted(self) -> None:
         twiml = generate_twiml(
             "wss://example.com/ws",
-            TwiMLOptions(extra={"future_feature": "on", "another_attr": True}),
+            VoiceTwiMLOptionsConversationRelay(
+                extra={"future_feature": "on", "another_attr": True}
+            ),
         )
         # Twilio SDK snake_case → camelCase
         assert 'futureFeature="on"' in twiml
@@ -1538,15 +1551,17 @@ class TestTwiMLOptionsExtra:
         from pydantic import ValidationError
 
         with pytest.raises(ValidationError, match="shadow typed fields"):
-            TwiMLOptions(voice="en-US-Journey-D", extra={"voice": "should-not-appear"})
+            VoiceTwiMLOptionsConversationRelay(
+                voice="en-US-Journey-D", extra={"voice": "should-not-appear"}
+            )
 
         with pytest.raises(ValidationError, match="shadow typed fields"):
             # Even when the typed field is unset, a shadow key must use the
             # typed field directly so validators / type coercion run.
-            TwiMLOptions(extra={"speech_timeout": 800})
+            VoiceTwiMLOptionsConversationRelay(extra={"speech_timeout": 800})
 
     def test_extra_none_emits_nothing(self) -> None:
-        twiml = generate_twiml("wss://example.com/ws", TwiMLOptions())
+        twiml = generate_twiml("wss://example.com/ws", VoiceTwiMLOptionsConversationRelay())
         # Sanity: no trailing garbage from extra handling when it's unset.
         assert "<ConversationRelay url=" in twiml
 
@@ -1564,13 +1579,13 @@ class TestHandleIncomingCallMerge:
 
     @pytest.mark.asyncio
     async def test_static_options_override_conversation_configuration(self) -> None:
-        from tac.channels.voice import VoiceChannelConfig
+        from tac.channels.voice import ConversationRelayProviderConfig
 
         tac = TAC(get_test_config())
         channel = VoiceChannel(
             tac,
-            config=VoiceChannelConfig(
-                default_twiml_options=TwiMLOptions(
+            config=ConversationRelayProviderConfig(
+                default_twiml_options=VoiceTwiMLOptionsConversationRelay(
                     conversation_configuration="conv_configuration_custom"
                 ),
             ),
@@ -1622,13 +1637,15 @@ class TestHandleIncomingCallMerge:
     async def test_static_options_action_url_beats_derived_default(self) -> None:
         """A static action_url on default_twiml_options is an explicit user
         choice and wins over the derived cleanup URL."""
-        from tac.channels.voice import VoiceChannelConfig
+        from tac.channels.voice import ConversationRelayProviderConfig
 
         tac = TAC(get_test_config())
         channel = VoiceChannel(
             tac,
-            config=VoiceChannelConfig(
-                default_twiml_options=TwiMLOptions(action_url="https://static.example.com/end"),
+            config=ConversationRelayProviderConfig(
+                default_twiml_options=VoiceTwiMLOptionsConversationRelay(
+                    action_url="https://static.example.com/end"
+                ),
             ),
         )
         twiml = await channel.handle_incoming_call()
@@ -1641,17 +1658,19 @@ class TestHandleIncomingCallMerge:
         default_twiml_options.action_url. Verifies the _overlay_fields skip
         invariant — every layer's action_url is funneled through
         _resolve_action_url, never via the field overlay."""
-        from tac.channels.voice import VoiceChannelConfig
+        from tac.channels.voice import ConversationRelayProviderConfig
         from tac.models.voice import TwiMLRequest
 
-        async def customizer(req: TwiMLRequest) -> TwiMLOptions:
-            return TwiMLOptions(voice="en-US-Journey-D")  # no action_url
+        async def customizer(req: TwiMLRequest) -> VoiceTwiMLOptionsConversationRelay:
+            return VoiceTwiMLOptionsConversationRelay(voice="en-US-Journey-D")  # no action_url
 
         tac = TAC(get_test_config())
         channel = VoiceChannel(
             tac,
-            config=VoiceChannelConfig(
-                default_twiml_options=TwiMLOptions(action_url="https://static.example.com/end"),
+            config=ConversationRelayProviderConfig(
+                default_twiml_options=VoiceTwiMLOptionsConversationRelay(
+                    action_url="https://static.example.com/end"
+                ),
             ),
         )
         channel.on_inbound_call_twiml(customizer)
@@ -1664,18 +1683,20 @@ class TestHandleIncomingCallMerge:
         """Explicit action_url=None on the customizer suppresses the
         <Connect action=...> attribute, even if Studio handoff or a channel
         default would otherwise populate it."""
-        from tac.channels.voice import VoiceChannelConfig
+        from tac.channels.voice import ConversationRelayProviderConfig
         from tac.models.voice import TwiMLRequest
 
-        async def customizer(req: TwiMLRequest) -> TwiMLOptions:
-            return TwiMLOptions(action_url=None)
+        async def customizer(req: TwiMLRequest) -> VoiceTwiMLOptionsConversationRelay:
+            return VoiceTwiMLOptionsConversationRelay(action_url=None)
 
         flow_sid = "FW" + "a" * 32
         tac = TAC({**get_test_config(), "studio_handoff_flow_sid": flow_sid})
         channel = VoiceChannel(
             tac,
-            config=VoiceChannelConfig(
-                default_twiml_options=TwiMLOptions(action_url="https://static.example.com/end"),
+            config=ConversationRelayProviderConfig(
+                default_twiml_options=VoiceTwiMLOptionsConversationRelay(
+                    action_url="https://static.example.com/end"
+                ),
             ),
         )
         channel.on_inbound_call_twiml(customizer)
@@ -1686,14 +1707,14 @@ class TestHandleIncomingCallMerge:
     async def test_default_options_action_url_none_suppresses(self) -> None:
         """Explicit action_url=None on default_twiml_options suppresses
         <Connect action=...> channel-wide, even with Studio handoff configured."""
-        from tac.channels.voice import VoiceChannelConfig
+        from tac.channels.voice import ConversationRelayProviderConfig
 
         flow_sid = "FW" + "a" * 32
         tac = TAC({**get_test_config(), "studio_handoff_flow_sid": flow_sid})
         channel = VoiceChannel(
             tac,
-            config=VoiceChannelConfig(
-                default_twiml_options=TwiMLOptions(action_url=None),
+            config=ConversationRelayProviderConfig(
+                default_twiml_options=VoiceTwiMLOptionsConversationRelay(action_url=None),
             ),
         )
         twiml = await channel.handle_incoming_call()
@@ -1709,7 +1730,7 @@ class TestHandleIncomingCallMerge:
 
         affinity_url = "wss://example.com/ws?agent_session_id=CA123"
         twiml = await channel.handle_incoming_call(
-            host_twiml_options=TwiMLOptions(
+            host_twiml_options=VoiceTwiMLOptionsConversationRelay(
                 websocket_url=affinity_url,
                 custom_parameters={"agent_session_id": "CA123"},
             ),
@@ -1725,19 +1746,19 @@ class TestHandleIncomingCallMerge:
         """Precedence: the application's on_inbound_call_twiml customizer sits
         ABOVE host_twiml_options — a developer's explicit choice wins over the
         host's per-call values (for fields the dev sets)."""
-        from tac.channels.voice import VoiceChannelConfig
+        from tac.channels.voice import ConversationRelayProviderConfig
         from tac.models.voice import TwiMLRequest
 
-        async def app_customizer(req: TwiMLRequest) -> TwiMLOptions:
-            return TwiMLOptions(welcome_greeting="App wins")
+        async def app_customizer(req: TwiMLRequest) -> VoiceTwiMLOptionsConversationRelay:
+            return VoiceTwiMLOptionsConversationRelay(welcome_greeting="App wins")
 
         tac = TAC(get_test_config())
-        channel = VoiceChannel(tac, config=VoiceChannelConfig())
+        channel = VoiceChannel(tac, config=ConversationRelayProviderConfig())
         channel.on_inbound_call_twiml(app_customizer)
 
         twiml = await channel.handle_incoming_call(
             twiml_request=TwiMLRequest(),
-            host_twiml_options=TwiMLOptions(
+            host_twiml_options=VoiceTwiMLOptionsConversationRelay(
                 websocket_url="wss://example.com/ws?agent_session_id=CA1",
                 welcome_greeting="Host loses",
             ),
@@ -1752,18 +1773,20 @@ class TestHandleIncomingCallMerge:
     @pytest.mark.asyncio
     async def test_default_options_beats_host_twiml_options(self) -> None:
         """default_twiml_options sits above host_twiml_options."""
-        from tac.channels.voice import VoiceChannelConfig
+        from tac.channels.voice import ConversationRelayProviderConfig
 
         tac = TAC(get_test_config())
         channel = VoiceChannel(
             tac,
-            config=VoiceChannelConfig(
-                default_twiml_options=TwiMLOptions(welcome_greeting="Channel default"),
+            config=ConversationRelayProviderConfig(
+                default_twiml_options=VoiceTwiMLOptionsConversationRelay(
+                    welcome_greeting="Channel default"
+                ),
             ),
         )
 
         twiml = await channel.handle_incoming_call(
-            host_twiml_options=TwiMLOptions(welcome_greeting="Host override"),
+            host_twiml_options=VoiceTwiMLOptionsConversationRelay(welcome_greeting="Host override"),
         )
 
         assert 'welcomeGreeting="Channel default"' in twiml
@@ -1802,17 +1825,19 @@ class TestHandleIncomingCallMerge:
 
 
 class TestStaticTwiMLOptions:
-    """VoiceChannelConfig.twiml_options applies to every call without a callback."""
+    """ConversationRelayProviderConfig.twiml_options applies to every call without a callback."""
 
     @pytest.mark.asyncio
     async def test_static_options_applied(self) -> None:
-        from tac.channels.voice import VoiceChannelConfig
+        from tac.channels.voice import ConversationRelayProviderConfig
 
         tac = TAC(get_test_config())
         channel = VoiceChannel(
             tac,
-            config=VoiceChannelConfig(
-                default_twiml_options=TwiMLOptions(voice="en-US-Journey-D", language="en-US"),
+            config=ConversationRelayProviderConfig(
+                default_twiml_options=VoiceTwiMLOptionsConversationRelay(
+                    voice="en-US-Journey-D", language="en-US"
+                ),
             ),
         )
         twiml = await channel.handle_incoming_call()
@@ -1821,13 +1846,15 @@ class TestStaticTwiMLOptions:
 
     @pytest.mark.asyncio
     async def test_welcome_greeting_via_twiml_options(self) -> None:
-        from tac.channels.voice import VoiceChannelConfig
+        from tac.channels.voice import ConversationRelayProviderConfig
 
         tac = TAC(get_test_config())
         channel = VoiceChannel(
             tac,
-            config=VoiceChannelConfig(
-                default_twiml_options=TwiMLOptions(welcome_greeting="Bonjour!"),
+            config=ConversationRelayProviderConfig(
+                default_twiml_options=VoiceTwiMLOptionsConversationRelay(
+                    welcome_greeting="Bonjour!"
+                ),
             ),
         )
         twiml = await channel.handle_incoming_call()
@@ -1843,10 +1870,10 @@ class TestCustomizeTwiMLOptions:
 
         called = False
 
-        async def customizer(ctx: TwiMLRequest) -> TwiMLOptions:
+        async def customizer(ctx: TwiMLRequest) -> VoiceTwiMLOptionsConversationRelay:
             nonlocal called
             called = True
-            return TwiMLOptions(voice="en-US-Journey-D")
+            return VoiceTwiMLOptionsConversationRelay(voice="en-US-Journey-D")
 
         tac = TAC(get_test_config())
         channel = VoiceChannel(tac)
@@ -1862,9 +1889,11 @@ class TestCustomizeTwiMLOptions:
 
         seen: dict[str, TwiMLRequest] = {}
 
-        async def customizer(ctx: TwiMLRequest) -> TwiMLOptions:
+        async def customizer(ctx: TwiMLRequest) -> VoiceTwiMLOptionsConversationRelay:
             seen["ctx"] = ctx
-            return TwiMLOptions(voice="en-US-Journey-D", interruptible="speech")
+            return VoiceTwiMLOptionsConversationRelay(
+                voice="en-US-Journey-D", interruptible="speech"
+            )
 
         tac = TAC(get_test_config())
         channel = VoiceChannel(tac)
@@ -1880,17 +1909,17 @@ class TestCustomizeTwiMLOptions:
 
     @pytest.mark.asyncio
     async def test_customizer_output_beats_static(self) -> None:
-        from tac.channels.voice import VoiceChannelConfig
+        from tac.channels.voice import ConversationRelayProviderConfig
         from tac.models.voice import TwiMLRequest
 
-        async def customizer(ctx: TwiMLRequest) -> TwiMLOptions:
-            return TwiMLOptions(voice="es-MX-Neural2-A")
+        async def customizer(ctx: TwiMLRequest) -> VoiceTwiMLOptionsConversationRelay:
+            return VoiceTwiMLOptionsConversationRelay(voice="es-MX-Neural2-A")
 
         tac = TAC(get_test_config())
         channel = VoiceChannel(
             tac,
-            config=VoiceChannelConfig(
-                default_twiml_options=TwiMLOptions(voice="en-US-Journey-D"),
+            config=ConversationRelayProviderConfig(
+                default_twiml_options=VoiceTwiMLOptionsConversationRelay(voice="en-US-Journey-D"),
             ),
         )
         channel.on_inbound_call_twiml(customizer)
@@ -1901,17 +1930,19 @@ class TestCustomizeTwiMLOptions:
 
     @pytest.mark.asyncio
     async def test_customizer_unset_fields_keep_lower_layers(self) -> None:
-        from tac.channels.voice import VoiceChannelConfig
+        from tac.channels.voice import ConversationRelayProviderConfig
         from tac.models.voice import TwiMLRequest
 
-        async def customizer(ctx: TwiMLRequest) -> TwiMLOptions:
-            return TwiMLOptions(voice="en-US-Journey-D")
+        async def customizer(ctx: TwiMLRequest) -> VoiceTwiMLOptionsConversationRelay:
+            return VoiceTwiMLOptionsConversationRelay(voice="en-US-Journey-D")
 
         tac = TAC(get_test_config())
         channel = VoiceChannel(
             tac,
-            config=VoiceChannelConfig(
-                default_twiml_options=TwiMLOptions(welcome_greeting="Channel default"),
+            config=ConversationRelayProviderConfig(
+                default_twiml_options=VoiceTwiMLOptionsConversationRelay(
+                    welcome_greeting="Channel default"
+                ),
             ),
         )
         channel.on_inbound_call_twiml(customizer)
@@ -1928,8 +1959,10 @@ class TestCustomizeTwiMLOptions:
 
         flow_sid = "FW" + "a" * 32
 
-        async def customizer(ctx: TwiMLRequest) -> TwiMLOptions:
-            return TwiMLOptions(action_url="https://customizer.example.com/end")
+        async def customizer(ctx: TwiMLRequest) -> VoiceTwiMLOptionsConversationRelay:
+            return VoiceTwiMLOptionsConversationRelay(
+                action_url="https://customizer.example.com/end"
+            )
 
         tac = TAC({**get_test_config(), "studio_handoff_flow_sid": flow_sid})
         channel = VoiceChannel(tac)
@@ -2317,7 +2350,7 @@ class TestConversationInitializationFlow:
 
 
 class TestSessionManagerDefaults:
-    """Test session_manager default behavior in VoiceChannelConfig."""
+    """Test session_manager default behavior in ConversationRelayProviderConfig."""
 
     def test_default_session_manager_is_created(self) -> None:
         """Test that VoiceChannel creates a session_manager by default."""
@@ -2332,10 +2365,10 @@ class TestSessionManagerDefaults:
 
     def test_session_manager_can_be_set_to_none(self) -> None:
         """Test that session_manager can be explicitly disabled."""
-        from tac.channels.voice import VoiceChannelConfig
+        from tac.channels.voice import ConversationRelayProviderConfig
 
         tac = TAC(get_test_config())
-        config = VoiceChannelConfig(session_manager=None)
+        config = ConversationRelayProviderConfig(session_manager=None)
         channel = VoiceChannel(tac, config=config)
 
         # Verify session_manager is None when explicitly disabled
@@ -2794,3 +2827,94 @@ class TestGetConversationSessionByCallSid:
 
         assert session.metadata["reached_voicemail"] is True
         channel.send_response.assert_awaited_once_with("conv_abc", "We'll try again.")
+
+
+class TestVoiceChannelConfigDeprecatedAlias:
+    """``VoiceChannelConfig`` is a deprecated pre-provider-split alias for
+    ``ConversationRelayProviderConfig``, resolved lazily via module
+    ``__getattr__`` (PEP 562) at every re-export layer (``tac.channels``,
+    ``tac.channels.voice``, ``tac.channels.voice.conversation_relay``, and the
+    defining ``config`` module) so it stays a true alias rather than a
+    subclass — see each of those modules' ``__getattr__``.
+    """
+
+    @pytest.mark.parametrize(
+        "import_path",
+        [
+            "tac.channels",
+            "tac.channels.voice",
+            "tac.channels.voice.conversation_relay",
+            "tac.channels.voice.conversation_relay.config",
+        ],
+    )
+    def test_accessing_the_name_warns_at_every_reexport_layer(self, import_path: str) -> None:
+        import importlib
+
+        from tac.channels.voice.conversation_relay.config import ConversationRelayProviderConfig
+
+        module = importlib.import_module(import_path)
+        with pytest.warns(DeprecationWarning, match="VoiceChannelConfig is deprecated"):
+            resolved = module.VoiceChannelConfig
+
+        assert resolved is ConversationRelayProviderConfig
+
+    def test_is_a_true_alias_not_a_subclass(self) -> None:
+        """isinstance/equality must behave identically to the modern name —
+        this is the whole reason the alias is a module __getattr__ rather
+        than a subclass with its own __init__.
+        """
+        from tac.channels.voice.conversation_relay.config import ConversationRelayProviderConfig
+
+        with pytest.warns(DeprecationWarning):
+            from tac.channels import VoiceChannelConfig
+
+        assert VoiceChannelConfig is ConversationRelayProviderConfig
+
+        modern = ConversationRelayProviderConfig(memory_mode="once")
+        deprecated = VoiceChannelConfig(memory_mode="once")
+        assert isinstance(modern, VoiceChannelConfig)
+        assert isinstance(deprecated, ConversationRelayProviderConfig)
+
+    def test_unknown_attribute_still_raises_attribute_error(self) -> None:
+        import tac.channels as channels_module
+
+        with pytest.raises(AttributeError):
+            channels_module.not_a_real_attribute  # noqa: B018
+
+    @pytest.mark.parametrize(
+        "import_path",
+        [
+            "tac.channels",
+            "tac.channels.voice",
+            "tac.channels.voice.conversation_relay",
+            "tac.channels.voice.conversation_relay.config",
+        ],
+    )
+    def test_warning_is_attributed_to_the_caller_not_an_internal_shim(
+        self, import_path: str
+    ) -> None:
+        """Regression test: each re-export layer must resolve the alias
+        directly rather than forwarding to another layer's __getattr__ — a
+        forwarded call attributes the warning (via stacklevel) to the internal
+        shim that did the forwarding, not to this line. That misattribution is
+        not just a wrong file/line in the message: Python's default warning
+        filter dedupes by the attributed (module, line), so once any caller
+        anywhere in the process triggers the warning through a forwarding
+        path, every other, unrelated caller going through that same path is
+        silently suppressed afterward. See tac._deprecation.
+        """
+        import importlib
+        import inspect
+        import warnings
+
+        module = importlib.import_module(import_path)
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            frame = inspect.currentframe()
+            assert frame is not None
+            expected_lineno = frame.f_lineno + 1
+            _ = module.VoiceChannelConfig  # this exact line must be what's reported
+
+        assert len(caught) >= 1
+        assert caught[0].filename == __file__
+        assert caught[0].lineno == expected_lineno

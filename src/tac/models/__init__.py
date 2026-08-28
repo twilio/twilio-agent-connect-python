@@ -1,5 +1,8 @@
 """Shared models for the Twilio Agent Connect."""
 
+from typing import TYPE_CHECKING, Any
+
+from tac._deprecation import resolve_deprecated_alias
 from tac.models.conversation import (
     ActionChannelSettings,
     ActionParticipantRef,
@@ -59,7 +62,6 @@ from tac.models.voice import (
     AmdEvent,
     CallStatusEvent,
     RecordingEvent,
-    TwiMLOptions,
     VoiceTwiMLOptions,
     VoiceTwiMLOptionsConversationRelay,
 )
@@ -125,7 +127,16 @@ __all__ = [
     "TACCommunicationContent",
     "TACMemoryResponse",
     "TriggerDetails",
-    "TwiMLOptions",
     "VoiceTwiMLOptions",
     "VoiceTwiMLOptionsConversationRelay",
 ]
+
+if TYPE_CHECKING:  # static type only, see tac._deprecation
+    TwiMLOptions = VoiceTwiMLOptionsConversationRelay
+
+
+def __getattr__(name: str) -> Any:
+    # See tac._deprecation. TODO(3.0): remove.
+    if name == "TwiMLOptions":
+        return resolve_deprecated_alias("TwiMLOptions", VoiceTwiMLOptionsConversationRelay)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

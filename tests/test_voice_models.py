@@ -1,13 +1,18 @@
 """Tests for Voice WebSocket message models."""
 
+import inspect
+import warnings
+
+import pytest
+
 from tac.models.voice import (
     CustomParameters,
     InterruptMessage,
     LanguageConfig,
     PromptMessage,
     SetupMessage,
-    TwiMLOptions,
     TwiMLRequest,
+    VoiceTwiMLOptionsConversationRelay,
 )
 
 
@@ -265,12 +270,12 @@ class TestTwiMLOptionsFieldsSet:
     """Merge semantics rely on Pydantic's model_fields_set."""
 
     def test_unset_scalar_fields_are_none(self) -> None:
-        options = TwiMLOptions()
+        options = VoiceTwiMLOptionsConversationRelay()
         assert options.voice is None
         assert "voice" not in options.model_fields_set
 
     def test_explicitly_set_fields_tracked(self) -> None:
-        options = TwiMLOptions(
+        options = VoiceTwiMLOptionsConversationRelay(
             voice="en-US-Journey-D",
             dtmf_detection=False,
         )
@@ -284,3 +289,72 @@ class TestTwiMLOptionsFieldsSet:
         assert lang.voice is None
         assert lang.tts_provider is None
         assert lang.transcription_provider is None
+
+
+class TestTwiMLOptionsDeprecatedAlias:
+    """``TwiMLOptions`` is a deprecated pre-Media-Streams alias for
+    ``VoiceTwiMLOptionsConversationRelay``, resolved lazily via module
+    ``__getattr__`` (PEP 562) so it stays a true alias rather than a
+    subclass — see ``tac.models.voice.__getattr__``.
+    """
+
+    def test_accessing_the_name_warns(self) -> None:
+        import tac.models.voice as voice_module
+
+        with pytest.warns(DeprecationWarning, match="TwiMLOptions is deprecated"):
+            resolved = voice_module.TwiMLOptions
+
+        assert resolved is VoiceTwiMLOptionsConversationRelay
+
+    @pytest.mark.parametrize(
+        "import_path",
+        ["tac", "tac.models", "tac.models.voice"],
+    )
+    def test_warning_is_attributed_to_the_caller_not_an_internal_shim(
+        self, import_path: str
+    ) -> None:
+        """Regression test: each re-export layer must resolve the alias
+        directly rather than forwarding to another layer's __getattr__ — a
+        forwarded call attributes the warning (via stacklevel) to the internal
+        shim that did the forwarding, not to this line. That misattribution is
+        not just a wrong file/line in the message: Python's default warning
+        filter dedupes by the attributed (module, line), so once any caller
+        anywhere in the process triggers the warning through a forwarding
+        path, every other, unrelated caller going through that same path is
+        silently suppressed afterward. See tac._deprecation.
+        """
+        import importlib
+
+        module = importlib.import_module(import_path)
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            frame = inspect.currentframe()
+            assert frame is not None
+            expected_lineno = frame.f_lineno + 1
+            _ = module.TwiMLOptions  # this exact line must be what's reported
+
+        assert len(caught) >= 1
+        assert caught[0].filename == __file__
+        assert caught[0].lineno == expected_lineno
+
+    def test_is_a_true_alias_not_a_subclass(self) -> None:
+        """isinstance/equality must behave identically to the modern name —
+        this is the whole reason the alias is a module __getattr__ rather
+        than a subclass with its own __init__.
+        """
+        with pytest.warns(DeprecationWarning):
+            from tac.models.voice import TwiMLOptions
+
+        assert TwiMLOptions is VoiceTwiMLOptionsConversationRelay
+
+        modern = VoiceTwiMLOptionsConversationRelay(voice="en-US-Journey-D")
+        deprecated = TwiMLOptions(voice="en-US-Journey-D")
+        assert isinstance(modern, TwiMLOptions)
+        assert isinstance(deprecated, VoiceTwiMLOptionsConversationRelay)
+        assert modern == deprecated
+
+    def test_unknown_attribute_still_raises_attribute_error(self) -> None:
+        import tac.models.voice as voice_module
+
+        with pytest.raises(AttributeError):
+            voice_module.not_a_real_attribute  # noqa: B018

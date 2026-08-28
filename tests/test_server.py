@@ -1147,14 +1147,14 @@ class TestTwiMLCustomizerEndToEnd:
         from fastapi.testclient import TestClient
 
         from tac.channels.voice import VoiceChannel
-        from tac.models.voice import TwiMLOptions, TwiMLRequest
+        from tac.models.voice import TwiMLRequest, VoiceTwiMLOptionsConversationRelay
         from tac.server import TACFastAPIServer
 
         captured: dict[str, TwiMLRequest] = {}
 
-        async def customizer(ctx: TwiMLRequest) -> TwiMLOptions:
+        async def customizer(ctx: TwiMLRequest) -> VoiceTwiMLOptionsConversationRelay:
             captured["ctx"] = ctx
-            return TwiMLOptions(voice="en-US-Journey-D", language="en-US")
+            return VoiceTwiMLOptionsConversationRelay(voice="en-US-Journey-D", language="en-US")
 
         tac = TAC(get_test_config())
         vc = VoiceChannel(tac)

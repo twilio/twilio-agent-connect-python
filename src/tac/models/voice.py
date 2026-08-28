@@ -1,8 +1,10 @@
 """Pydantic models for Twilio ConversationRelay Voice WebSocket messages."""
 
-from typing import Any, ClassVar, Literal, TypeVar
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, TypeVar
 
 from pydantic import BaseModel, Field, field_validator, model_validator
+
+from tac._deprecation import resolve_deprecated_alias
 
 # Twilio uses the same four-value enum for several attributes that control
 # what caller input (DTMF, speech, both, neither) triggers a given behavior.
@@ -481,9 +483,18 @@ class VoiceTwiMLOptionsConversationRelay(VoiceTwiMLOptions):
         return self
 
 
-# TwiMLOptions is this same class under its pre-Media-Streams name — not a
-# separate model, so this alias is the only place the two names diverge.
-TwiMLOptions = VoiceTwiMLOptionsConversationRelay
+if TYPE_CHECKING:  # static type only, see tac._deprecation
+    TwiMLOptions = VoiceTwiMLOptionsConversationRelay
+
+
+def __getattr__(name: str) -> Any:
+    """Deprecated pre-Media-Streams name for ``VoiceTwiMLOptionsConversationRelay``.
+
+    TODO(3.0): remove.
+    """
+    if name == "TwiMLOptions":
+        return resolve_deprecated_alias("TwiMLOptions", VoiceTwiMLOptionsConversationRelay)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 class VoiceTwiMLOptionsMediaStreams(VoiceTwiMLOptions):
@@ -538,8 +549,8 @@ class TwiMLRequest(BaseModel):
     Populated by ``TACFastAPIServer`` from the incoming Twilio webhook, then
     passed to a customizer registered via
     ``VoiceChannel.on_inbound_call_twiml(...)`` so the application can
-    produce per-call ``TwiMLOptions`` overrides without depending on FastAPI
-    types.
+    produce per-call ``VoiceTwiMLOptionsConversationRelay`` overrides without
+    depending on FastAPI types.
     """
 
     from_number: str | None = Field(None, alias="From")
@@ -553,8 +564,8 @@ class TwiMLRequest(BaseModel):
         default_factory=dict,
         description="Any other fields from the Twilio webhook not captured above. "
         "Values are always strings here (webhook form fields are url-encoded), "
-        "unlike TwiMLOptions.extra which accepts str | bool | int for emitted "
-        "TwiML attributes.",
+        "unlike VoiceTwiMLOptionsConversationRelay.extra which accepts "
+        "str | bool | int for emitted TwiML attributes.",
     )
 
     model_config = {"populate_by_name": True, "extra": "ignore"}

@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from pydantic import Field
 
+from tac._deprecation import resolve_deprecated_alias
 from tac.channels.voice.conversation_relay.provider import ConversationRelayProvider
 from tac.channels.voice.provider import VoiceProvider, VoiceProviderConfig
 from tac.core.config import TACConfig
@@ -100,6 +101,15 @@ class ConversationRelayProviderConfig(VoiceProviderConfig):
         return ConversationRelayProvider(channel, tac_config, self)
 
 
-# VoiceChannelConfig is this same class under its pre-provider-split name —
-# not a separate model, so this alias is the only place the two names diverge.
-VoiceChannelConfig = ConversationRelayProviderConfig
+if TYPE_CHECKING:  # static type only, see tac._deprecation
+    VoiceChannelConfig = ConversationRelayProviderConfig
+
+
+def __getattr__(name: str) -> Any:
+    """Deprecated pre-provider-split name for ``ConversationRelayProviderConfig``.
+
+    TODO(3.0): remove.
+    """
+    if name == "VoiceChannelConfig":
+        return resolve_deprecated_alias("VoiceChannelConfig", ConversationRelayProviderConfig)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -30,7 +30,7 @@ from openai.types.chat import (
 from tac import TAC, TACConfig
 from tac.adapters.openai import with_tac_memory
 from tac.channels.sms import SMSChannel, SMSChannelConfig
-from tac.channels.voice import VoiceChannel, VoiceChannelConfig
+from tac.channels.voice import ConversationRelayProviderConfig, VoiceChannel
 from tac.core.logging import get_logger
 from tac.models.session import ConversationSession
 from tac.models.tac import TACMemoryResponse
@@ -42,7 +42,7 @@ logger = get_logger(__name__)
 
 tac = TAC(config=TACConfig.from_env())
 
-voice_channel = VoiceChannel(tac, config=VoiceChannelConfig(memory_mode="always"))
+voice_channel = VoiceChannel(tac, config=ConversationRelayProviderConfig(memory_mode="always"))
 sms_channel = SMSChannel(tac, config=SMSChannelConfig(memory_mode="always"))
 
 openai_client = AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY"))

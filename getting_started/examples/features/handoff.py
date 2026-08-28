@@ -16,7 +16,7 @@ from dotenv import load_dotenv
 
 from tac import TAC, TACConfig
 from tac.channels.sms import SMSChannel, SMSChannelConfig
-from tac.channels.voice import VoiceChannel, VoiceChannelConfig
+from tac.channels.voice import ConversationRelayProviderConfig, VoiceChannel
 from tac.models.session import ConversationSession
 from tac.models.tac import TACMemoryResponse
 from tac.server import TACFastAPIServer
@@ -76,7 +76,7 @@ async def handle_message_ready(
     return result.final_output_as(str)
 
 
-voice_channel = VoiceChannel(tac, config=VoiceChannelConfig())
+voice_channel = VoiceChannel(tac, config=ConversationRelayProviderConfig())
 sms_channel = SMSChannel(tac, config=SMSChannelConfig())
 
 tac.on_message_ready(handle_message_ready)

@@ -36,7 +36,7 @@ from strands.session.file_session_manager import FileSessionManager
 from tac import TAC, TACConfig
 from tac.adapters import MemoryPromptBuilder
 from tac.channels.sms import SMSChannel, SMSChannelConfig
-from tac.channels.voice import VoiceChannel, VoiceChannelConfig
+from tac.channels.voice import ConversationRelayProviderConfig, VoiceChannel
 from tac.core.logging import get_logger
 from tac.models.session import ConversationSession
 from tac.models.tac import TACMemoryResponse
@@ -53,7 +53,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 tac = TAC(config=TACConfig.from_env())
 
 # Create channel handlers for Voice and SMS
-voice_channel = VoiceChannel(tac, config=VoiceChannelConfig(memory_mode="once"))
+voice_channel = VoiceChannel(tac, config=ConversationRelayProviderConfig(memory_mode="once"))
 sms_channel = SMSChannel(tac, config=SMSChannelConfig(memory_mode="always"))
 
 # Get AWS region and model ID from environment

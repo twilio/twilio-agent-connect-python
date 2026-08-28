@@ -99,7 +99,7 @@ class ConversationRelayProvider(VoiceProvider):
           1. Output of the customizer registered via
              ``VoiceChannel.on_inbound_call_twiml(...)`` if configured
              and ``twiml_request`` is given. (Application-owned.)
-          2. ``VoiceChannelConfig.default_twiml_options`` — per-channel defaults.
+          2. ``ConversationRelayProviderConfig.default_twiml_options`` — per-channel defaults.
           3. ``host_twiml_options`` — per-call transport facts supplied by the
              host (the code owning the route), e.g. a per-call ``websocket_url``
              with an affinity token.
@@ -440,10 +440,10 @@ class ConversationRelayProvider(VoiceProvider):
                 raise cancelled_error
 
     def _merge_call_options(self, per_call: CallOptions | None) -> CallOptions | None:
-        """Overlay ``per_call`` onto ``VoiceChannelConfig.default_call_options``.
+        """Overlay ``per_call`` onto ``ConversationRelayProviderConfig.default_call_options``.
 
         Per-field via ``model_fields_set``, same as ``_overlay_fields`` does for
-        TwiMLOptions. The merged result is re-validated so a combination only
+        VoiceTwiMLOptionsConversationRelay. The merged result is re-validated so a combination only
         reachable by layering — per-call clearing ``machine_detection`` while the
         default set ``async_amd`` — still fails instead of reaching Twilio.
         """
@@ -461,7 +461,7 @@ class ConversationRelayProvider(VoiceProvider):
         """Build the extra kwargs for ``client.calls.create``.
 
         Layers, highest precedence first: this call's ``call_options``,
-        ``VoiceChannelConfig.default_call_options``, then callback URLs derived
+        ``ConversationRelayProviderConfig.default_call_options``, then callback URLs derived
         from ``voice_public_domain`` + ``voice_call_event_path``.
 
         A URL is derived only when its handler is registered. That's a deliberate
@@ -501,7 +501,7 @@ class ConversationRelayProvider(VoiceProvider):
 
         TwiML fields are merged per-field, highest precedence first:
           1. ``options.twiml_options`` — per-call overrides
-          2. ``VoiceChannelConfig.default_twiml_options`` — channel-wide defaults
+          2. ``ConversationRelayProviderConfig.default_twiml_options`` — channel-wide defaults
           3. TAC defaults: welcome greeting, ``conversation_configuration``
              from ``TACConfig``, and ``action_url`` from Studio handoff (if
              configured), else derived from ``TACConfig.voice_public_domain``

@@ -12,7 +12,7 @@ from tac.models.voice import VoiceTwiMLOptionsConversationRelay
 from tac.tools.handoff import studio_voice_handoff_url
 
 if TYPE_CHECKING:
-    from tac.channels.voice.conversation_relay.config import VoiceChannelConfig
+    from tac.channels.voice.conversation_relay.config import ConversationRelayProviderConfig
 
 # Fields on VoiceTwiMLOptionsConversationRelay that map to <ConversationRelay> attributes
 # and are emitted via the snake_case → camelCase conversion done by twilio's SDK.
@@ -98,7 +98,7 @@ def generate_twiml(
 
     This is a low-level function. Most users should call
     ``VoiceChannel.handle_incoming_call`` instead — it layers in TAC defaults,
-    static ``twiml_options`` from ``VoiceChannelConfig``, and any per-call
+    static ``twiml_options`` from ``ConversationRelayProviderConfig``, and any per-call
     customizer output.
 
     The WebSocket URL may be passed positionally or as ``options.websocket_url``
@@ -204,13 +204,15 @@ class TwiMLBuilderConversationRelay:
     """Builds the TwiML for a ConversationRelay call, owning every layering
     and resolution decision so ``VoiceChannel`` doesn't have to.
 
-    Takes ``TACConfig`` and ``VoiceChannelConfig`` wholesale (not individual
+    Takes ``TACConfig`` and ``ConversationRelayProviderConfig`` wholesale (not individual
     derived values) so a later change to either — a new field, a new default
     — is a change to this class alone, not a change to what ``VoiceChannel``
     has to compute and hand over.
     """
 
-    def __init__(self, tac_config: TACConfig, channel_config: VoiceChannelConfig) -> None:
+    def __init__(
+        self, tac_config: TACConfig, channel_config: ConversationRelayProviderConfig
+    ) -> None:
         self.tac_config = tac_config
         self.channel_config = channel_config
 
