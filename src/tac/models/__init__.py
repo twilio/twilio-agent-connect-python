@@ -1,5 +1,8 @@
 """Shared models for the Twilio Agent Connect."""
 
+from typing import Any
+
+from tac._deprecation import resolve_deprecated_alias
 from tac.models.conversation import (
     ActionChannelSettings,
     ActionParticipantRef,
@@ -59,7 +62,6 @@ from tac.models.voice import (
     AmdEvent,
     CallStatusEvent,
     RecordingEvent,
-    TwiMLOptions,
     VoiceTwiMLOptions,
     VoiceTwiMLOptionsConversationRelay,
 )
@@ -129,3 +131,12 @@ __all__ = [
     "VoiceTwiMLOptions",
     "VoiceTwiMLOptionsConversationRelay",
 ]
+
+
+def __getattr__(name: str) -> Any:
+    # Resolved directly (not forwarded to another module's __getattr__) so the
+    # warning attributes correctly to this access. See
+    # tac._deprecation.resolve_deprecated_alias. TODO(3.0): remove.
+    if name == "TwiMLOptions":
+        return resolve_deprecated_alias("TwiMLOptions", VoiceTwiMLOptionsConversationRelay)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

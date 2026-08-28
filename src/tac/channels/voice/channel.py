@@ -23,7 +23,7 @@ from tac.models.voice import (
     VoiceTwiMLOptions,
 )
 
-from .conversation_relay import VoiceChannelConfig
+from .conversation_relay import ConversationRelayProviderConfig
 from .provider import VoiceProviderConfig
 
 InboundCallTwiMLHandler = Callable[[TwiMLRequest], Awaitable[VoiceTwiMLOptions]]
@@ -59,26 +59,29 @@ class VoiceChannel(BaseChannel):
             tac: TAC instance for memory/context operations
             config: Voice channel configuration — a ``VoiceProviderConfig``
                 instance for any provider, or a dict. The dict form is
-                shorthand for ``VoiceChannelConfig`` (the default
+                shorthand for ``ConversationRelayProviderConfig`` (the default
                 ConversationRelay provider) specifically, not a generic
-                constructor — it's hydrated as ``VoiceChannelConfig(**config)``
-                and fails if it has fields that config doesn't have. To
-                configure a different provider, construct that provider's
-                config and pass it directly instead of a dict. If None, uses
-                ``VoiceChannelConfig()``.
+                constructor — it's hydrated as
+                ``ConversationRelayProviderConfig(**config)`` and fails if it
+                has fields that config doesn't have. To configure a different
+                provider, construct that provider's config and pass it
+                directly instead of a dict. If None, uses
+                ``ConversationRelayProviderConfig()``.
 
         Examples:
             >>> channel = VoiceChannel(tac, config={"memory_mode": "always"})
-            >>> channel = VoiceChannel(tac, config=VoiceChannelConfig(session_manager=sm))
+            >>> channel = VoiceChannel(
+            ...     tac, config=ConversationRelayProviderConfig(session_manager=sm)
+            ... )
             >>> channel = VoiceChannel(tac)  # Use defaults
         """
-        # dict is shorthand for VoiceChannelConfig specifically — see the
-        # config Args note above. Not a generic dict-to-provider-config
+        # dict is shorthand for ConversationRelayProviderConfig specifically —
+        # see the config Args note above. Not a generic dict-to-provider-config
         # constructor.
         if isinstance(config, dict):
-            config = VoiceChannelConfig(**config)
+            config = ConversationRelayProviderConfig(**config)
         elif config is None:
-            config = VoiceChannelConfig()
+            config = ConversationRelayProviderConfig()
 
         super().__init__(tac, memory_mode=config.memory_mode)
         self._provider = config.create_provider(self, tac.config)

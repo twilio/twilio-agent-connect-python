@@ -7,9 +7,9 @@ Two layers (highest precedence first):
    ``voice_channel.on_inbound_call_twiml(...)``. Async callable that
    receives a TwiMLRequest (parsed Twilio webhook fields: From, To,
    CallerCountry, …). Inbound only. For outbound, pass per-call
-   TwiMLOptions on InitiateVoiceConversationOptions.
-2. ``VoiceChannelConfig.default_twiml_options`` — static TwiMLOptions
-   applied to every call (inbound and outbound).
+   VoiceTwiMLOptionsConversationRelay on InitiateVoiceConversationOptions.
+2. ``ConversationRelayProviderConfig.default_twiml_options`` — static
+   VoiceTwiMLOptionsConversationRelay applied to every call (inbound and outbound).
 
 Layers merge per-field: the customizer overrides only the fields it
 explicitly sets; everything else falls through to ``default_twiml_options``
@@ -23,10 +23,10 @@ specific callers.
 from dotenv import load_dotenv
 
 from tac import TAC, TACConfig
-from tac.channels.voice import VoiceChannel, VoiceChannelConfig
+from tac.channels.voice import ConversationRelayProviderConfig, VoiceChannel
 from tac.models.session import ConversationSession
 from tac.models.tac import TACMemoryResponse
-from tac.models.voice import TwiMLOptions, TwiMLRequest
+from tac.models.voice import TwiMLRequest, VoiceTwiMLOptionsConversationRelay
 from tac.server import TACFastAPIServer
 
 load_dotenv()
@@ -45,27 +45,27 @@ async def handle_message_ready(
 tac.on_message_ready(handle_message_ready)
 
 
-async def customize_twiml(req: TwiMLRequest) -> TwiMLOptions:
+async def customize_twiml(req: TwiMLRequest) -> VoiceTwiMLOptionsConversationRelay:
     """Per-call overrides for inbound calls. Only the fields you set here
     override the channel default; the rest fall through."""
     if req.caller_country == "MX":
-        return TwiMLOptions(
+        return VoiceTwiMLOptionsConversationRelay(
             language="es-MX",
             welcome_greeting="¡Hola! ¿En qué puedo ayudarte?",
         )
     if req.caller_country == "FR":
-        return TwiMLOptions(
+        return VoiceTwiMLOptionsConversationRelay(
             language="fr-FR",
             welcome_greeting="Bonjour ! Comment puis-je vous aider ?",
         )
-    return TwiMLOptions()  # fall through to default_twiml_options
+    return VoiceTwiMLOptionsConversationRelay()  # fall through to default_twiml_options
 
 
 voice_channel = VoiceChannel(
     tac,
-    config=VoiceChannelConfig(
+    config=ConversationRelayProviderConfig(
         # Channel-wide defaults — apply to every call (inbound + outbound).
-        default_twiml_options=TwiMLOptions(
+        default_twiml_options=VoiceTwiMLOptionsConversationRelay(
             welcome_greeting="Hello! This is a default greeting.",
             interruptible="speech",
             # Escape hatch for ConversationRelay attributes TAC hasn't typed yet:

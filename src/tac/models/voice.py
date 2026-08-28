@@ -4,6 +4,8 @@ from typing import Any, ClassVar, Literal, TypeVar
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from tac._deprecation import resolve_deprecated_alias
+
 # Twilio uses the same four-value enum for several attributes that control
 # what caller input (DTMF, speech, both, neither) triggers a given behavior.
 InterruptMode = Literal["none", "dtmf", "speech", "any"]
@@ -481,9 +483,23 @@ class VoiceTwiMLOptionsConversationRelay(VoiceTwiMLOptions):
         return self
 
 
-# TwiMLOptions is this same class under its pre-Media-Streams name — not a
-# separate model, so this alias is the only place the two names diverge.
-TwiMLOptions = VoiceTwiMLOptionsConversationRelay
+def __getattr__(name: str) -> Any:
+    """Lazily resolve ``TwiMLOptions``, the deprecated pre-Media-Streams name for
+    ``VoiceTwiMLOptionsConversationRelay``.
+
+    A module-level ``__getattr__`` (PEP 562) — rather than a subclass with its own
+    ``__init__`` — keeps ``TwiMLOptions`` a true alias: ``TwiMLOptions is
+    VoiceTwiMLOptionsConversationRelay``, so ``isinstance``/``==`` behave exactly as
+    they did before the rename, and the warning fires once per access rather than
+    once per instantiation. Every other re-export of this name (``tac``,
+    ``tac.models``, ``tac.channels.voice``) resolves it the same way, directly —
+    see ``tac._deprecation.resolve_deprecated_alias``.
+
+    TODO(3.0): remove.
+    """
+    if name == "TwiMLOptions":
+        return resolve_deprecated_alias("TwiMLOptions", VoiceTwiMLOptionsConversationRelay)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 class VoiceTwiMLOptionsMediaStreams(VoiceTwiMLOptions):

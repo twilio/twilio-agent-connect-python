@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from pydantic import Field
 
+from tac._deprecation import resolve_deprecated_alias
 from tac.channels.voice.conversation_relay.provider import ConversationRelayProvider
 from tac.channels.voice.provider import VoiceProvider, VoiceProviderConfig
 from tac.core.config import TACConfig
@@ -100,6 +101,21 @@ class ConversationRelayProviderConfig(VoiceProviderConfig):
         return ConversationRelayProvider(channel, tac_config, self)
 
 
-# VoiceChannelConfig is this same class under its pre-provider-split name —
-# not a separate model, so this alias is the only place the two names diverge.
-VoiceChannelConfig = ConversationRelayProviderConfig
+def __getattr__(name: str) -> Any:
+    """Lazily resolve ``VoiceChannelConfig``, the deprecated pre-provider-split
+    name for ``ConversationRelayProviderConfig``.
+
+    A module-level ``__getattr__`` (PEP 562) — rather than a subclass with its own
+    ``__init__`` — keeps ``VoiceChannelConfig`` a true alias:
+    ``VoiceChannelConfig is ConversationRelayProviderConfig``, so
+    ``isinstance``/``==`` behave exactly as they did before the rename, and the
+    warning fires once per access rather than once per instantiation. Every
+    other re-export of this name (``tac.channels``, ``tac.channels.voice``,
+    ``tac.channels.voice.conversation_relay``) resolves it the same way,
+    directly — see ``tac._deprecation.resolve_deprecated_alias``.
+
+    TODO(3.0): remove.
+    """
+    if name == "VoiceChannelConfig":
+        return resolve_deprecated_alias("VoiceChannelConfig", ConversationRelayProviderConfig)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

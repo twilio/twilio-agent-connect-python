@@ -33,7 +33,7 @@ from tac import TAC, TACConfig
 from tac.channels.messaging import MessagingChannel
 from tac.channels.rcs import RCSChannel, RCSChannelConfig
 from tac.channels.sms import SMSChannel, SMSChannelConfig
-from tac.channels.voice import VoiceChannel, VoiceChannelConfig
+from tac.channels.voice import ConversationRelayProviderConfig, VoiceChannel
 from tac.channels.whatsapp import WhatsAppChannel, WhatsAppChannelConfig
 from tac.models.outbound import (
     InitiateMessagingConversationOptions,
@@ -41,7 +41,7 @@ from tac.models.outbound import (
 )
 from tac.models.session import ConversationSession
 from tac.models.tac import TACMemoryResponse
-from tac.models.voice import TwiMLOptions
+from tac.models.voice import VoiceTwiMLOptionsConversationRelay
 from tac.server import TACFastAPIServer
 
 load_dotenv()
@@ -93,10 +93,10 @@ whatsapp_channel = (
 )
 voice_channel = VoiceChannel(
     tac,
-    config=VoiceChannelConfig(
+    config=ConversationRelayProviderConfig(
         memory_mode="once",
         # Channel-wide TwiML applied to every call (inbound + outbound).
-        default_twiml_options=TwiMLOptions(
+        default_twiml_options=VoiceTwiMLOptionsConversationRelay(
             voice="en-US-Journey-D",
             welcome_greeting="Hi! How can I help?",
         ),
@@ -176,7 +176,9 @@ async def initiate_outbound(args: argparse.Namespace) -> None:
                 InitiateVoiceConversationOptions(
                     to=args.to,
                     # Per-call TwiML overrides for this outbound call. Overrides channel defaults
-                    twiml_options=TwiMLOptions(welcome_greeting=args.welcome_greeting),
+                    twiml_options=VoiceTwiMLOptionsConversationRelay(
+                        welcome_greeting=args.welcome_greeting
+                    ),
                 )
             )
             print(f"Call placed to {args.to} (SID: {voice_result.call_sid})")
