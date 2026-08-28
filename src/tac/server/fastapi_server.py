@@ -274,7 +274,7 @@ class TACFastAPIServer:
                 try:
                     form_data = await request.form()
                     payload_dict = {k: v for k, v in form_data.items() if isinstance(v, str)}
-                    await vc.handle_conversation_relay_callback(payload_dict)
+                    await vc.handle_twilio_provider_callback(payload_dict)
                 except Exception:
                     logger.error("Failed to process ConversationRelay callback", exc_info=True)
                     return Response(content="", media_type="text/plain", status_code=400)
