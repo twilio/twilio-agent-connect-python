@@ -6,7 +6,7 @@ from typing import Any, ClassVar, Literal
 from pydantic import BaseModel, Field, field_serializer, model_validator
 
 from tac.models.session import ConversationSession
-from tac.models.voice import TwiMLOptions
+from tac.models.voice import VoiceTwiMLOptions
 
 
 class InitiateMessagingConversationOptions(BaseModel):
@@ -182,7 +182,7 @@ class InitiateVoiceConversationOptions(BaseModel):
          action_url resolved via Studio handoff if configured)
 
     Fields you don't set at a layer fall through to lower layers — so
-    ``twiml_options=TwiMLOptions(voice="es-MX-Neural2-A")`` on this call
+    ``twiml_options=VoiceTwiMLOptionsConversationRelay(voice="es-MX-Neural2-A")`` on this call
     overrides only ``voice``; ``language``, ``interruptible``, etc. from the
     channel config still apply.
 
@@ -201,9 +201,10 @@ class InitiateVoiceConversationOptions(BaseModel):
         "``voice_websocket_path``. Pass it here only to override the URL "
         "for a specific call.",
     )
-    twiml_options: TwiMLOptions | None = Field(
+    twiml_options: VoiceTwiMLOptions | None = Field(
         default=None,
-        description="Per-call overrides for the TwiML inside <ConversationRelay>. "
+        description="Per-call overrides for the outbound TwiML — a "
+        "VoiceTwiMLOptionsConversationRelay for the default ConversationRelay provider. "
         "Merged over VoiceChannelConfig.default_twiml_options and TAC defaults.",
     )
     call_options: CallOptions | None = Field(

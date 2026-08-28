@@ -1769,6 +1769,37 @@ class TestHandleIncomingCallMerge:
         assert 'welcomeGreeting="Channel default"' in twiml
         assert "Host override" not in twiml
 
+    @pytest.mark.asyncio
+    async def test_host_twiml_options_wrong_type_raises(self) -> None:
+        """host_twiml_options is typed against the VoiceTwiMLOptions base (any
+        provider's options satisfy the type), but ConversationRelayProvider
+        needs the concrete VoiceTwiMLOptionsConversationRelay to build TwiML —
+        a base instance (or another provider's options) must be rejected."""
+        from tac.models.voice import VoiceTwiMLOptions
+
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+
+        with pytest.raises(TypeError, match="VoiceTwiMLOptionsConversationRelay"):
+            await channel.handle_incoming_call(host_twiml_options=VoiceTwiMLOptions())
+
+    @pytest.mark.asyncio
+    async def test_on_inbound_call_twiml_customizer_wrong_return_type_raises(self) -> None:
+        """The on_inbound_call_twiml customizer is typed to return the
+        VoiceTwiMLOptions base, but ConversationRelayProvider needs the
+        concrete VoiceTwiMLOptionsConversationRelay to build TwiML."""
+        from tac.models.voice import TwiMLRequest, VoiceTwiMLOptions
+
+        async def wrong_type_customizer(req: TwiMLRequest) -> VoiceTwiMLOptions:
+            return VoiceTwiMLOptions()
+
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+        channel.on_inbound_call_twiml(wrong_type_customizer)
+
+        with pytest.raises(TypeError, match="VoiceTwiMLOptionsConversationRelay"):
+            await channel.handle_incoming_call(twiml_request=TwiMLRequest())
+
 
 class TestStaticTwiMLOptions:
     """VoiceChannelConfig.twiml_options applies to every call without a callback."""

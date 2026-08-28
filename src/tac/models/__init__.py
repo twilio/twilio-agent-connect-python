@@ -55,7 +55,14 @@ from tac.models.tac import (
     TACCommunicationContent,
     TACMemoryResponse,
 )
-from tac.models.voice import AmdEvent, CallStatusEvent, RecordingEvent, TwiMLOptions
+from tac.models.voice import (
+    AmdEvent,
+    CallStatusEvent,
+    RecordingEvent,
+    TwiMLOptions,
+    VoiceTwiMLOptions,
+    VoiceTwiMLOptionsConversationRelay,
+)
 
 # Rebuild ConversationSession after importing TACMemoryResponse so Pydantic can
 # resolve the forward reference used by ConversationSession. The session model
@@ -119,4 +126,6 @@ __all__ = [
     "TACMemoryResponse",
     "TriggerDetails",
     "TwiMLOptions",
+    "VoiceTwiMLOptions",
+    "VoiceTwiMLOptionsConversationRelay",
 ]

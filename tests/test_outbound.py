@@ -802,6 +802,17 @@ class TestInitiateVoiceConversationOptionsForbidsExtra:
         with pytest.raises(ValidationError, match="custom_parameters"):
             InitiateVoiceConversationOptions(to="+15551234567", custom_parameters={"k": "v"})  # type: ignore[call-arg]
 
+    def test_twiml_options_dict_raises_instead_of_silently_dropping(self) -> None:
+        """twiml_options is typed against the VoiceTwiMLOptions base, which has
+        no fields of its own and forbids extras — so a dict raises instead of
+        silently validating into an empty VoiceTwiMLOptions()."""
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError, match="welcome_greeting"):
+            InitiateVoiceConversationOptions(
+                to="+15551234567", twiml_options={"welcome_greeting": "Hi!"}
+            )
+
 
 # =============================================================================
 # isOwnMessage 2-tier
@@ -1019,6 +1030,32 @@ class TestVoiceOutboundErrors:
                     websocket_url="wss://example.com/ws",
                 )
             )
+
+    @pytest.mark.asyncio
+    async def test_twiml_options_wrong_type_raises(self) -> None:
+        """twiml_options is typed against the VoiceTwiMLOptions base, but
+        ConversationRelayProvider needs the concrete
+        VoiceTwiMLOptionsConversationRelay to build TwiML."""
+        from tac.models.voice import VoiceTwiMLOptions
+
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+
+        mock_client = MagicMock()
+
+        with (
+            patch.object(channel, "_get_twilio_client", return_value=mock_client),
+            pytest.raises(TypeError, match="VoiceTwiMLOptionsConversationRelay"),
+        ):
+            await channel.initiate_outbound_conversation(
+                InitiateVoiceConversationOptions(
+                    to="+15559876543",
+                    websocket_url="wss://example.com/ws",
+                    twiml_options=VoiceTwiMLOptions(),
+                )
+            )
+
+        mock_client.calls.create.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_custom_parameters_in_twiml(self) -> None:

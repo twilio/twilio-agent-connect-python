@@ -263,7 +263,24 @@ class LanguageConfig(BaseModel):
     model_config = {"populate_by_name": True}
 
 
-class TwiMLOptions(BaseModel):
+class VoiceTwiMLOptions(BaseModel):
+    """Base for a ``VoiceProvider``'s inbound-call TwiML customization options.
+
+    Each provider answers the inbound-call webhook with its own TwiML shape
+    (``VoiceTwiMLOptionsConversationRelay`` for ``<ConversationRelay>``, a
+    future subclass for ``<Stream>``), so ``VoiceProvider.handle_incoming_call``'s
+    ``host_twiml_options`` is typed against this base rather than a specific
+    provider's options.
+
+    Rejects unknown fields (inherited by subclasses) — this base has none of
+    its own, so a dict passed where a ``VoiceTwiMLOptions`` is expected would
+    otherwise silently validate into an empty instance.
+    """
+
+    model_config = {"extra": "forbid"}
+
+
+class VoiceTwiMLOptionsConversationRelay(VoiceTwiMLOptions):
     """Options for the TwiML inside ``<ConversationRelay>`` (plus the
     ``<Connect action>`` URL).
 
@@ -447,7 +464,7 @@ class TwiMLOptions(BaseModel):
         return v
 
     @model_validator(mode="after")
-    def _reject_extra_shadowing_typed_fields(self) -> "TwiMLOptions":
+    def _reject_extra_shadowing_typed_fields(self) -> "VoiceTwiMLOptionsConversationRelay":
         """Fail fast when ``extra`` includes a key that has a typed field on
         this model. Without this, the user's value would be silently dropped
         by the TwiML serializer in favor of the typed default — a footgun.
@@ -458,10 +475,15 @@ class TwiMLOptions(BaseModel):
         shadowed = sorted(k for k in self.extra if k in typed)
         if shadowed:
             raise ValueError(
-                f"TwiMLOptions.extra keys {shadowed} shadow typed fields. "
+                f"VoiceTwiMLOptionsConversationRelay.extra keys {shadowed} shadow typed fields. "
                 "Set the typed field directly instead of using ``extra``."
             )
         return self
+
+
+# TwiMLOptions is this same class under its pre-Media-Streams name — not a
+# separate model, so this alias is the only place the two names diverge.
+TwiMLOptions = VoiceTwiMLOptionsConversationRelay
 
 
 class TwiMLRequest(BaseModel):

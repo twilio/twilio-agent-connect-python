@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -19,18 +19,17 @@ from tac.models.voice import (
     AmdEvent,
     CallStatusEvent,
     RecordingEvent,
-    TwiMLOptions,
     TwiMLRequest,
+    VoiceTwiMLOptions,
 )
 
-from .config import (
-    AmdHandler,
-    CallStatusHandler,
-    InboundCallTwiMLHandler,
-    RecordingHandler,
-    VoiceChannelConfig,
-)
+from .config import VoiceChannelConfig
 from .provider import VoiceProviderConfig
+
+InboundCallTwiMLHandler = Callable[[TwiMLRequest], Awaitable[VoiceTwiMLOptions]]
+CallStatusHandler = Callable[[CallStatusEvent], Awaitable[None]]
+AmdHandler = Callable[[AmdEvent], Awaitable[None]]
+RecordingHandler = Callable[[RecordingEvent], Awaitable[None]]
 
 
 class VoiceChannel(BaseChannel):
@@ -58,16 +57,24 @@ class VoiceChannel(BaseChannel):
 
         Args:
             tac: TAC instance for memory/context operations
-            config: Voice channel configuration (a ``VoiceProviderConfig`` —
-                ``VoiceChannelConfig`` today — or dict). If None, uses default
-                configuration.
+            config: Voice channel configuration — a ``VoiceProviderConfig``
+                instance for any provider, or a dict. The dict form is
+                shorthand for ``VoiceChannelConfig`` (the default
+                ConversationRelay provider) specifically, not a generic
+                constructor — it's hydrated as ``VoiceChannelConfig(**config)``
+                and fails if it has fields that config doesn't have. To
+                configure a different provider, construct that provider's
+                config and pass it directly instead of a dict. If None, uses
+                ``VoiceChannelConfig()``.
 
         Examples:
             >>> channel = VoiceChannel(tac, config={"memory_mode": "always"})
             >>> channel = VoiceChannel(tac, config=VoiceChannelConfig(session_manager=sm))
             >>> channel = VoiceChannel(tac)  # Use defaults
         """
-        # Convert dict to config model or use defaults.
+        # dict is shorthand for VoiceChannelConfig specifically — see the
+        # config Args note above. Not a generic dict-to-provider-config
+        # constructor.
         if isinstance(config, dict):
             config = VoiceChannelConfig(**config)
         elif config is None:
@@ -83,23 +90,14 @@ class VoiceChannel(BaseChannel):
 
     def on_inbound_call_twiml(self, callback: InboundCallTwiMLHandler) -> None:
         """Register a callback that produces per-call overrides for the
-        TwiML inside ``<ConversationRelay>`` on inbound calls.
+        active provider's inbound-call TwiML.
 
         The callback receives a framework-neutral ``TwiMLRequest`` (parsed
-        from the Twilio webhook form) and returns a ``TwiMLOptions``. Fields
-        the callback explicitly sets override ``default_twiml_options`` and
-        TAC defaults; unset fields fall through.
-
-        Example:
-            ```python
-            async def by_country(req: TwiMLRequest) -> TwiMLOptions:
-                if req.caller_country == "MX":
-                    return TwiMLOptions(language="es-MX", welcome_greeting="¡Hola!")
-                return TwiMLOptions()
-
-
-            voice_channel.on_inbound_call_twiml(by_country)
-            ```
+        from the Twilio webhook form) and returns a ``VoiceTwiMLOptions`` —
+        the concrete subclass the active provider expects (e.g.
+        ``VoiceTwiMLOptionsConversationRelay`` for the default
+        ConversationRelay provider; see that provider's
+        ``handle_incoming_call`` for its merge/precedence rules).
 
         Outbound calls don't use this — pass per-call TwiML via
         ``InitiateVoiceConversationOptions.twiml_options`` directly.
@@ -191,12 +189,16 @@ class VoiceChannel(BaseChannel):
         self,
         twiml_request: TwiMLRequest | None = None,
         *,
-        host_twiml_options: TwiMLOptions | None = None,
+        host_twiml_options: VoiceTwiMLOptions | None = None,
     ) -> str:
         """Generate TwiML response for incoming voice calls. Delegates to the
         active provider — see ``ConversationRelayProvider.handle_incoming_call``
         for the full merge/precedence rules (only meaningful for that provider;
         a non-TwiML provider ignores ``host_twiml_options``).
+
+        ``host_twiml_options`` is typed against the ``VoiceTwiMLOptions`` base —
+        the active provider defines the concrete shape it expects (e.g.
+        ``VoiceTwiMLOptionsConversationRelay``) and validates it at runtime.
         """
         return await self._provider.handle_incoming_call(
             twiml_request, host_twiml_options=host_twiml_options
@@ -305,7 +307,7 @@ class VoiceChannel(BaseChannel):
         await self._on_recording(event)
 
     async def end_call(self, call_sid: str) -> bool:
-        """Hang up a call and clean up its ConversationRelay session.
+        """Hang up a call and clean up its session.
 
         Works on ``call_sid`` alone, whether or not a session exists yet.
         No-ops the session cleanup if none is tracked.
@@ -358,7 +360,7 @@ class VoiceChannel(BaseChannel):
         At the other end, orchestrator mode keeps the session until Conversation
         Orchestrator's CLOSED webhook, so it outlives the call and
         ``on_call_status`` / ``on_recording`` do resolve. Relay-only mode tears
-        down on the ConversationRelay callback instead, which races them.
+        down on the provider's out-of-band callback instead, which races them.
 
         Named for ``ConversationSession``; ``session_manager`` deals in
         ``SessionState``, a different type.

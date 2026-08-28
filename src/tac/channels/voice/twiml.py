@@ -8,15 +8,16 @@ from pydantic import BaseModel
 from twilio.twiml.voice_response import VoiceResponse
 
 from tac.core.config import TACConfig
-from tac.models.voice import TwiMLOptions
+from tac.models.voice import VoiceTwiMLOptionsConversationRelay
 from tac.tools.handoff import studio_voice_handoff_url
 
 if TYPE_CHECKING:
     from .config import VoiceChannelConfig
 
-# Fields on TwiMLOptions that map to <ConversationRelay> attributes and are
-# emitted via the snake_case → camelCase conversion done by twilio's SDK.
-# Must stay in sync with TwiMLOptions field declarations; see _verify_attrs_in_sync.
+# Fields on VoiceTwiMLOptionsConversationRelay that map to <ConversationRelay> attributes
+# and are emitted via the snake_case → camelCase conversion done by twilio's SDK.
+# Must stay in sync with VoiceTwiMLOptionsConversationRelay's field declarations —
+# see _verify_attrs_in_sync.
 _OPTIONAL_RELAY_ATTRS = (
     "welcome_greeting",
     "welcome_greeting_interruptible",
@@ -48,7 +49,7 @@ _OPTIONAL_RELAY_ATTRS = (
     "intelligence_service",
 )
 
-# Fields on TwiMLOptions that this module handles specially (not via the
+# Fields on VoiceTwiMLOptionsConversationRelay that this module handles specially (not via the
 # generic _OPTIONAL_RELAY_ATTRS loop) — the websocket_url (emitted as the
 # ``<ConversationRelay url=...>`` attribute, resolved from the positional
 # ``websocket_url`` arg or ``options.websocket_url``), the action_url, the
@@ -64,23 +65,23 @@ _HANDLED_OUTSIDE_LOOP = {
 
 
 def _verify_attrs_in_sync() -> None:
-    """Fail fast at import time if TwiMLOptions grows a field that isn't
+    """Fail fast at import time if VoiceTwiMLOptionsConversationRelay grows a field that isn't
     accounted for here — either it's a new ConversationRelay attribute that
     needs to go in _OPTIONAL_RELAY_ATTRS, or it's special-cased and should
     be added to _HANDLED_OUTSIDE_LOOP.
     """
-    declared = set(TwiMLOptions.model_fields)
+    declared = set(VoiceTwiMLOptionsConversationRelay.model_fields)
     accounted = set(_OPTIONAL_RELAY_ATTRS) | _HANDLED_OUTSIDE_LOOP
     missing = declared - accounted
     extra = accounted - declared
     if missing:
         raise RuntimeError(
-            f"TwiMLOptions field(s) {sorted(missing)} not handled by twiml.py — "
-            "add to _OPTIONAL_RELAY_ATTRS or _HANDLED_OUTSIDE_LOOP."
+            f"VoiceTwiMLOptionsConversationRelay field(s) {sorted(missing)} not handled by "
+            "twiml.py — add to _OPTIONAL_RELAY_ATTRS or _HANDLED_OUTSIDE_LOOP."
         )
     if extra:
         raise RuntimeError(
-            f"twiml.py references TwiMLOptions field(s) {sorted(extra)} that "
+            f"twiml.py references VoiceTwiMLOptionsConversationRelay field(s) {sorted(extra)} that "
             "no longer exist on the model."
         )
 
@@ -90,7 +91,7 @@ _verify_attrs_in_sync()
 
 def generate_twiml(
     websocket_url: str | None = None,
-    options: TwiMLOptions | dict[str, Any] | None = None,
+    options: VoiceTwiMLOptionsConversationRelay | dict[str, Any] | None = None,
 ) -> str:
     """
     Generate TwiML XML for ConversationRelay.
@@ -102,13 +103,13 @@ def generate_twiml(
 
     The WebSocket URL may be passed positionally or as ``options.websocket_url``
     (positional wins when both are given), so a caller can pass everything in one
-    object: ``generate_twiml(options=TwiMLOptions(websocket_url=...))``.
+    object: ``generate_twiml(options=VoiceTwiMLOptionsConversationRelay(websocket_url=...))``.
 
     Args:
         websocket_url: Public WebSocket URL for ConversationRelay
             (e.g. ``'wss://example.ngrok.app/ws'``). Optional if
             ``options.websocket_url`` is set.
-        options: Optional ``TwiMLOptions`` (or dict). See ``TwiMLOptions``
+        options: Optional ``VoiceTwiMLOptionsConversationRelay`` (or dict). See that model
             for supported fields. Newly-added ConversationRelay attributes
             not yet typed on the model can be passed via ``extra``.
 
@@ -121,19 +122,20 @@ def generate_twiml(
     Example:
         >>> twiml = generate_twiml(
         ...     "wss://example.com/voice",
-        ...     TwiMLOptions(
+        ...     VoiceTwiMLOptionsConversationRelay(
         ...         welcome_greeting="Hello!",
         ...         conversation_configuration="conv_configuration_xxxx",
         ...     ),
         ... )
     """
     if options is None:
-        options = TwiMLOptions()
+        options = VoiceTwiMLOptionsConversationRelay()
     elif isinstance(options, dict):
-        options = TwiMLOptions(**options)
+        options = VoiceTwiMLOptionsConversationRelay(**options)
 
     # Positional arg wins when both are set; fall back to options.websocket_url.
-    # (TwiMLOptions rejects an empty websocket_url, so any value here is real.)
+    # (VoiceTwiMLOptionsConversationRelay rejects an empty websocket_url, so any value
+    # here is real.)
     resolved_websocket_url = websocket_url if websocket_url is not None else options.websocket_url
     if not resolved_websocket_url:
         raise ValueError(
@@ -163,8 +165,8 @@ def generate_twiml(
             value = "any" if value else "none"
         relay_kwargs[attr] = value
 
-    # TwiMLOptions' validator already rejects extra keys that shadow typed
-    # fields, so we can pass everything through here as-is.
+    # VoiceTwiMLOptionsConversationRelay's validator already rejects extra keys that shadow
+    # typed fields, so we can pass everything through here as-is.
     if options.extra:
         relay_kwargs.update(options.extra)
 
@@ -215,8 +217,8 @@ class TwiMLBuilderConversationRelay:
         self,
         caller: str,
         *,
-        host: TwiMLOptions | None = None,
-        per_call: TwiMLOptions | None = None,
+        host: VoiceTwiMLOptionsConversationRelay | None = None,
+        per_call: VoiceTwiMLOptionsConversationRelay | None = None,
         websocket_url: str | None = None,
     ) -> str:
         """Build the TwiML XML for one call.
@@ -259,15 +261,15 @@ class TwiMLBuilderConversationRelay:
 
     def _build_twiml_options(
         self,
-        host: TwiMLOptions | None,
-        per_call: TwiMLOptions | None,
-    ) -> TwiMLOptions:
+        host: VoiceTwiMLOptionsConversationRelay | None,
+        per_call: VoiceTwiMLOptionsConversationRelay | None,
+    ) -> VoiceTwiMLOptionsConversationRelay:
         """Layer TwiML options, lowest precedence first: TAC defaults →
         ``host`` (calling host's per-call values) → ``default_twiml_options`` →
         ``per_call`` (application customizer output for inbound, or
         ``InitiateVoiceConversationOptions.twiml_options`` for outbound).
         """
-        merged = TwiMLOptions(
+        merged = VoiceTwiMLOptionsConversationRelay(
             welcome_greeting=DEFAULT_WELCOME_GREETING,
             conversation_configuration=self.tac_config.conversation_configuration_id,
             action_url=self._resolve_action_url(host, per_call),
@@ -281,7 +283,9 @@ class TwiMLBuilderConversationRelay:
         return merged
 
     @staticmethod
-    def _overlay_fields(target: TwiMLOptions, source: TwiMLOptions) -> None:
+    def _overlay_fields(
+        target: VoiceTwiMLOptionsConversationRelay, source: VoiceTwiMLOptionsConversationRelay
+    ) -> None:
         """Apply fields explicitly set on ``source`` onto ``target``.
 
         Nested models (``custom_parameters``), lists (``languages``), and
@@ -302,8 +306,8 @@ class TwiMLBuilderConversationRelay:
 
     def _resolve_action_url(
         self,
-        host: TwiMLOptions | None,
-        customized: TwiMLOptions | None,
+        host: VoiceTwiMLOptionsConversationRelay | None,
+        customized: VoiceTwiMLOptionsConversationRelay | None,
     ) -> str | None:
         """Resolve the TwiML ``<Connect action=...>`` URL.
 
