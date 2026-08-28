@@ -486,6 +486,52 @@ class VoiceTwiMLOptionsConversationRelay(VoiceTwiMLOptions):
 TwiMLOptions = VoiceTwiMLOptionsConversationRelay
 
 
+class VoiceTwiMLOptionsMediaStreams(VoiceTwiMLOptions):
+    """Options for the TwiML inside ``<Connect><Stream>``.
+
+    Fields map to the attributes documented at
+    https://www.twilio.com/docs/voice/twiml/stream (the ``<Stream>`` verb)
+    and https://www.twilio.com/docs/voice/twiml/connect (the ``<Connect>``
+    verb it's nested in). ``track`` is omitted — bidirectional ``<Connect>``
+    streams only ever carry ``inbound_track``, so it isn't settable.
+    """
+
+    websocket_url: str | None = Field(
+        None,
+        description="Public WebSocket URL for Twilio's Media Stream (the "
+        "<Stream url=...> attribute). Leave None to use the URL derived from "
+        "TACConfig.voice_public_domain + voice_websocket_path.",
+    )
+    custom_parameters: dict[str, Any] | None = Field(
+        None,
+        description="Custom parameters emitted as <Parameter> children of <Stream>. "
+        "They arrive back in the WebSocket 'start' event under start.customParameters.",
+    )
+    name: str | None = Field(
+        None,
+        description="Friendly name for the Stream (the <Stream name=...> attribute). "
+        "Must be unique per call; arrives back in the WebSocket 'start' event.",
+    )
+    status_callback: str | None = Field(
+        None,
+        description="Absolute URL Twilio posts to when the stream starts, stops, or "
+        "errors (StreamSid/StreamName/StreamEvent/StreamError/Timestamp params).",
+    )
+    status_callback_method: Literal["GET", "POST"] | None = Field(
+        None,
+        description="HTTP method for status_callback. Defaults to POST on Twilio.",
+    )
+    action_url: str | None = Field(
+        None,
+        description="URL Twilio requests when the <Connect> verb completes (the "
+        "<Connect action=...> attribute), with standard call parameters.",
+    )
+    action_method: Literal["GET", "POST"] | None = Field(
+        None,
+        description="HTTP method for action_url. Defaults to POST on Twilio.",
+    )
+
+
 class TwiMLRequest(BaseModel):
     """Framework-neutral view of the Twilio TwiML webhook form.
 

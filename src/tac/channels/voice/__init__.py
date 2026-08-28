@@ -1,4 +1,9 @@
-"""Voice channel for handling voice-based conversations."""
+"""Voice channel for handling voice-based conversations.
+
+``OpenAIRealtimeProvider`` needs the optional ``websockets`` dependency, so
+import it from ``tac.channels.voice.media_streams.openai_realtime`` instead
+of from here.
+"""
 
 from tac.channels.voice.channel import (
     AmdHandler,

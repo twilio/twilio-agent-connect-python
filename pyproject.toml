@@ -36,6 +36,9 @@ server = [
     "uvicorn[standard]>=0.32.0,<1",
     "python-multipart>=0.0.20,<1",
 ]
+openai-realtime = [
+    "websockets>=14,<17",
+]
 
 [dependency-groups]
 dev = [
