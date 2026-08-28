@@ -12,7 +12,6 @@ from tac.channels.voice.conversation_relay.twiml import generate_twiml
 __all__ = [
     "ConversationRelayProvider",
     "ConversationRelayProviderConfig",
-    "VoiceChannelConfig",
     "generate_twiml",
 ]
 

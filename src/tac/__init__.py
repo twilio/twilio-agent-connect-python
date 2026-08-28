@@ -19,7 +19,6 @@ __all__ = [
     "TACConfig",
     "PartnerConnector",
     "get_logger",
-    "TwiMLOptions",
     "mask_address",
     "mask_email",
     "mask_phone",

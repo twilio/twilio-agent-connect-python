@@ -549,8 +549,8 @@ class TwiMLRequest(BaseModel):
     Populated by ``TACFastAPIServer`` from the incoming Twilio webhook, then
     passed to a customizer registered via
     ``VoiceChannel.on_inbound_call_twiml(...)`` so the application can
-    produce per-call ``TwiMLOptions`` overrides without depending on FastAPI
-    types.
+    produce per-call ``VoiceTwiMLOptionsConversationRelay`` overrides without
+    depending on FastAPI types.
     """
 
     from_number: str | None = Field(None, alias="From")
@@ -564,8 +564,8 @@ class TwiMLRequest(BaseModel):
         default_factory=dict,
         description="Any other fields from the Twilio webhook not captured above. "
         "Values are always strings here (webhook form fields are url-encoded), "
-        "unlike TwiMLOptions.extra which accepts str | bool | int for emitted "
-        "TwiML attributes.",
+        "unlike VoiceTwiMLOptionsConversationRelay.extra which accepts "
+        "str | bool | int for emitted TwiML attributes.",
     )
 
     model_config = {"populate_by_name": True, "extra": "ignore"}

@@ -23,7 +23,6 @@ __all__ = [
     "MessagingChannel",
     "MessagingChannelConfig",
     "VoiceChannel",
-    "VoiceChannelConfig",
     "WhatsAppChannel",
     "WhatsAppChannelConfig",
 ]

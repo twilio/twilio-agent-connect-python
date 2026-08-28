@@ -127,7 +127,6 @@ __all__ = [
     "TACCommunicationContent",
     "TACMemoryResponse",
     "TriggerDetails",
-    "TwiMLOptions",
     "VoiceTwiMLOptions",
     "VoiceTwiMLOptionsConversationRelay",
 ]
