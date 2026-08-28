@@ -2,7 +2,7 @@
 ConversationRelay's managed setup/prompt/interrupt loop over one WebSocket.
 """
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from tac._deprecation import resolve_deprecated_alias
 from tac.channels.voice.conversation_relay.config import ConversationRelayProviderConfig
@@ -16,11 +16,12 @@ __all__ = [
     "generate_twiml",
 ]
 
+if TYPE_CHECKING:  # static type only, see tac._deprecation
+    VoiceChannelConfig = ConversationRelayProviderConfig
+
 
 def __getattr__(name: str) -> Any:
-    # Resolved directly (not forwarded to config.py's own __getattr__) so the
-    # warning attributes correctly to this access, not to config.py's caller.
-    # See tac._deprecation.resolve_deprecated_alias. TODO(3.0): remove.
+    # See tac._deprecation. TODO(3.0): remove.
     if name == "VoiceChannelConfig":
         return resolve_deprecated_alias("VoiceChannelConfig", ConversationRelayProviderConfig)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

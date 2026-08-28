@@ -1,6 +1,6 @@
 """Pydantic models for Twilio ConversationRelay Voice WebSocket messages."""
 
-from typing import Any, ClassVar, Literal, TypeVar
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, TypeVar
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -483,17 +483,12 @@ class VoiceTwiMLOptionsConversationRelay(VoiceTwiMLOptions):
         return self
 
 
-def __getattr__(name: str) -> Any:
-    """Lazily resolve ``TwiMLOptions``, the deprecated pre-Media-Streams name for
-    ``VoiceTwiMLOptionsConversationRelay``.
+if TYPE_CHECKING:  # static type only, see tac._deprecation
+    TwiMLOptions = VoiceTwiMLOptionsConversationRelay
 
-    A module-level ``__getattr__`` (PEP 562) — rather than a subclass with its own
-    ``__init__`` — keeps ``TwiMLOptions`` a true alias: ``TwiMLOptions is
-    VoiceTwiMLOptionsConversationRelay``, so ``isinstance``/``==`` behave exactly as
-    they did before the rename, and the warning fires once per access rather than
-    once per instantiation. Every other re-export of this name (``tac``,
-    ``tac.models``, ``tac.channels.voice``) resolves it the same way, directly —
-    see ``tac._deprecation.resolve_deprecated_alias``.
+
+def __getattr__(name: str) -> Any:
+    """Deprecated pre-Media-Streams name for ``VoiceTwiMLOptionsConversationRelay``.
 
     TODO(3.0): remove.
     """

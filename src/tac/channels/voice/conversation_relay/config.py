@@ -101,18 +101,12 @@ class ConversationRelayProviderConfig(VoiceProviderConfig):
         return ConversationRelayProvider(channel, tac_config, self)
 
 
-def __getattr__(name: str) -> Any:
-    """Lazily resolve ``VoiceChannelConfig``, the deprecated pre-provider-split
-    name for ``ConversationRelayProviderConfig``.
+if TYPE_CHECKING:  # static type only, see tac._deprecation
+    VoiceChannelConfig = ConversationRelayProviderConfig
 
-    A module-level ``__getattr__`` (PEP 562) — rather than a subclass with its own
-    ``__init__`` — keeps ``VoiceChannelConfig`` a true alias:
-    ``VoiceChannelConfig is ConversationRelayProviderConfig``, so
-    ``isinstance``/``==`` behave exactly as they did before the rename, and the
-    warning fires once per access rather than once per instantiation. Every
-    other re-export of this name (``tac.channels``, ``tac.channels.voice``,
-    ``tac.channels.voice.conversation_relay``) resolves it the same way,
-    directly — see ``tac._deprecation.resolve_deprecated_alias``.
+
+def __getattr__(name: str) -> Any:
+    """Deprecated pre-provider-split name for ``ConversationRelayProviderConfig``.
 
     TODO(3.0): remove.
     """

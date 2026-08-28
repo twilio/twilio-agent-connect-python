@@ -22,10 +22,12 @@ from the real caller (this function, then that layer's ``__getattr__``), so
 from __future__ import annotations
 
 import warnings
-from typing import Any
+from typing import TypeVar
+
+T = TypeVar("T")
 
 
-def resolve_deprecated_alias(old_name: str, target: Any, version: str = "3.0") -> Any:
+def resolve_deprecated_alias(old_name: str, target: type[T], version: str = "3.0") -> type[T]:
     """Warn that ``old_name`` is deprecated in favor of ``target``, then return it.
 
     Args:
