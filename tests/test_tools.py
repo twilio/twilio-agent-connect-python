@@ -4,6 +4,7 @@ import json
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from pydantic import BaseModel
 
 from tac.context.knowledge import KnowledgeClient
 from tac.context.memory import MemoryClient
@@ -123,6 +124,70 @@ class TestTACTool:
 
         result_json = await sdk_tool.on_invoke_tool(None, '{"x": "hello"}')
         assert json.loads(result_json) == {"echo": "hello"}
+
+    @pytest.mark.asyncio
+    async def test_to_openai_agents_sdk_tool_serializes_pydantic_results(self):
+        """Tools returning Pydantic models (e.g. the knowledge tool) are JSON-encoded."""
+
+        class ChunkResult(BaseModel):
+            content: str
+            score: float | None = None
+
+        async def search(x: str) -> list[ChunkResult]:
+            return [ChunkResult(content=f"result for {x}")]
+
+        tool = TACTool(
+            name="search_tool",
+            description="A search tool",
+            params_json_schema={
+                "type": "object",
+                "properties": {"x": {"type": "string"}},
+                "required": ["x"],
+            },
+            _raw_implementation=search,
+        )
+
+        sdk_tool = tool.to_openai_agents_sdk_tool()
+
+        result_json = await sdk_tool.on_invoke_tool(None, '{"x": "hello"}')
+        # exclude_none drops the null score
+        assert json.loads(result_json) == [{"content": "result for hello"}]
+
+    @pytest.mark.asyncio
+    async def test_to_openai_agents_sdk_tool_serializes_non_json_primitives(self):
+        """Models with datetime/UUID fields serialize via mode="json"."""
+        from datetime import datetime
+        from uuid import UUID
+
+        class Record(BaseModel):
+            id: UUID
+            created_at: datetime
+
+        async def fetch(x: str) -> Record:
+            return Record(
+                id=UUID("12345678-1234-5678-1234-567812345678"),
+                created_at=datetime(2026, 7, 10, 12, 0, 0),
+            )
+
+        tool = TACTool(
+            name="fetch_tool",
+            description="A fetch tool",
+            params_json_schema={
+                "type": "object",
+                "properties": {"x": {"type": "string"}},
+                "required": ["x"],
+            },
+            _raw_implementation=fetch,
+        )
+
+        sdk_tool = tool.to_openai_agents_sdk_tool()
+
+        # Without mode="json" this raises "not JSON serializable" on datetime/UUID.
+        result_json = await sdk_tool.on_invoke_tool(None, '{"x": "hello"}')
+        assert json.loads(result_json) == {
+            "id": "12345678-1234-5678-1234-567812345678",
+            "created_at": "2026-07-10T12:00:00",
+        }
 
     def test_to_json(self):
         """Test conversion to JSON string."""
