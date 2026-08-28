@@ -1,9 +1,18 @@
 """Voice channel configuration."""
 
+from __future__ import annotations
+
 from collections.abc import Awaitable, Callable
+from typing import TYPE_CHECKING
 
-from pydantic import BaseModel, Field
+from pydantic import Field
 
+from tac.channels.voice.conversation_relay import ConversationRelayProvider
+from tac.channels.voice.provider import VoiceProvider, VoiceProviderConfig
+from tac.core.config import TACConfig
+
+if TYPE_CHECKING:
+    from tac.channels.voice.channel import VoiceChannel
 from tac.models.memory import MemoryMode
 from tac.models.outbound import CallOptions
 from tac.models.voice import (
@@ -21,7 +30,7 @@ AmdHandler = Callable[[AmdEvent], Awaitable[None]]
 RecordingHandler = Callable[[RecordingEvent], Awaitable[None]]
 
 
-class VoiceChannelConfig(BaseModel):
+class ConversationRelayProviderConfig(VoiceProviderConfig):
     """
     Configuration for Voice channel.
 
@@ -102,3 +111,11 @@ class VoiceChannelConfig(BaseModel):
         "non-default paths; they override the URLs TAC would derive from "
         "voice_public_domain + voice_call_event_path.",
     )
+
+    def create_provider(self, channel: VoiceChannel, tac_config: TACConfig) -> VoiceProvider:
+        return ConversationRelayProvider(channel, tac_config, self)
+
+
+# VoiceChannelConfig is this same class under its pre-provider-split name —
+# not a separate model, so this alias is the only place the two names diverge.
+VoiceChannelConfig = ConversationRelayProviderConfig
