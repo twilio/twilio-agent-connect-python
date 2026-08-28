@@ -361,7 +361,7 @@ class TestVoiceChannel:
     async def test_process_webhook_conversation_inactive(self) -> None:
         """Test that INACTIVE invalidates cached memory when memory_mode='once'."""
 
-        from tac.channels.voice.config import VoiceChannelConfig
+        from tac.channels.voice.conversation_relay import VoiceChannelConfig
 
         tac = TAC(get_test_config())
         # Enable "once" mode to trigger cache invalidation
@@ -2077,7 +2077,7 @@ class TestConversationInitializationFlow:
         assert profile_id == "profile_voice_correct"
 
     @pytest.mark.asyncio
-    @patch("tac.channels.voice.conversation_relay._POLL_BASE_DELAY", 0)
+    @patch("tac.channels.voice.conversation_relay.provider._POLL_BASE_DELAY", 0)
     async def test_error_when_no_conversations_found(self, capsys: pytest.CaptureFixture) -> None:
         """Test RuntimeError when ConversationRelay creates 0 conversations."""
         from tac.channels.websocket_protocol import WebSocketDisconnectError
@@ -2114,7 +2114,7 @@ class TestConversationInitializationFlow:
         assert len(channel._conversations) == 0
 
     @pytest.mark.asyncio
-    @patch("tac.channels.voice.conversation_relay._POLL_BASE_DELAY", 0)
+    @patch("tac.channels.voice.conversation_relay.provider._POLL_BASE_DELAY", 0)
     async def test_error_when_multiple_conversations_found(
         self, capsys: pytest.CaptureFixture
     ) -> None:

@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import ValidationError
 
+from tac.channels.voice.conversation_relay.twiml import TwiMLBuilderConversationRelay
 from tac.channels.voice.provider import VoiceProvider
 from tac.channels.websocket_manager import WebSocketManager
 from tac.channels.websocket_protocol import WebSocketDisconnectError, WebSocketProtocol
@@ -35,11 +36,9 @@ from tac.models.voice import (
 from tac.session import SessionState
 from tac.utils.redaction import mask_phone, redact_twiml_parameters
 
-from . import twiml
-
 if TYPE_CHECKING:
     from tac.channels.voice.channel import VoiceChannel
-    from tac.channels.voice.config import ConversationRelayProviderConfig
+    from tac.channels.voice.conversation_relay.config import ConversationRelayProviderConfig
 
 _POLL_ATTEMPTS = 10
 _POLL_BASE_DELAY = 0.25
@@ -67,7 +66,7 @@ class ConversationRelayProvider(VoiceProvider):
         self.config = config
         self.session_manager = config.session_manager
         self._websocket_manager = WebSocketManager()
-        self._twiml = twiml.TwiMLBuilderConversationRelay(tac_config, config)
+        self._twiml = TwiMLBuilderConversationRelay(tac_config, config)
 
     @property
     def channel_name(self) -> str:
