@@ -8,17 +8,18 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import Field, model_validator
 
+from tac.channels.voice.media_streams.config import MediaStreamsProviderConfig
 from tac.channels.voice.media_streams.openai_realtime.provider import OpenAIRealtimeProvider
-from tac.channels.voice.provider import VoiceProvider, VoiceProviderConfig
+from tac.channels.voice.provider import VoiceProvider
 from tac.core.config import TACConfig
-from tac.models.voice import TwiMLRequest, VoiceTwiMLOptionsMediaStreams
+from tac.models.voice import TwiMLRequest
 from tac.tools import TACTool
 
 if TYPE_CHECKING:
     from tac.channels.voice.channel import VoiceChannel
 
 
-class OpenAIRealtimeProviderConfig(VoiceProviderConfig):
+class OpenAIRealtimeProviderConfig(MediaStreamsProviderConfig):
     """Configuration for ``OpenAIRealtimeProvider``."""
 
     model_config = {"extra": "forbid", "arbitrary_types_allowed": True}
@@ -50,12 +51,6 @@ class OpenAIRealtimeProviderConfig(VoiceProviderConfig):
         "client-events#session.update for the schema. If using `tools`, its 'tools' entry "
         "must separately list each tool's `to_realtime_format()` schema — this config is "
         "passed to OpenAI as-is, with no tool schemas merged in.",
-    )
-    default_twiml_options: VoiceTwiMLOptionsMediaStreams | None = Field(
-        default=None,
-        description="Static VoiceTwiMLOptionsMediaStreams applied to every inbound call. "
-        "Per-call customization is registered via VoiceChannel.on_inbound_call_twiml(...), "
-        "which takes precedence over this.",
     )
     on_inbound_call_session_config: (
         Callable[[TwiMLRequest], Awaitable[dict[str, Any] | None]] | None

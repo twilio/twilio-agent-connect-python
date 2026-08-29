@@ -3,6 +3,7 @@
 import asyncio
 import json
 import re
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -747,3 +748,76 @@ class TestOutboundCallSessionConfig:
             await asyncio.wait_for(provider.handle_websocket(twilio_ws), timeout=5)
 
         assert "model=gpt-realtime-outbound-only" in mock_connect.call_args.args[0]
+
+
+class TestCallEventCallbackWiring:
+    """``OpenAIRealtimeProvider._build_call_kwargs`` shares its call-event-URL
+    wiring with ``ConversationRelayProvider`` via
+    ``VoiceProvider._apply_call_event_callbacks`` — covers the same behavior
+    on this provider's outbound path (see ``TestNoAutoWiring`` in
+    test_outbound.py for the ConversationRelay side).
+    """
+
+    @staticmethod
+    def _noop_handler() -> Any:
+        async def handler(event: Any) -> None:
+            return None
+
+        return handler
+
+    async def _place_call(
+        self, channel: VoiceChannel, *, websocket_url: str | None = None
+    ) -> dict[str, Any]:
+        mock_call = MagicMock(sid="CA_WIRE")
+        mock_client = MagicMock()
+        mock_client.calls.create.return_value = mock_call
+        with patch.object(channel, "_get_twilio_client", return_value=mock_client):
+            await channel.initiate_outbound_conversation(
+                InitiateVoiceConversationOptions(to="+15559876543", websocket_url=websocket_url)
+            )
+        return mock_client.calls.create.call_args.kwargs
+
+    @pytest.mark.asyncio
+    async def test_no_auto_wiring_without_handlers(self) -> None:
+        channel = make_channel()
+        kwargs = await self._place_call(channel)
+        assert "status_callback" not in kwargs
+        assert "async_amd_status_callback" not in kwargs
+        assert "recording_status_callback" not in kwargs
+
+    @pytest.mark.asyncio
+    async def test_each_callback_wired_only_for_its_handler(self) -> None:
+        channel = make_channel()
+        channel.on_amd(self._noop_handler())
+        kwargs = await self._place_call(channel)
+        assert kwargs["async_amd_status_callback"] == "https://example.com/twilio/call-events/amd"
+        assert "status_callback" not in kwargs
+        assert "recording_status_callback" not in kwargs
+
+    @pytest.mark.asyncio
+    async def test_all_callbacks_wired_when_all_handlers_registered(self) -> None:
+        channel = make_channel()
+        channel.on_call_status(self._noop_handler())
+        channel.on_amd(self._noop_handler())
+        channel.on_recording(self._noop_handler())
+        kwargs = await self._place_call(channel)
+        assert kwargs["status_callback"] == "https://example.com/twilio/call-events/status"
+        assert kwargs["async_amd_status_callback"] == "https://example.com/twilio/call-events/amd"
+        assert (
+            kwargs["recording_status_callback"]
+            == "https://example.com/twilio/call-events/recording"
+        )
+
+    @pytest.mark.asyncio
+    async def test_no_auto_wiring_without_domain(self) -> None:
+        tac = TAC({**get_test_tac_config(), "voice_public_domain": None})
+        channel = VoiceChannel(
+            tac,
+            config=OpenAIRealtimeProviderConfig(
+                openai_api_key="sk-test",
+                default_session_config={"model": "gpt-realtime-test", "audio": _VALID_AUDIO},
+            ),
+        )
+        channel.on_call_status(self._noop_handler())
+        kwargs = await self._place_call(channel, websocket_url="wss://example.com/ws")
+        assert "status_callback" not in kwargs

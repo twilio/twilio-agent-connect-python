@@ -6,13 +6,13 @@ one kind of real-time media provider.
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
 
 from tac.channels.websocket_protocol import WebSocketProtocol
-from tac.core.config import TACConfig
+from tac.core.config import CallEventKind, TACConfig
 from tac.core.logging import get_logger
 from tac.models.memory import MemoryMode
 from tac.models.outbound import InitiateVoiceConversationOptions, InitiateVoiceConversationResult
@@ -89,6 +89,27 @@ class VoiceProvider:
     def get_websocket(self, conversation_id: str) -> WebSocketProtocol | None:
         """Return the Twilio-facing WebSocket for a conversation, if tracked."""
         return None
+
+    def _apply_call_event_callbacks(self, call_kwargs: dict[str, Any]) -> dict[str, Any]:
+        """Set callback URLs on ``call_kwargs`` for every registered call-event handler.
+
+        A URL is derived only when its handler is registered — an unwanted
+        call-event URL would otherwise surface as silent 11200 alerts for a
+        feature nobody asked for. Set the URLs in ``default_call_options``
+        instead when TAC isn't serving the routes.
+        """
+        wiring: list[tuple[CallEventKind, str, Callable[..., Any] | None]] = [
+            ("status", "status_callback", self.channel._on_call_status),
+            ("amd", "async_amd_status_callback", self.channel._on_amd),
+            ("recording", "recording_status_callback", self.channel._on_recording),
+        ]
+        for kind, param, handler in wiring:
+            if handler is None:
+                continue
+            url = self.channel.tac.config.call_event_url(kind)
+            if url is not None:
+                call_kwargs.setdefault(param, url)
+        return call_kwargs
 
 
 class VoiceProviderConfig(BaseModel):

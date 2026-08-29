@@ -5,12 +5,10 @@ from tac.channels.voice.media_streams.openai_realtime.provider import (
     TWILIO_MEDIA_STREAM_AUDIO_FORMAT,
     OpenAIRealtimeProvider,
 )
-from tac.channels.voice.media_streams.openai_realtime.twiml import (
-    VoiceTwiMLOptionsMediaStreams,
-    generate_twiml,
-)
+from tac.channels.voice.media_streams.twiml import generate_twiml
 from tac.models.outbound import InitiateVoiceConversationOptionsOpenAIRealtime
 from tac.models.stream import StreamStartMessage
+from tac.models.voice import VoiceTwiMLOptionsMediaStreams
 
 __all__ = [
     "TWILIO_MEDIA_STREAM_AUDIO_FORMAT",
