@@ -95,8 +95,9 @@ class VoiceProvider:
 
         A URL is derived only when its handler is registered — an unwanted
         call-event URL would otherwise surface as silent 11200 alerts for a
-        feature nobody asked for. Set the URLs in ``default_call_options``
-        instead when TAC isn't serving the routes.
+        feature nobody asked for. If TAC isn't serving these routes, set the
+        URLs explicitly via ``CallOptions`` (or
+        ``ConversationRelayProviderConfig.default_call_options``, where available).
         """
         wiring: list[tuple[CallEventKind, str, Callable[..., Any] | None]] = [
             ("status", "status_callback", self.channel._on_call_status),
