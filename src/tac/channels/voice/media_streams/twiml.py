@@ -96,7 +96,7 @@ class TwiMLBuilderMediaStreams(TwiMLBuilderBase):
           1. ``per_call`` — the ``on_inbound_call_twiml`` customizer's output
              for inbound, or ``InitiateVoiceConversationOptions.twiml_options``
              for outbound.
-          2. ``OpenAIRealtimeProviderConfig.default_twiml_options`` — channel-wide defaults
+          2. ``MediaStreamsProviderConfig.default_twiml_options`` — channel-wide defaults
           3. ``host`` — per-call transport facts supplied by the host (e.g. a
              per-call ``websocket_url`` with an affinity token)
           4. TAC defaults: the WebSocket URL derived from
