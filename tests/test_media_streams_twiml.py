@@ -1,18 +1,17 @@
-"""Tests for OpenAIRealtimeProvider's TwiML generation and layering.
+"""Tests for Media Streams' TwiML generation and layering.
 
-Media Streams' ``generate_twiml``/``TwiMLBuilderMediaStreams`` are a
-separate implementation from ConversationRelay's (see test_voice_channel.py
-for that one) — same shape (customizer > default > host > TAC-default
-layering), different verb (``<Connect><Stream>`` vs ``<ConversationRelay>``).
+``generate_twiml``/``TwiMLBuilderMediaStreams`` are shared by every Media
+Streams provider (``OpenAIRealtimeProviderConfig`` is the only one today, so
+it's what these tests configure the builder with) and are a separate
+implementation from ConversationRelay's (see test_voice_channel.py for that
+one) — same shape (customizer > default > host > TAC-default layering),
+different verb (``<Connect><Stream>`` vs ``<ConversationRelay>``).
 """
 
 import pytest
 
 from tac.channels.voice.media_streams.openai_realtime import OpenAIRealtimeProviderConfig
-from tac.channels.voice.media_streams.openai_realtime.twiml import (
-    TwiMLBuilderMediaStreams,
-    generate_twiml,
-)
+from tac.channels.voice.media_streams.twiml import TwiMLBuilderMediaStreams, generate_twiml
 from tac.core.config import TACConfig
 from tac.models.voice import VoiceTwiMLOptionsMediaStreams
 

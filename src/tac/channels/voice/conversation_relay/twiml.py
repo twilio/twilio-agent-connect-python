@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel
 from twilio.twiml.voice_response import VoiceResponse
 
-from tac.core.config import TACConfig
+from tac.channels.voice.twiml import TwiMLBuilderBase
 from tac.models.voice import VoiceTwiMLOptionsConversationRelay
 from tac.tools.handoff import studio_voice_handoff_url
 
@@ -200,7 +200,7 @@ def generate_twiml(
 DEFAULT_WELCOME_GREETING = "Hello! How can I assist you today?"
 
 
-class TwiMLBuilderConversationRelay:
+class TwiMLBuilderConversationRelay(TwiMLBuilderBase):
     """Builds the TwiML for a ConversationRelay call, owning every layering
     and resolution decision so ``VoiceChannel`` doesn't have to.
 
@@ -210,11 +210,7 @@ class TwiMLBuilderConversationRelay:
     has to compute and hand over.
     """
 
-    def __init__(
-        self, tac_config: TACConfig, channel_config: ConversationRelayProviderConfig
-    ) -> None:
-        self.tac_config = tac_config
-        self.channel_config = channel_config
+    channel_config: ConversationRelayProviderConfig
 
     def build(
         self,
@@ -250,15 +246,10 @@ class TwiMLBuilderConversationRelay:
             resolved_websocket_url = websocket_url
         elif merged.websocket_url is not None:
             resolved_websocket_url = merged.websocket_url
-        elif self.tac_config.voice_public_domain:
-            resolved_websocket_url = (
-                f"wss://{self.tac_config.voice_public_domain}{self.tac_config.voice_websocket_path}"
-            )
+        elif (default_url := self._default_websocket_url()) is not None:
+            resolved_websocket_url = default_url
         else:
-            raise ValueError(
-                f"{caller} needs a WebSocket URL. Set TWILIO_VOICE_PUBLIC_DOMAIN "
-                "(or TACConfig.voice_public_domain)."
-            )
+            raise self._missing_websocket_url_error(caller)
 
         return generate_twiml(resolved_websocket_url, merged)
 
@@ -277,35 +268,16 @@ class TwiMLBuilderConversationRelay:
             conversation_configuration=self.tac_config.conversation_configuration_id,
             action_url=self._resolve_action_url(host, per_call),
         )
+        # action_url is resolved above via _resolve_action_url, so skip it here.
         if host is not None:
-            self._overlay_fields(merged, host)
+            self._overlay_fields(merged, host, skip={"action_url"})
         if self.channel_config.default_twiml_options is not None:
-            self._overlay_fields(merged, self.channel_config.default_twiml_options)
+            self._overlay_fields(
+                merged, self.channel_config.default_twiml_options, skip={"action_url"}
+            )
         if per_call is not None:
-            self._overlay_fields(merged, per_call)
+            self._overlay_fields(merged, per_call, skip={"action_url"})
         return merged
-
-    @staticmethod
-    def _overlay_fields(
-        target: VoiceTwiMLOptionsConversationRelay, source: VoiceTwiMLOptionsConversationRelay
-    ) -> None:
-        """Apply fields explicitly set on ``source`` onto ``target``.
-
-        Nested models (``custom_parameters``), lists (``languages``), and
-        dicts (``extra``) replace wholesale — there's no per-key merging.
-        If you add a field that should merge (e.g. a dict of headers),
-        special-case it here instead of getting the default overwrite behavior.
-
-        ``action_url`` is skipped here on purpose — it's resolved once via
-        ``_resolve_action_url`` looking at every layer at once, and that
-        resolved value is written into ``target`` before this overlay runs.
-        Letting it through here would let a higher-priority layer that didn't
-        set action_url silently clobber a lower layer that did.
-        """
-        for field in source.model_fields_set:
-            if field == "action_url":
-                continue
-            setattr(target, field, getattr(source, field))
 
     def _resolve_action_url(
         self,

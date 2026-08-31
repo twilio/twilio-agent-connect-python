@@ -15,19 +15,16 @@ import base64
 import contextlib
 import json
 import uuid
-from collections.abc import AsyncGenerator, Callable
+from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING, Any
 
 import websockets
 
 from tac.channels.voice.media_streams.openai_realtime.models import _CallState
-from tac.channels.voice.media_streams.openai_realtime.twiml import (
-    TwiMLBuilderMediaStreams,
-    VoiceTwiMLOptionsMediaStreams,
-)
+from tac.channels.voice.media_streams.twiml import TwiMLBuilderMediaStreams
 from tac.channels.voice.provider import VoiceProvider
 from tac.channels.websocket_protocol import WebSocketDisconnectError, WebSocketProtocol
-from tac.core.config import CallEventKind, TACConfig
+from tac.core.config import TACConfig
 from tac.models.outbound import (
     CallOptions,
     InitiateVoiceConversationOptions,
@@ -36,7 +33,7 @@ from tac.models.outbound import (
 )
 from tac.models.session import ConversationSession
 from tac.models.stream import StreamStartMessage
-from tac.models.voice import TwiMLRequest, VoiceTwiMLOptions
+from tac.models.voice import TwiMLRequest, VoiceTwiMLOptions, VoiceTwiMLOptionsMediaStreams
 from tac.tools import TACTool
 from tac.utils.redaction import mask_phone, redact_twiml_parameters
 
@@ -172,20 +169,7 @@ class OpenAIRealtimeProvider(VoiceProvider):
         one per registered handler.
         """
         call_kwargs = call_options.to_call_kwargs() if call_options else {}
-
-        wiring: list[tuple[CallEventKind, str, Callable[..., Any] | None]] = [
-            ("status", "status_callback", self.channel._on_call_status),
-            ("amd", "async_amd_status_callback", self.channel._on_amd),
-            ("recording", "recording_status_callback", self.channel._on_recording),
-        ]
-        for kind, param, handler in wiring:
-            if handler is None:
-                continue
-            url = self.channel.tac.config.call_event_url(kind)
-            if url is not None:
-                call_kwargs.setdefault(param, url)
-
-        return call_kwargs
+        return self._apply_call_event_callbacks(call_kwargs)
 
     async def initiate_outbound_conversation(
         self,

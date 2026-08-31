@@ -1,21 +1,17 @@
-"""TwiML generation for ``OpenAIRealtimeProvider``.
+"""TwiML generation for Media Streams (``<Connect><Stream>``) providers.
 
 See https://www.twilio.com/docs/voice/twiml/stream for the ``<Stream>`` verb.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from twilio.twiml.voice_response import Connect, VoiceResponse
 
-from tac.core.config import TACConfig
+from tac.channels.voice.media_streams.config import MediaStreamsProviderConfig
+from tac.channels.voice.twiml import TwiMLBuilderBase
 from tac.models.voice import VoiceTwiMLOptionsMediaStreams
-
-if TYPE_CHECKING:
-    from tac.channels.voice.media_streams.openai_realtime.config import (
-        OpenAIRealtimeProviderConfig,
-    )
 
 
 def generate_twiml(
@@ -79,14 +75,12 @@ def generate_twiml(
     return str(response)
 
 
-class TwiMLBuilderMediaStreams:
+class TwiMLBuilderMediaStreams(TwiMLBuilderBase):
     """Builds the TwiML for a Media Streams call, owning the layering and
-    WebSocket URL resolution so ``OpenAIRealtimeProvider`` doesn't have to.
+    WebSocket URL resolution so the provider doesn't have to.
     """
 
-    def __init__(self, tac_config: TACConfig, channel_config: OpenAIRealtimeProviderConfig) -> None:
-        self.tac_config = tac_config
-        self.channel_config = channel_config
+    channel_config: MediaStreamsProviderConfig
 
     def build(
         self,
@@ -102,7 +96,7 @@ class TwiMLBuilderMediaStreams:
           1. ``per_call`` — the ``on_inbound_call_twiml`` customizer's output
              for inbound, or ``InitiateVoiceConversationOptions.twiml_options``
              for outbound.
-          2. ``OpenAIRealtimeProviderConfig.default_twiml_options`` — channel-wide defaults
+          2. ``MediaStreamsProviderConfig.default_twiml_options`` — channel-wide defaults
           3. ``host`` — per-call transport facts supplied by the host (e.g. a
              per-call ``websocket_url`` with an affinity token)
           4. TAC defaults: the WebSocket URL derived from
@@ -129,15 +123,10 @@ class TwiMLBuilderMediaStreams:
             resolved_websocket_url = websocket_url
         elif merged.websocket_url is not None:
             resolved_websocket_url = merged.websocket_url
-        elif self.tac_config.voice_public_domain:
-            resolved_websocket_url = (
-                f"wss://{self.tac_config.voice_public_domain}{self.tac_config.voice_websocket_path}"
-            )
+        elif (default_url := self._default_websocket_url()) is not None:
+            resolved_websocket_url = default_url
         else:
-            raise ValueError(
-                f"{caller} needs a WebSocket URL. Set TWILIO_VOICE_PUBLIC_DOMAIN "
-                "(or TACConfig.voice_public_domain)."
-            )
+            raise self._missing_websocket_url_error(caller)
 
         return generate_twiml(resolved_websocket_url, merged)
 
@@ -158,15 +147,3 @@ class TwiMLBuilderMediaStreams:
         if per_call is not None:
             self._overlay_fields(merged, per_call)
         return merged
-
-    @staticmethod
-    def _overlay_fields(
-        target: VoiceTwiMLOptionsMediaStreams, source: VoiceTwiMLOptionsMediaStreams
-    ) -> None:
-        """Apply fields explicitly set on ``source`` onto ``target``.
-
-        ``custom_parameters`` replaces wholesale when set at a higher-priority
-        layer — there's no per-key merging.
-        """
-        for field in source.model_fields_set:
-            setattr(target, field, getattr(source, field))

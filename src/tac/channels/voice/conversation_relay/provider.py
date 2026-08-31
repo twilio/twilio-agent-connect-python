@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import AsyncGenerator, Callable
+from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING, Any
 
 from pydantic import ValidationError
@@ -17,7 +17,7 @@ from tac.channels.voice.conversation_relay.twiml import TwiMLBuilderConversation
 from tac.channels.voice.provider import VoiceProvider
 from tac.channels.websocket_manager import WebSocketManager
 from tac.channels.websocket_protocol import WebSocketDisconnectError, WebSocketProtocol
-from tac.core.config import CallEventKind, TACConfig
+from tac.core.config import TACConfig
 from tac.models.outbound import (
     CallOptions,
     InitiateVoiceConversationOptions,
@@ -463,30 +463,10 @@ class ConversationRelayProvider(VoiceProvider):
         Layers, highest precedence first: this call's ``call_options``,
         ``ConversationRelayProviderConfig.default_call_options``, then callback URLs derived
         from ``voice_public_domain`` + ``voice_call_event_path``.
-
-        A URL is derived only when its handler is registered. That's a deliberate
-        deviation from ``websocket_url`` / ``action_url``, which derive
-        unconditionally: those are load-bearing, so a wrong one fails loudly on
-        the first call, whereas an unwanted call-event URL fails as silent 11200
-        alerts for a feature nobody asked for. Set the URLs in
-        ``default_call_options`` when TAC isn't serving the routes.
         """
         merged = self._merge_call_options(call_options)
         call_kwargs = merged.to_call_kwargs() if merged else {}
-
-        wiring: list[tuple[CallEventKind, str, Callable[..., Any] | None]] = [
-            ("status", "status_callback", self.channel._on_call_status),
-            ("amd", "async_amd_status_callback", self.channel._on_amd),
-            ("recording", "recording_status_callback", self.channel._on_recording),
-        ]
-        for kind, param, handler in wiring:
-            if handler is None:
-                continue
-            url = self.channel.tac.config.call_event_url(kind)
-            if url is not None:
-                call_kwargs.setdefault(param, url)
-
-        return call_kwargs
+        return self._apply_call_event_callbacks(call_kwargs)
 
     async def initiate_outbound_conversation(
         self,
