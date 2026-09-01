@@ -22,6 +22,7 @@ import websockets
 from tac.channels.voice.media_streams.openai_realtime.models import _CallState
 from tac.channels.voice.media_streams.shared.openai_provider import (
     OPENAI_USER_AGENT,
+    SESSION_CONFIG_TOKEN_PARAM,
     MediaStreamsOpenAIProvider,
 )
 from tac.channels.websocket_protocol import WebSocketDisconnectError, WebSocketProtocol
@@ -52,13 +53,6 @@ TWILIO_AUDIO_FORMAT_FOR_REALTIME: dict[str, Any] = {"type": "audio/pcmu"}
 #: non-configurable rate, so audio byte count converts to milliseconds by
 #: this constant alone, regardless of session_config.
 _PCMU_BYTES_PER_MS = 8
-
-#: Reserved <Stream> custom_parameters key used to correlate an outbound
-#: call's session_config override to its WebSocket start event. calls.create()
-#: returning call.sid doesn't happen-before Twilio connecting the stream, so
-#: call.sid can't be the correlation key — this token, embedded in the TwiML
-#: before the call is placed, can.
-_SESSION_CONFIG_TOKEN_PARAM = "_tac_session_config_token"
 
 
 class OpenAIRealtimeProvider(MediaStreamsOpenAIProvider[_CallState]):
@@ -128,7 +122,7 @@ class OpenAIRealtimeProvider(MediaStreamsOpenAIProvider[_CallState]):
                 update={
                     "custom_parameters": {
                         **existing_params,
-                        _SESSION_CONFIG_TOKEN_PARAM: session_config_token,
+                        SESSION_CONFIG_TOKEN_PARAM: session_config_token,
                     }
                 }
             )
@@ -260,7 +254,7 @@ class OpenAIRealtimeProvider(MediaStreamsOpenAIProvider[_CallState]):
         message = StreamStartMessage(**start)
         conv_id = message.conversation_id
 
-        token = message.custom_parameters.get(_SESSION_CONFIG_TOKEN_PARAM)
+        token = message.custom_parameters.get(SESSION_CONFIG_TOKEN_PARAM)
         if token is not None:
             session_config = self._call_session_configs.pop(token, None)
             if session_config is not None:
@@ -534,9 +528,12 @@ class OpenAIRealtimeProvider(MediaStreamsOpenAIProvider[_CallState]):
                 await call.model_ws.close()
             except Exception as e:
                 self.logger.debug(f"Error closing model socket: {e}", conversation_id=conv_id)
+        # Drop any session config that was stashed for this call but never
+        # consumed (_connect_model raised, or the stream stopped before it ran).
+        self._call_session_configs.pop(conv_id, None)
 
-        # Before the end below, so Websocket Disconnected always precedes the
-        # Conversation Ended it triggers.
+        # Before the release below, so Websocket Disconnected always precedes
+        # the Conversation Ended it triggers.
         track_event(
             "Websocket Disconnected",
             self.tac_config.account_sid,
@@ -546,4 +543,4 @@ class OpenAIRealtimeProvider(MediaStreamsOpenAIProvider[_CallState]):
             orchestrator_enabled=self.channel.tac.is_orchestrator_enabled(),
         )
 
-        await self.channel._end_conversation(conv_id)
+        await self.channel._release_session(conv_id)

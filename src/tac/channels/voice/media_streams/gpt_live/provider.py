@@ -19,6 +19,7 @@ import websockets
 from tac.channels.voice.media_streams.gpt_live.models import _CallState
 from tac.channels.voice.media_streams.shared.openai_provider import (
     OPENAI_USER_AGENT,
+    SESSION_CONFIG_TOKEN_PARAM,
     MediaStreamsOpenAIProvider,
 )
 from tac.channels.websocket_protocol import WebSocketDisconnectError, WebSocketProtocol
@@ -35,13 +36,6 @@ from tac.utils.redaction import mask_phone, redact_twiml_parameters
 
 if TYPE_CHECKING:
     from tac.channels.voice.media_streams.gpt_live.config import GPTLiveProviderConfig
-
-#: Reserved <Stream> custom_parameters key used to correlate an outbound
-#: call's session_config override to its WebSocket start event. calls.create()
-#: returning call.sid doesn't happen-before Twilio connecting the stream, so
-#: call.sid can't be the correlation key — this token, embedded in the TwiML
-#: before the call is placed, can.
-_SESSION_CONFIG_TOKEN_PARAM = "_tac_session_config_token"
 
 #: Twilio Media Streams always sends/expects 8kHz G.711 u-law — see
 #: https://www.twilio.com/docs/voice/media-streams/websocket-messages. Not
@@ -148,7 +142,7 @@ class GPTLiveProvider(MediaStreamsOpenAIProvider[_CallState]):
                 update={
                     "custom_parameters": {
                         **existing_params,
-                        _SESSION_CONFIG_TOKEN_PARAM: session_config_token,
+                        SESSION_CONFIG_TOKEN_PARAM: session_config_token,
                     }
                 }
             )
@@ -304,7 +298,7 @@ class GPTLiveProvider(MediaStreamsOpenAIProvider[_CallState]):
         message = StreamStartMessage(**start)
         conv_id = message.conversation_id
 
-        token = message.custom_parameters.get(_SESSION_CONFIG_TOKEN_PARAM)
+        token = message.custom_parameters.get(SESSION_CONFIG_TOKEN_PARAM)
         if token is not None:
             session_config = self._call_session_configs.pop(token, None)
             if session_config is not None:
@@ -553,9 +547,12 @@ class GPTLiveProvider(MediaStreamsOpenAIProvider[_CallState]):
                     "Error closing model socket", error=str(e), conversation_id=conv_id
                 )
         self._calls.pop(conv_id, None)
+        # Drop any session config that was stashed for this call but never
+        # consumed (_connect_model raised, or the stream stopped before it ran).
+        self._call_session_configs.pop(conv_id, None)
 
-        # Before the end below, so Websocket Disconnected always precedes the
-        # Conversation Ended it triggers.
+        # Before the release below, so Websocket Disconnected always precedes
+        # the Conversation Ended it triggers.
         track_event(
             "Websocket Disconnected",
             self.tac_config.account_sid,
@@ -565,4 +562,4 @@ class GPTLiveProvider(MediaStreamsOpenAIProvider[_CallState]):
             orchestrator_enabled=self.channel.tac.is_orchestrator_enabled(),
         )
 
-        await self.channel._end_conversation(conv_id)
+        await self.channel._release_session(conv_id)

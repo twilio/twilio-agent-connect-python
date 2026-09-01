@@ -11,6 +11,7 @@ from tac.models.outbound import (
     InitiateConversationResult,
     InitiateMessagingConversationOptions,
 )
+from tac.models.session import ConversationSession
 
 
 class WhatsAppChannelConfig(MessagingChannelConfig):
@@ -66,7 +67,7 @@ class WhatsAppChannel(MessagingChannel):
         """Check if the author address is one of the configured WhatsApp numbers."""
         return author_address in self.tac.config.whatsapp_numbers
 
-    def get_agent_address(self, conversation_id: str) -> ParticipantAddress:
+    def get_agent_address(self, session: ConversationSession) -> ParticipantAddress:
         """Get the agent's default participant address for this conversation."""
         if self.tac.config.whatsapp_number is None:
             raise RuntimeError("whatsapp_number is required for WhatsApp channel.")

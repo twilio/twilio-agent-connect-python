@@ -92,6 +92,13 @@ class ConversationRelayProvider(VoiceProvider):
             orchestrator_enabled=self.channel.tac.is_orchestrator_enabled(),
         )
 
+    @property
+    def _conversation_closed_by_orchestrator(self) -> bool:
+        # ConversationRelay asks Conversation Orchestrator to create the
+        # conversation whenever TAC is orchestrated; in relay-only mode there
+        # is no CO conversation and nothing will ever close it for us.
+        return self.channel.tac.is_orchestrator_enabled()
+
     @staticmethod
     def _caller_address(setup_msg: SetupMessage) -> str | None:
         """Return the phone number of the remote caller/callee from the setup message."""
@@ -228,8 +235,9 @@ class ConversationRelayProvider(VoiceProvider):
         )
 
         if payload.call_status == "completed" and not self.channel.tac.is_orchestrator_enabled():
-            if payload.call_sid in self.channel._conversations:
-                await self.channel._end_conversation(payload.call_sid)
+            # Relay-only: conv_id == call_sid. No-ops when the WebSocket
+            # teardown already released the session, which is the usual case.
+            await self.channel._release_session(payload.call_sid)
 
     async def _initialize_conversation(
         self,
@@ -914,12 +922,13 @@ class ConversationRelayProvider(VoiceProvider):
 
     async def _cleanup_connection(self, conv_id: str) -> None:
         """
-        Clean up WebSocket and session resources when connection closes.
+        Clean up WebSocket and session resources when the connection closes.
 
-        In orchestrated mode, the conversation remains tracked in
-        self.channel._conversations until the CONVERSATION_UPDATED/CLOSED webhook
-        arrives from Conversation Orchestrator. In relay-only mode there is no such webhook,
-        so we also end the conversation here.
+        Runs unconditionally — the call is over in every mode once its socket
+        is gone, so nothing local is kept waiting for a Conversation
+        Orchestrator webhook that may land on a different instance.
+        ``_release_session`` fires ``on_call_ended`` here and defers
+        ``on_conversation_ended`` to CO's CLOSED webhook when orchestrated.
 
         Args:
             conv_id: Conversation ID
@@ -935,8 +944,8 @@ class ConversationRelayProvider(VoiceProvider):
             await session_state.cancel_stream_task()
             self.session_manager.remove_session(conv_id)
 
-        # Before the relay-only end below, so Websocket Disconnected always
-        # precedes the Conversation Ended it can trigger.
+        # Before the release below, so Websocket Disconnected always
+        # precedes the Conversation Ended it triggers.
         track_event(
             "Websocket Disconnected",
             self.channel.tac.config.account_sid,
@@ -946,11 +955,7 @@ class ConversationRelayProvider(VoiceProvider):
             orchestrator_enabled=self.channel.tac.is_orchestrator_enabled(),
         )
 
-        if (
-            not self.channel.tac.is_orchestrator_enabled()
-            and conv_id in self.channel._conversations
-        ):
-            await self.channel._end_conversation(conv_id)
+        await self.channel._release_session(conv_id)
 
         self.logger.debug(
             "Cleaned up WebSocket and session resources",

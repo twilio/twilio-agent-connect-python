@@ -134,6 +134,14 @@ class TAC:
         """True if TAC is configured with Conversation Orchestrator (not relay-only mode)."""
         return self.conversation_orchestrator_client is not None
 
+    def _has_conversation_ended_callback(self) -> bool:
+        """Whether an ``on_conversation_ended`` handler is registered.
+
+        Channels check this before rebuilding a session from Conversation
+        Orchestrator: with no handler, there is nothing to hand it to.
+        """
+        return self._conversation_ended_callback is not None
+
     async def retrieve_memory(
         self,
         conversation_context: ConversationSession,
@@ -197,7 +205,11 @@ class TAC:
                     )
                     raise ValueError("No profile_id or author_info available")
 
-            if conversation_context.profile_id and not conversation_context.profile:
+            if (
+                self.config.memory_config.fetch_profile_traits
+                and conversation_context.profile_id
+                and not conversation_context.profile
+            ):
                 try:
                     profile_response = await self.conversation_memory_client.get_profile(
                         profile_id=conversation_context.profile_id,
