@@ -227,6 +227,16 @@ class InitiateVoiceConversationOptionsOpenAIRealtime(InitiateVoiceConversationOp
     )
 
 
+class InitiateVoiceConversationOptionsGPTLive(InitiateVoiceConversationOptions):
+    """Outbound options for ``GPTLiveProvider``, adding a per-call ``session_config``."""
+
+    session_config: dict[str, Any] | None = Field(
+        default=None,
+        description="Used verbatim in place of "
+        "GPTLiveProviderConfig.default_session_config for this call.",
+    )
+
+
 class InitiateVoiceConversationResult(BaseModel):
     """Result of initiating an outbound voice conversation."""
 

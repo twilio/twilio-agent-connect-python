@@ -39,6 +39,9 @@ server = [
 openai-realtime = [
     "websockets>=14,<17",
 ]
+gpt-live = [
+    "websockets>=14,<17",
+]
 
 [dependency-groups]
 dev = [
