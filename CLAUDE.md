@@ -51,16 +51,21 @@ Tests are in `tests/` — one test file per module (e.g., `test_tac.py`, `test_s
 
 - **Channel-based**: Messaging channels (SMS, RCS, WhatsApp, Chat) and Voice channel process Twilio webhooks, manage conversation lifecycle, and trigger `on_message_ready` / `on_conversation_ended` callbacks
 - **Callback responses**: Callbacks return `str` (auto-sent) or `None` (manual `channel.send_response()`)
-- **Memory modes**: Channels support three memory retrieval modes:
+- **Memory modes**:
   - `"never"` (default): No automatic memory retrieval
   - `"always"`: Fetch memory on every message with the user's query string for semantic search
-  - `"once"`: Fetch once with empty query, cache it. Cache invalidated on INACTIVE (when Orchestrator updates memory). Uses `cache_lock` to coordinate concurrent async access
+  - `"once"` (**Voice only**): Fetch once with empty query, cache it on the session. Invalidated on INACTIVE; uses `cache_lock` for concurrent async access. Needs a session outliving one request, which only voice has — messaging channels raise at construction.
+  - `memory_config.fetch_profile_traits=False` drops the `get_profile` call when prompts don't use `build_profile_prompt()`.
 - **Memory fallback**: `TAC.retrieve_memory()` tries Conversation Memory first, gracefully falls back to Conversation Orchestrator's `list_communications()` on any failure
 - **Profile resolution**: Automatic profile lookup by phone/email if `profile_id` not present in webhook
 - **Memory auto-init**: Memory client is always initialized from Conversation Orchestrator configuration's `memory_store_id`
 - **Auth**: All API clients use HTTP Basic Auth (API Key as username, API Token as password)
 - **BaseAPIClient**: All API clients (ConversationClient, MemoryClient, KnowledgeClient) inherit from `BaseAPIClient`, which provides shared HTTP client configuration, authentication, and User-Agent header management following Twilio SDK conventions
-- **Horizontal scaling limitation**: Channels track active conversations in instance-local memory (`self._conversations`). Works perfectly for single-instance deployments. In multi-instance deployments behind a load balancer, webhooks may route to a different instance than the one that handled the connection/message, preventing proper conversation cleanup and causing memory leaks. Recommended solutions: sticky sessions (route by conversation_id) or shared state store (Redis/database). Voice call events (status/AMD/recording) are a second, independently-arriving traffic class with the same constraint — they carry only the `CallSid`, so `VoiceChannel.end_call()` resolves the session by scanning `self._conversations` and finds nothing when the event lands on an instance that never saw the call. The Twilio-side hangup still succeeds; only local session cleanup is missed.
+- **Horizontal scaling**: N replicas behind a load balancer, **no shared datastore**. See `docs/deployment.md`.
+  - **Messaging is stateless** — `MessagingChannel` has no session store; each webhook derives a `ConversationSession` from the payload, config, and one `list_participants` call it needs anyway. The idempotency LRU is per-process, so a retry landing elsewhere is reprocessed: `on_message_ready` handlers must be idempotent.
+  - **Voice is instance-local**, correctly: a WebSocket pins a call to one process. Safe because teardown is guaranteed — `_release_session()` runs on every disconnect path and fires `on_call_ended` (invariant: `assert_no_residual_state` in `tests/voice_invariants.py`). `VoiceChannel.aclose()` drains at shutdown, wired by `TACFastAPIServer`.
+  - **Out-of-band call webhooks** (status/AMD/recording, `<Connect action>`) carry only a `CallSid`. Set `TACConfig.instance_public_domain` and TAC mints every callback URL against it; otherwise route by `CallSid` at the balancer.
+  - **`on_conversation_ended`** fires on whichever replica gets CO's CLOSED webhook — both families rebuild the session from CO. `on_call_ended` is the only hook carrying live in-memory state (transcript, metadata).
 - **ConversationRelay-only mode**: When `conversation_configuration_id` is omitted from TACConfig, TAC runs with just the Voice channel (messaging channels raise at construction), `TAC.retrieve_memory()` returns an empty `TACMemoryResponse`, and the ConversationRelay callback handles session cleanup. Use `tac.is_orchestrator_enabled()` to check mode at runtime.
 
 ## OpenAI Adapter

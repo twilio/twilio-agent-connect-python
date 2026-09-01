@@ -26,6 +26,13 @@ class TACServerConfig(BaseModel):
         description="Path for Conversation Intelligence webhook endpoint. "
         "Set to enable CI webhook route (e.g., '/ci-webhook').",
     )
+    shutdown_grace_period: float = Field(
+        default=30.0,
+        ge=0,
+        description="Seconds to wait on shutdown for live voice calls to end before "
+        "force-releasing their sessions (see `VoiceChannel.aclose`). Keep it below your "
+        "orchestrator's termination grace period, or the process is killed mid-drain.",
+    )
 
     @classmethod
     def from_env(cls) -> "TACServerConfig":

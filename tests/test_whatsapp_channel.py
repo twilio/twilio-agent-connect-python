@@ -160,8 +160,7 @@ async def test_conversation_created_webhook(whatsapp_channel: WhatsAppChannel) -
     # CONVERSATION_CREATED events are ignored (no action needed)
     await whatsapp_channel.process_webhook(webhook)
 
-    # Conversations are not started until COMMUNICATION_CREATED
-    assert "conv_123" not in whatsapp_channel._conversations
+    # Nothing to assert on locally — the channel stores no sessions.
 
 
 @pytest.mark.asyncio
@@ -340,8 +339,6 @@ async def test_conversation_updated_closed(whatsapp_channel: WhatsAppChannel) ->
         mock_reconcile.return_value = (mock_agent, mock_customer)
         await whatsapp_channel.process_webhook(webhook)
 
-    assert conversation_id in whatsapp_channel._conversations
-
     # Mock the conversation ended callback
     callback_called = False
     callback_context = None
@@ -359,10 +356,15 @@ async def test_conversation_updated_closed(whatsapp_channel: WhatsAppChannel) ->
         timestamp="2025-01-15T10:20:30Z",
     )
 
-    await whatsapp_channel.process_webhook(close_webhook)
+    with patch.object(
+        whatsapp_channel.tac.conversation_orchestrator_client,
+        "list_participants",
+        new=AsyncMock(return_value=[mock_agent, mock_customer]),
+    ):
+        await whatsapp_channel.process_webhook(close_webhook)
 
-    # Verify conversation was ended
-    assert conversation_id not in whatsapp_channel._conversations
+    # The session handed to the callback is rebuilt from Conversation
+    # Orchestrator, so it fires on any instance — not just this one.
     assert callback_called
     assert callback_context.conversation_id == conversation_id
 

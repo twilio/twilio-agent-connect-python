@@ -18,6 +18,7 @@ from tac.models.voice import (
     SetupMessage,
     VoiceTwiMLOptionsConversationRelay,
 )
+from tests.voice_invariants import assert_no_residual_state
 
 
 def get_test_config() -> dict:
@@ -314,28 +315,20 @@ class TestVoiceChannel:
         await channel.send_response("CALL123", "Hello there")
 
     @pytest.mark.asyncio
-    async def test_end_conversation_cleanup(self) -> None:
-        """Test ending conversation cleans up WebSocket but keeps conversation tracked."""
+    async def test_cleanup_connection_releases_everything(self) -> None:
+        """Disconnect frees every local resource — nothing waits on a webhook."""
         tac = TAC(get_test_config())
         channel = VoiceChannel(tac)
 
-        # Start conversation directly
         channel._start_conversation("CALL123", "profile_test")
+        channel._provider._websocket_manager.add_websocket("CALL123", MagicMock())
 
-        # Add a mock websocket to the manager
-        mock_websocket = MagicMock()
-        channel._provider._websocket_manager.add_websocket("CALL123", mock_websocket)
-
-        # Verify websocket is registered
         assert channel._provider._websocket_manager.has_websocket("CALL123")
         assert "CALL123" in channel._conversations
 
-        # Clean up connection (WebSocket only)
         await channel._provider._cleanup_connection("CALL123")
 
-        # Verify WebSocket cleanup but conversation still tracked
-        assert not channel._provider._websocket_manager.has_websocket("CALL123")
-        assert "CALL123" in channel._conversations
+        assert_no_residual_state(channel, "CALL123")
 
     @pytest.mark.asyncio
     async def test_process_webhook_conversation_closed(self) -> None:
@@ -350,7 +343,11 @@ class TestVoiceChannel:
         # Process CONVERSATION_UPDATED with CLOSED status
         webhook_data = {
             "eventType": "CONVERSATION_UPDATED",
-            "data": {"id": "CONV123", "status": "CLOSED"},
+            "data": {
+                "id": "CONV123",
+                "status": "CLOSED",
+                "configurationId": "conv_configuration_test123",
+            },
         }
         await channel.process_webhook(webhook_data)
 
@@ -378,7 +375,11 @@ class TestVoiceChannel:
         # Process CONVERSATION_UPDATED with INACTIVE status
         webhook_data = {
             "eventType": "CONVERSATION_UPDATED",
-            "data": {"id": "CONV123", "status": "INACTIVE"},
+            "data": {
+                "id": "CONV123",
+                "status": "INACTIVE",
+                "configurationId": "conv_configuration_test123",
+            },
         }
         await channel.process_webhook(webhook_data)
 
@@ -398,7 +399,11 @@ class TestVoiceChannel:
         # Process CONVERSATION_UPDATED for unknown conversation
         webhook_data = {
             "eventType": "CONVERSATION_UPDATED",
-            "data": {"id": "CONV_UNKNOWN", "status": "CLOSED"},
+            "data": {
+                "id": "CONV_UNKNOWN",
+                "status": "CLOSED",
+                "configurationId": "conv_configuration_test123",
+            },
         }
         await channel.process_webhook(webhook_data)
 
@@ -778,28 +783,24 @@ class TestVoiceChannel:
         assert len(channel._conversations) == 3
         assert len(channel._provider._websocket_manager) == 3
 
-        # Clean up CALL_B WebSocket only
+        # Clean up CALL_B only
         await channel._provider._cleanup_connection("CALL_B")
 
-        # Verify CALL_B WebSocket is cleaned up but conversation still tracked
-        assert not channel._provider._websocket_manager.has_websocket("CALL_B")
-        assert "CALL_B" in channel._conversations
-        assert len(channel._conversations) == 3
+        assert_no_residual_state(channel, "CALL_B")
+        assert len(channel._conversations) == 2
         assert len(channel._provider._websocket_manager) == 2
 
-        # Verify CALL_A and CALL_C are still active
+        # Verify CALL_A and CALL_C are untouched
         assert "CALL_A" in channel._conversations
         assert "CALL_C" in channel._conversations
         assert channel._provider._websocket_manager.has_websocket("CALL_A")
         assert channel._provider._websocket_manager.has_websocket("CALL_C")
 
-        # Clean up remaining WebSockets
         await channel._provider._cleanup_connection("CALL_A")
         await channel._provider._cleanup_connection("CALL_C")
 
-        # Verify WebSockets cleaned up but conversations still tracked
         assert len(channel._provider._websocket_manager) == 0
-        assert len(channel._conversations) == 3
+        assert len(channel._conversations) == 0
 
     @pytest.mark.asyncio
     async def test_websocket_manager_get_all_conversation_ids(self) -> None:
@@ -980,29 +981,51 @@ class TestVoiceChannel:
 
         await channel._provider._cleanup_connection("CALL_CB1")
 
-        # Callback should NOT be called (conversation still tracked for webhook)
+        # In orchestrated mode the *conversation* isn't over yet — Conversation
+        # Orchestrator's CLOSED webhook owns that hook — but the call is, so
+        # local state is gone.
         assert len(captured) == 0
-        # Conversation should still be tracked
-        assert "CALL_CB1" in channel._conversations
-        # WebSocket should be removed
-        assert not channel._provider._websocket_manager.has_websocket("CALL_CB1")
+        assert_no_residual_state(channel, "CALL_CB1")
 
     @pytest.mark.asyncio
-    async def test_cleanup_connection_removes_websocket_only(self) -> None:
-        """_cleanup_connection removes WebSocket but keeps conversation tracked."""
+    async def test_call_ended_fires_with_the_live_session_on_cleanup(self) -> None:
+        """on_call_ended fires at teardown in orchestrated mode, with the session."""
         tac = TAC(get_test_config())
         channel = VoiceChannel(tac)
+        captured: list[ConversationSession] = []
 
-        channel._start_conversation("CALL_CB2", "prof_cb2")
-        mock_ws = MagicMock()
-        channel._provider._websocket_manager.add_websocket("CALL_CB2", mock_ws)
+        async def on_call_ended(session: ConversationSession) -> None:
+            captured.append(session)
+
+        channel.on_call_ended(on_call_ended)
+
+        session = channel._start_conversation("CALL_CB2", "prof_cb2")
+        session.call_sid = "CA_CB2"
+        session.metadata["transcript"] = [{"role": "user", "text": "hi"}]
+        channel._provider._websocket_manager.add_websocket("CALL_CB2", MagicMock())
 
         await channel._provider._cleanup_connection("CALL_CB2")
 
-        # Conversation still tracked (waiting for webhook)
-        assert "CALL_CB2" in channel._conversations
-        # WebSocket removed
-        assert not channel._provider._websocket_manager.has_websocket("CALL_CB2")
+        assert len(captured) == 1
+        assert captured[0] is session
+        assert captured[0].call_sid == "CA_CB2"
+        assert captured[0].metadata["transcript"] == [{"role": "user", "text": "hi"}]
+        assert_no_residual_state(channel, "CALL_CB2")
+
+    @pytest.mark.asyncio
+    async def test_call_ended_handler_error_does_not_block_teardown(self) -> None:
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+
+        async def boom(session: ConversationSession) -> None:
+            raise RuntimeError("handler exploded")
+
+        channel.on_call_ended(boom)
+        channel._start_conversation("CALL_BOOM", None)
+
+        await channel._provider._cleanup_connection("CALL_BOOM")
+
+        assert_no_residual_state(channel, "CALL_BOOM")
 
     @pytest.mark.asyncio
     async def test_webhook_triggers_conversation_ended_callback(self) -> None:
@@ -1021,7 +1044,11 @@ class TestVoiceChannel:
         # Process webhook with CLOSED status
         webhook_data = {
             "eventType": "CONVERSATION_UPDATED",
-            "data": {"id": "CALL_ASYNC1", "status": "CLOSED"},
+            "data": {
+                "id": "CALL_ASYNC1",
+                "status": "CLOSED",
+                "configurationId": "conv_configuration_test123",
+            },
         }
         await channel.process_webhook(webhook_data)
 
@@ -1043,12 +1070,10 @@ class TestVoiceChannel:
         channel._provider._websocket_manager.add_websocket("CALL_NOCB", mock_ws)
 
         await channel._provider._cleanup_connection("CALL_NOCB")
-        # Second cleanup should be a no-op (websocket already removed)
+        # Second cleanup should be a no-op (everything already released)
         await channel._provider._cleanup_connection("CALL_NOCB")
 
-        # Conversation still tracked (only webhook removes it)
-        assert "CALL_NOCB" in channel._conversations
-        assert not channel._provider._websocket_manager.has_websocket("CALL_NOCB")
+        assert_no_residual_state(channel, "CALL_NOCB")
 
     @pytest.mark.asyncio
     async def test_task_cancellation_with_unified_workflow(self) -> None:
@@ -2207,11 +2232,8 @@ class TestConversationInitializationFlow:
         the caller's first utterance instead of adding to it.
 
         If the call disconnects before any prompt arrives to claim the
-        result, the websocket the lookup already registered (as a side
-        effect of `_initialize_conversation`) must still be cleaned up, not
-        leaked. (The conversation itself intentionally stays in
-        `_conversations` until CO's CLOSED webhook, same as any other
-        orchestrator-mode call — see `_cleanup_connection`.)
+        result, everything the lookup already registered (as a side effect of
+        `_initialize_conversation`) must still be cleaned up, not leaked.
         """
         from tac.channels.websocket_protocol import WebSocketDisconnectError
         from tac.models.conversation import ParticipantAddress, ParticipantResponse
@@ -2268,12 +2290,9 @@ class TestConversationInitializationFlow:
         )
         co_client.list_participants.assert_called_once_with("CH_setup_test")
 
-        # The websocket registration is cleaned up (not leaked) even though
-        # no prompt ever arrived to claim conv_id itself.
-        assert not channel._provider._websocket_manager.has_websocket("CH_setup_test")
-        # The conversation entry legitimately stays until CO's CLOSED
-        # webhook — same as any other orchestrator-mode call.
-        assert list(channel._conversations.keys()) == ["CH_setup_test"]
+        # Everything the lookup registered is cleaned up (not leaked) even
+        # though no prompt ever arrived to claim conv_id itself.
+        assert_no_residual_state(channel, "CH_setup_test")
 
     @pytest.mark.asyncio
     async def test_subsequent_prompts_reuse_conversation(self) -> None:
@@ -2705,13 +2724,13 @@ class TestEndCall:
         # Simulate an active orchestrator-mode session (conv id != call sid).
         session = channel._start_conversation("conv_abc")
         session.call_sid = "CA1"
-        channel._end_conversation = AsyncMock()  # type: ignore[method-assign]
+        channel._release_session = AsyncMock()  # type: ignore[method-assign]
 
         mock_client = MagicMock()
         with patch.object(channel, "_get_twilio_client", return_value=mock_client):
             await channel.end_call("CA1")
 
-        channel._end_conversation.assert_awaited_once_with("conv_abc")
+        channel._release_session.assert_awaited_once_with("conv_abc")
 
     @pytest.mark.asyncio
     async def test_hangup_failure_returns_false_without_raising(self) -> None:
@@ -2730,28 +2749,28 @@ class TestEndCall:
         channel = VoiceChannel(tac)
         session = channel._start_conversation("conv_abc")
         session.call_sid = "CA1"
-        channel._end_conversation = AsyncMock()  # type: ignore[method-assign]
+        channel._release_session = AsyncMock()  # type: ignore[method-assign]
 
         mock_client = MagicMock()
         mock_client.calls("CA1").update.side_effect = RuntimeError("Twilio 400")
         with patch.object(channel, "_get_twilio_client", return_value=mock_client):
             assert await channel.end_call("CA1") is False
 
-        channel._end_conversation.assert_awaited_once_with("conv_abc")
+        channel._release_session.assert_awaited_once_with("conv_abc")
 
     @pytest.mark.asyncio
     async def test_hangup_works_without_tracked_session(self) -> None:
         """A machine may never prompt (no session); the hangup must still work."""
         tac = TAC(get_test_config())
         channel = VoiceChannel(tac)
-        channel._end_conversation = AsyncMock()  # type: ignore[method-assign]
+        channel._release_session = AsyncMock()  # type: ignore[method-assign]
 
         mock_client = MagicMock()
         with patch.object(channel, "_get_twilio_client", return_value=mock_client):
             assert await channel.end_call("CA_unknown") is True
 
         mock_client.calls().update.assert_called_with(status="completed")
-        channel._end_conversation.assert_not_awaited()
+        channel._release_session.assert_not_awaited()
 
 
 class TestGetConversationSessionByCallSid:
