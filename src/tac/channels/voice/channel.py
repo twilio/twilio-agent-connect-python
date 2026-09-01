@@ -39,8 +39,7 @@ class VoiceChannel(BaseChannel):
     Owns the Twilio Calls API lifecycle and conversation bookkeeping
     (inherited from BaseChannel). The real-time media transport itself —
     TwiML generation, WebSocket protocol handling, outbound call
-    initiation — is delegated to a pluggable ``VoiceProvider``
-    (``ConversationRelayProvider`` is the only implementation today).
+    initiation — is delegated to a pluggable ``VoiceProvider``.
 
     This channel is framework-agnostic and accepts any WebSocket implementation
     satisfying WebSocketProtocol. For a batteries-included FastAPI server, use

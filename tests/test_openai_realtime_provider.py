@@ -428,6 +428,57 @@ class TestToolCalls:
         assert "error" in payload
         assert {"type": "response.create"} in model_ws.sent
 
+    @pytest.mark.asyncio
+    async def test_missing_call_id_is_dropped_without_sending_anything(self) -> None:
+        """No call_id means we can't tell the model which pending function
+        call this answers — sending one with call_id=None would likely be
+        rejected and leaves the real pending call still hanging."""
+
+        @function_tool()
+        def add(a: int, b: int) -> int:
+            """Add two numbers."""
+            return a + b
+
+        channel = make_channel(tools=[add])
+        provider = channel._provider
+
+        model_ws = FakeModelWebSocket()
+        provider._calls["CA10"] = _CallState(model_ws=model_ws)
+
+        await provider._handle_function_call(
+            "CA10", {"name": "add", "arguments": json.dumps({"a": 2, "b": 3})}
+        )
+
+        assert model_ws.sent == []
+
+    @pytest.mark.asyncio
+    async def test_missing_name_sends_structured_error_without_running_a_tool(self) -> None:
+        ran = False
+
+        @function_tool()
+        def add(a: int, b: int) -> int:
+            """Add two numbers."""
+            nonlocal ran
+            ran = True
+            return a + b
+
+        channel = make_channel(tools=[add])
+        provider = channel._provider
+
+        model_ws = FakeModelWebSocket()
+        provider._calls["CA11"] = _CallState(model_ws=model_ws)
+
+        await provider._handle_function_call(
+            "CA11", {"call_id": "call_1", "arguments": json.dumps({"a": 2, "b": 3})}
+        )
+
+        assert ran is False
+        outputs = [m for m in model_ws.sent if m["type"] == "conversation.item.create"]
+        assert len(outputs) == 1
+        assert outputs[0]["item"]["call_id"] == "call_1"
+        payload = json.loads(outputs[0]["item"]["output"])
+        assert "error" in payload
+
 
 class TestConfigValidation:
     """OpenAIRealtimeProviderConfig fails fast on unusable combinations."""
