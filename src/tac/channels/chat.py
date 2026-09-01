@@ -63,9 +63,10 @@ class ChatChannel(MessagingChannel):
     def is_default_agent_address(self, author_address: str) -> bool:
         return author_address == self.agent_address
 
-    def get_agent_address(self, conversation_id: str) -> ParticipantAddress:
-        session = self._conversations.get(conversation_id)
-        channel_id = session.metadata.get("channel_id") if session else None
+    def get_agent_address(self, session: ConversationSession) -> ParticipantAddress:
+        # channelId is per-conversation, so it comes off the session rather
+        # than config — the inbound webhook puts it there.
+        channel_id = session.metadata.get("channel_id")
         return ParticipantAddress(
             channel="CHAT",
             address=self.agent_address,

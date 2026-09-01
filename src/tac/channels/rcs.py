@@ -11,6 +11,7 @@ from tac.models.outbound import (
     InitiateConversationResult,
     InitiateMessagingConversationOptions,
 )
+from tac.models.session import ConversationSession
 
 
 class RCSChannelConfig(MessagingChannelConfig):
@@ -67,7 +68,7 @@ class RCSChannel(MessagingChannel):
             raise RuntimeError("rcs_sender_id is required for RCS channel.")
         return author_address == self.tac.config.rcs_sender_id
 
-    def get_agent_address(self, conversation_id: str) -> ParticipantAddress:
+    def get_agent_address(self, session: ConversationSession) -> ParticipantAddress:
         """Get the agent's participant address for this conversation."""
         if not self.tac.config.rcs_sender_id:
             raise RuntimeError("rcs_sender_id is required for RCS channel.")

@@ -11,6 +11,7 @@ from tac.models.outbound import (
     InitiateConversationResult,
     InitiateMessagingConversationOptions,
 )
+from tac.models.session import ConversationSession
 
 
 class SMSChannelConfig(MessagingChannelConfig):
@@ -62,7 +63,7 @@ class SMSChannel(MessagingChannel):
     def is_default_agent_address(self, author_address: str) -> bool:
         return author_address == self.tac.config.phone_number
 
-    def get_agent_address(self, conversation_id: str) -> ParticipantAddress:
+    def get_agent_address(self, session: ConversationSession) -> ParticipantAddress:
         return ParticipantAddress(channel="SMS", address=self.tac.config.phone_number)
 
     async def initiate_outbound_conversation(

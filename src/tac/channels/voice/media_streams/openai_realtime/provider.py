@@ -35,6 +35,7 @@ from tac.models.session import ConversationSession
 from tac.models.stream import StreamStartMessage
 from tac.models.voice import TwiMLRequest, VoiceTwiMLOptions, VoiceTwiMLOptionsMediaStreams
 from tac.tools import TACTool
+from tac.utils.expiring_dict import ExpiringDict
 from tac.utils.redaction import mask_phone, redact_twiml_parameters
 
 if TYPE_CHECKING:
@@ -57,11 +58,11 @@ TWILIO_MEDIA_STREAM_AUDIO_FORMAT: dict[str, Any] = {"type": "audio/pcmu"}
 #: this constant alone, regardless of session_config.
 _PCMU_BYTES_PER_MS = 8
 
-#: Reserved <Stream> custom_parameters key used to correlate an outbound
-#: call's session_config override to its WebSocket start event. calls.create()
-#: returning call.sid doesn't happen-before Twilio connecting the stream, so
-#: call.sid can't be the correlation key — this token, embedded in the TwiML
-#: before the call is placed, can.
+#: Reserved <Stream> custom_parameters key correlating a call's session_config
+#: override to its WebSocket start event. CallSid can't be the key: outbound,
+#: calls.create() returning it doesn't happen-before Twilio connecting the
+#: stream; inbound, the TwiML request and the stream can reach different
+#: replicas, so the config has to travel on the TwiML.
 _SESSION_CONFIG_TOKEN_PARAM = "_tac_session_config_token"
 
 
@@ -87,8 +88,10 @@ class OpenAIRealtimeProvider(VoiceProvider):
         self._tools_by_name: dict[str, TACTool] = {tool.name: tool for tool in config.tools}
         self._calls: dict[str, _CallState] = {}
         self._twiml = TwiMLBuilderMediaStreams(tac_config, config)
-        # Keyed by call_sid; set in handle_incoming_call, popped in _connect_model.
-        self._call_session_configs: dict[str, dict[str, Any]] = {}
+        # Per-call session config, minted by one Twilio request and consumed
+        # when the call's WebSocket connects. Bounded and expiring so a call
+        # that never connects doesn't leave its entry here forever.
+        self._call_session_configs: ExpiringDict[dict[str, Any]] = ExpiringDict()
 
     @property
     def channel_name(self) -> str:
@@ -98,9 +101,9 @@ class OpenAIRealtimeProvider(VoiceProvider):
         """Return the transcript captured so far for an in-progress call.
 
         Lives on ``ConversationSession.metadata["transcript"]``, so once the
-        call ends (and the session is popped from ``channel._conversations``)
-        it's no longer reachable here — read it from the session an
-        ``on_conversation_ended`` handler receives instead.
+        call ends (and the session is released at WebSocket teardown) it's no
+        longer reachable here — read it from the session a
+        ``VoiceChannel.on_call_ended`` handler receives instead.
         """
         session = self.channel._conversations.get(conversation_id)
         return list(session.metadata.get("transcript", [])) if session else []
@@ -148,14 +151,22 @@ class OpenAIRealtimeProvider(VoiceProvider):
                 )
             customized = result
 
-        if (
-            self.config.on_inbound_call_session_config is not None
-            and twiml_request is not None
-            and twiml_request.call_sid is not None
-        ):
+        session_config: dict[str, Any] | None = None
+        if self.config.on_inbound_call_session_config is not None and twiml_request is not None:
             session_config = await self.config.on_inbound_call_session_config(twiml_request)
-            if session_config is not None:
-                self._call_session_configs[twiml_request.call_sid] = session_config
+
+        if session_config is not None:
+            # Ride the config out on the TwiML under a token, as outbound
+            # does, so it travels with the call rather than being stranded on
+            # whichever replica served this HTTP request.
+            token = uuid.uuid4().hex
+            existing_params = (customized.custom_parameters or {}) if customized else {}
+            customized = (customized or VoiceTwiMLOptionsMediaStreams()).model_copy(
+                update={
+                    "custom_parameters": {**existing_params, _SESSION_CONFIG_TOKEN_PARAM: token}
+                }
+            )
+            self._call_session_configs[token] = session_config
 
         return self._twiml.build(
             "handle_incoming_call", host=host_twiml_options, per_call=customized
@@ -654,7 +665,10 @@ class OpenAIRealtimeProvider(VoiceProvider):
                 await call.model_ws.close()
             except Exception as e:
                 self.logger.debug(f"Error closing model socket: {e}", conversation_id=conv_id)
-        await self.channel._end_conversation(conv_id)
+        # Drop any session config that was stashed for this call but never
+        # consumed (_connect_model raised, or the stream stopped before it ran).
+        self._call_session_configs.pop(conv_id, None)
+        await self.channel._release_session(conv_id)
 
     async def send_response(
         self,

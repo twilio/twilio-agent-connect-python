@@ -469,17 +469,29 @@ class TestInboundCallSessionConfig:
         channel = make_channel(on_inbound_call_session_config=customizer)
         provider = channel._provider
 
-        await provider.handle_incoming_call(
+        twiml = await provider.handle_incoming_call(
             twiml_request=TwiMLRequest(call_sid="CA_MX", caller_country="MX")
         )
-        assert provider._call_session_configs["CA_MX"] == {
+        # The config rides out on the TwiML under a token, so it reaches
+        # whichever replica Twilio opens the stream to.
+        token = _extract_custom_parameter(twiml, _SESSION_CONFIG_TOKEN_PARAM)
+        assert provider._call_session_configs[token] == {
             "model": "gpt-realtime-mx",
             "instructions": "Habla en español.",
             "audio": _VALID_AUDIO,
         }
 
         twilio_ws = FakeTwilioWebSocket(
-            events=[{"event": "start", "start": {"callSid": "CA_MX", "streamSid": "MZ_MX"}}]
+            events=[
+                {
+                    "event": "start",
+                    "start": {
+                        "callSid": "CA_MX",
+                        "streamSid": "MZ_MX",
+                        "customParameters": {_SESSION_CONFIG_TOKEN_PARAM: token},
+                    },
+                }
+            ]
         )
         model_ws = FakeModelWebSocket(events=[], stay_open=False)
 
@@ -496,6 +508,7 @@ class TestInboundCallSessionConfig:
             "instructions": "Habla en español.",
             "audio": _VALID_AUDIO,
         }
+        assert token not in provider._call_session_configs
         assert "CA_MX" not in provider._call_session_configs
 
     @pytest.mark.asyncio
@@ -506,10 +519,11 @@ class TestInboundCallSessionConfig:
         channel = make_channel(on_inbound_call_session_config=customizer)
         provider = channel._provider
 
-        await provider.handle_incoming_call(
+        twiml = await provider.handle_incoming_call(
             twiml_request=TwiMLRequest(call_sid="CA_US", caller_country="US")
         )
-        assert "CA_US" not in provider._call_session_configs
+        assert _SESSION_CONFIG_TOKEN_PARAM not in twiml
+        assert len(provider._call_session_configs) == 0
 
         twilio_ws = FakeTwilioWebSocket(
             events=[{"event": "start", "start": {"callSid": "CA_US", "streamSid": "MZ_US"}}]
@@ -526,16 +540,30 @@ class TestInboundCallSessionConfig:
         assert sent_session["session"] == {"model": "gpt-realtime-test", "audio": _VALID_AUDIO}
 
     @pytest.mark.asyncio
-    async def test_no_call_sid_skips_customizer(self) -> None:
-        customizer = AsyncMock(return_value={"model": "should-not-be-used"})
+    async def test_customizer_runs_without_a_call_sid(self) -> None:
+        """Correlation is by token now, so a CallSid isn't a prerequisite."""
+        customizer = AsyncMock(return_value={"model": "gpt-realtime-mx", "audio": _VALID_AUDIO})
 
         channel = make_channel(on_inbound_call_session_config=customizer)
         provider = channel._provider
 
-        await provider.handle_incoming_call(twiml_request=TwiMLRequest(caller_country="MX"))
+        twiml = await provider.handle_incoming_call(twiml_request=TwiMLRequest(caller_country="MX"))
 
-        customizer.assert_not_called()
-        assert provider._call_session_configs == {}
+        customizer.assert_awaited_once()
+        token = _extract_custom_parameter(twiml, _SESSION_CONFIG_TOKEN_PARAM)
+        assert provider._call_session_configs[token]["model"] == "gpt-realtime-mx"
+
+    @pytest.mark.asyncio
+    async def test_no_customizer_registered_adds_no_token(self) -> None:
+        channel = make_channel()
+        provider = channel._provider
+
+        twiml = await provider.handle_incoming_call(
+            twiml_request=TwiMLRequest(call_sid="CA_US", caller_country="US")
+        )
+
+        assert _SESSION_CONFIG_TOKEN_PARAM not in twiml
+        assert len(provider._call_session_configs) == 0
 
     @pytest.mark.asyncio
     async def test_missing_model_field_raises_at_connect_time(self) -> None:
@@ -640,7 +668,7 @@ class TestOutboundCallSessionConfig:
             "model": "gpt-realtime-outbound4",
             "audio": _VALID_AUDIO,
         }
-        assert provider._call_session_configs == {}
+        assert len(provider._call_session_configs) == 0
 
     @pytest.mark.asyncio
     async def test_session_config_token_cleaned_up_if_call_creation_fails(self) -> None:
@@ -659,7 +687,7 @@ class TestOutboundCallSessionConfig:
                     )
                 )
 
-        assert provider._call_session_configs == {}
+        assert len(provider._call_session_configs) == 0
 
     @pytest.mark.asyncio
     async def test_session_config_token_not_leaked_if_twiml_build_fails(self) -> None:
@@ -682,7 +710,7 @@ class TestOutboundCallSessionConfig:
                 )
             )
 
-        assert provider._call_session_configs == {}
+        assert len(provider._call_session_configs) == 0
 
     @pytest.mark.asyncio
     async def test_plain_options_type_ignored_falls_back_to_default(self) -> None:
@@ -698,7 +726,7 @@ class TestOutboundCallSessionConfig:
                 InitiateVoiceConversationOptions(to="+15551234567")
             )
 
-        assert provider._call_session_configs == {}
+        assert len(provider._call_session_configs) == 0
 
     @pytest.mark.asyncio
     async def test_outbound_only_config_with_no_default_connects_via_per_call_override(
