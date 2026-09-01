@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 from tac._deprecation import resolve_deprecated_alias
 from tac.channels.voice.channel import (
     AmdHandler,
+    CallEndedHandler,
     CallStatusHandler,
     InboundCallTwiMLHandler,
     RecordingHandler,
@@ -36,6 +37,7 @@ from tac.models.voice import (
 __all__ = [
     "AmdEvent",
     "AmdHandler",
+    "CallEndedHandler",
     "CallOptions",
     "CallStatusEvent",
     "CallStatusHandler",

@@ -42,6 +42,18 @@ class VoiceProvider:
         """
         return "VOICE"
 
+    @property
+    def _conversation_closed_by_orchestrator(self) -> bool:
+        """Whether a Conversation Orchestrator ``CLOSED`` webhook will end this
+        provider's conversations.
+
+        Decides who owns ``on_conversation_ended``. ``False`` (the default):
+        no CO conversation exists, so ``VoiceChannel`` fires it itself at
+        teardown. ``True``: only ``on_call_ended`` fires at teardown and the
+        CLOSED webhook — which may reach another instance — does the rest.
+        """
+        return False
+
     async def handle_incoming_call(
         self,
         twiml_request: TwiMLRequest | None = None,

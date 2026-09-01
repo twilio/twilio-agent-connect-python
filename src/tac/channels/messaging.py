@@ -2,7 +2,7 @@
 
 from abc import abstractmethod
 from collections.abc import AsyncGenerator
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 from pydantic import BaseModel, Field
@@ -27,6 +27,13 @@ from tac.models.outbound import InitiateConversationResult, InitiateMessagingCon
 from tac.models.session import AuthorInfo, ConversationSession
 from tac.utils.redaction import mask_address
 
+MessagingMemoryMode = Literal["never", "always"]
+"""Memory modes a messaging channel supports.
+
+Narrower than :data:`~tac.models.memory.MemoryMode`: ``"once"`` caches a recall
+on a long-lived session, which only voice has.
+"""
+
 
 class MessagingChannelConfig(BaseModel):
     """Base configuration for messaging channels (SMS, RCS, WhatsApp, Chat).
@@ -35,13 +42,13 @@ class MessagingChannelConfig(BaseModel):
         dedup_capacity: Maximum number of idempotency tokens to track.
             Default 10000 is suitable for most applications.
             Uses Twilio's i-twilio-idempotency-token header for deduplication.
-        memory_mode: Memory retrieval mode. Default is "never".
-            - "always": Retrieve memory for every message with the query string
-            - "once": Retrieve memory once at conversation start with empty query and cache it.
-                     Cache is invalidated when conversation becomes INACTIVE and is fetched
-                     again the next time a message triggers memory retrieval after the
-                     conversation becomes ACTIVE.
-            - "never": Skip memory retrieval
+        memory_mode: Memory retrieval mode. Default is `"never"`.
+
+            - `"always"`: Retrieve memory for every message with the query string
+            - `"never"`: Skip memory retrieval
+
+            `"once"` is **not** available on messaging channels — see
+            `MessagingMemoryMode`.
     """
 
     dedup_capacity: int = Field(
@@ -49,7 +56,7 @@ class MessagingChannelConfig(BaseModel):
         gt=0,
         description="Maximum number of idempotency tokens to track for deduplication",
     )
-    memory_mode: MemoryMode = Field(
+    memory_mode: MessagingMemoryMode = Field(
         default="never",
         description="Memory retrieval mode for this channel",
     )
@@ -62,17 +69,24 @@ class MessagingChannel(BaseChannel):
     Conversation Orchestrator webhooks with COMMUNICATION_CREATED
     and CONVERSATION_UPDATED event types.
 
-    Subclasses must implement:
-    - is_default_agent_address(): Fast-path check for the channel's default agent address
-    - get_agent_address(conversation_id): Return the agent's ParticipantAddress for a conversation
-    - get_channel_name(): Return channel name ("SMS", "RCS", "WHATSAPP", "CHAT")
+    **Stateless by construction.** No conversation state is kept between
+    webhooks: each request derives its own `ConversationSession` from the
+    payload, config, and one `list_participants` call it needs anyway. So any
+    replica can serve any webhook — no sticky sessions, no shared datastore.
 
-    send_response() is provided here as a shared implementation. Subclasses may
-    override _build_channel_settings() to customize how ActionChannelSettings
-    is built for the outbound send (e.g. chat requires channel_id).
+    Subclasses must implement:
+
+    - `is_default_agent_address()`: Fast-path check for the channel's default agent address
+    - `get_agent_address(session)`: Return the agent's `ParticipantAddress` for a session
+    - `get_channel_name()`: Return channel name (`"SMS"`, `"RCS"`, `"WHATSAPP"`, `"CHAT"`)
+
+    `send_response()` is provided here as a shared implementation. Subclasses may
+    override `_build_channel_settings()` to customize how `ActionChannelSettings`
+    is built for the outbound send (e.g. chat requires `channel_id`).
 
     Subclass class attributes:
-    - reconcile_customer_type: If True, reconciliation will also promote a
+
+    - `reconcile_customer_type`: If True, reconciliation will also promote a
       channel-matching UNKNOWN participant (not owning the agent address) to
       CUSTOMER. Set False for channels where the customer is identified
       author-driven (e.g. chat).
@@ -90,6 +104,12 @@ class MessagingChannel(BaseChannel):
             raise ValueError(
                 f"{type(self).__name__} requires Conversation Orchestrator to be configured. "
                 "Set `conversation_configuration_id` on TACConfig to enable messaging channels."
+            )
+        if memory_mode == "once":
+            raise ValueError(
+                f'{type(self).__name__} does not support memory_mode="once" — it caches a '
+                "recall on a long-lived session, and messaging channels hold none between "
+                'webhooks. Use "always". ("once" is still available on the Voice channel.)'
             )
         self.conversation_orchestrator_client: ConversationClient = (
             tac.conversation_orchestrator_client
@@ -111,52 +131,60 @@ class MessagingChannel(BaseChannel):
         """
         pass
 
-    async def _is_own_message(
+    def _is_own_message(
         self,
-        author_address: str,
-        conversation_id: str,
         author_participant_id: str | None,
+        participants: list[ParticipantResponse],
+        conversation_id: str,
     ) -> bool:
-        """Check if a message is from the bot itself (2-tier).
+        """Whether the author is TAC, judged from an already-fetched list.
 
-        1. Default agent address (stateless, no API call)
-        2. API fallback via listParticipants (cross-process / multi-worker)
+        The caller does the free check (author address == configured agent
+        address) first; this catches TAC speaking from some other address.
         """
-        if self.is_default_agent_address(author_address):
-            return True
+        if not author_participant_id:
+            return False
 
-        if author_participant_id:
-            try:
-                participants = await self.conversation_orchestrator_client.list_participants(
-                    conversation_id
-                )
-                author_p = next((p for p in participants if p.id == author_participant_id), None)
-                if author_p:
-                    if author_p.type is None:
-                        self.logger.warning(
-                            "Participant type is undefined",
-                            conversation_id=conversation_id,
-                            participant_id=author_participant_id,
-                        )
-                    if author_p.type in AGENT_TYPES:
-                        return True
-            except Exception as e:
-                self.logger.warning(
-                    "Failed to look up participant type for self-message check",
-                    conversation_id=conversation_id,
-                    participant_id=author_participant_id,
-                    error=str(e),
-                )
+        author = next((p for p in participants if p.id == author_participant_id), None)
+        if author is None:
+            return False
+        if author.type is None:
+            self.logger.warning(
+                "Participant type is undefined",
+                conversation_id=conversation_id,
+                participant_id=author_participant_id,
+            )
+        return author.type in AGENT_TYPES
 
-        return False
+    async def _list_participants(self, conversation_id: str) -> list[ParticipantResponse] | None:
+        """Fetch a conversation's participants, returning None on failure.
+
+        One call per inbound message, shared by the self-message check,
+        reconciliation, and profile resolution. None of them can proceed
+        without it, so a failure is a hard stop for the caller.
+        """
+        try:
+            return await self.conversation_orchestrator_client.list_participants(conversation_id)
+        except Exception as e:
+            self.logger.error(
+                "Failed to list participants",
+                conversation_id=conversation_id,
+                error=str(e),
+            )
+            return None
 
     @abstractmethod
-    def get_agent_address(self, conversation_id: str) -> ParticipantAddress:
-        """Return the agent-side ParticipantAddress for this conversation.
+    def get_agent_address(self, session: ConversationSession) -> ParticipantAddress:
+        """Return the agent-side ParticipantAddress for this session.
 
-        Used by `_reconcile_participants` to identify which participant (by
-        channel + address) represents the agent. May read from session state
-        (e.g. chat's per-conversation channelId) to build the address.
+        Identifies which participant represents the agent, and supplies the
+        `from` address for outbound sends. Reads the session where the address
+        isn't pure config — chat's per-conversation `channelId`, for instance.
+
+        !!! warning "Breaking change"
+            Was `get_agent_address(conversation_id: str)`. It takes the session
+            now because the channel no longer holds one to look up. Subclasses
+            outside TAC must update their override.
         """
         pass
 
@@ -176,65 +204,140 @@ class MessagingChannel(BaseChannel):
             else None
         )
 
+    def _participant_ref(
+        self, address: str | None, participant_id: str | None
+    ) -> ActionParticipantRef:
+        """Build an Actions API participant reference.
+
+        Conversation Orchestrator resolves by participant id or by explicit
+        `(channel, address)`. Prefer the id — reconciliation has already
+        established it — and fall back to the address when there isn't one.
+        """
+        channel_name = self.get_channel_name()
+        if participant_id:
+            return ActionParticipantRef(channel=channel_name, participant_id=participant_id)
+        return ActionParticipantRef(channel=channel_name, address=address)
+
+    def _session_from_participants(
+        self, conversation_id: str, participants: list[ParticipantResponse]
+    ) -> ConversationSession | None:
+        """Rebuild a session for a conversation this process never handled.
+
+        Returns ``None`` when no participant is on this channel, which is how
+        another channel's conversation is filtered out.
+        """
+        channel_name = self.get_channel_name()
+        session = ConversationSession(conversation_id=conversation_id, channel=channel_name)
+        agent_address = self.get_agent_address(session)
+
+        def _matches_channel(p: ParticipantResponse) -> bool:
+            return any(a.channel == channel_name for a in p.addresses)
+
+        if not any(_matches_channel(p) for p in participants):
+            return None
+
+        agent = self._find_agent_participant(participants, channel_name, agent_address.address)
+        session.ai_agent_info = AuthorInfo(
+            address=agent_address.address,
+            participant_id=agent.id if agent else None,
+        )
+
+        customer = next(
+            (
+                p
+                for p in participants
+                if p.type == "CUSTOMER"
+                and _matches_channel(p)
+                and not self._owns_address(p, channel_name, agent_address.address)
+            ),
+            None,
+        )
+        if customer is not None:
+            session.profile_id = customer.profile_id
+            customer_address = next(
+                (a.address for a in customer.addresses if a.channel == channel_name),
+                None,
+            )
+            if customer_address:
+                session.author_info = AuthorInfo(
+                    address=customer_address, participant_id=customer.id
+                )
+        return session
+
     async def send_response(
         self,
-        conversation_id: str,
+        conversation: str | ConversationSession,
         response: str | AsyncGenerator[str | dict[str, Any], None],
         role: str | None = None,
     ) -> None:
         """Send a text response using the Conversation Orchestrator Send API.
 
-        Reads the agent and customer participant ids stashed on the session
-        by inbound reconciliation or outbound initiation. Missing ids are a
-        misuse — send_response is only expected to be called after an inbound
-        webhook (COMMUNICATION_CREATED → reconcile) or after
-        `initiate_outbound_conversation`, both of which populate the session.
+        **Pass the session, not the id.** Hand back the one `on_message_ready`
+        gave you (or that `initiate_outbound_conversation` returned) and the
+        send costs no extra API call — it already carries both participants.
+        A bare id still works, but the channel keeps no session to look up, so
+        it spends a `list_participants` call rebuilding one.
 
         Args:
-            conversation_id: Conversation ID to send response to
+            conversation: The `ConversationSession` to reply within
+                (preferred), or the conversation id.
             response: Message content. Must be ``str`` — messaging channels send a
                 single complete message via the Conversation Orchestrator Send API
                 and do not support streaming (unlike the Voice channel).
             role: Optional message role (unused by messaging channels)
 
+        !!! warning "Breaking change"
+            The first parameter was named `conversation_id`. Positional calls
+            are unaffected; a call passing `conversation_id=` needs updating.
+
         Raises:
             TypeError: If response is not a string (e.g. an async generator is
                 passed, since messaging channels don't support streaming)
-            RuntimeError: If the session or participant ids are missing
+            RuntimeError: If no recipient can be resolved for the conversation.
         """
         channel_name = self.get_channel_name()
         if not isinstance(response, str):
             raise TypeError(f"{channel_name} channel only supports string responses")
 
-        session = self._conversations.get(conversation_id)
-        if session is None or not session.author_info or not session.ai_agent_info:
+        if isinstance(conversation, ConversationSession):
+            session: ConversationSession | None = conversation
+            conversation_id = conversation.conversation_id
+        else:
+            conversation_id = conversation
+            participants = await self._list_participants(conversation_id)
+            if participants is None:
+                raise RuntimeError(
+                    f"Unable to send {channel_name} message: could not read participants for "
+                    f"conversation {conversation_id}. Pass the ConversationSession from "
+                    "on_message_ready or initiate_outbound_conversation to avoid this lookup."
+                )
+            session = self._session_from_participants(conversation_id, participants)
+
+        if session is None or session.author_info is None:
             raise RuntimeError(
-                f"Unable to send {channel_name} message: send_response called without a "
-                f"reconciled session for conversation {conversation_id}. Wait for an "
-                "inbound webhook or call initiate_outbound_conversation first."
+                f"Unable to send {channel_name} message: no recipient resolved for "
+                f"conversation {conversation_id}. Pass the ConversationSession you were "
+                "handed by on_message_ready or initiate_outbound_conversation."
             )
 
-        customer_participant_id = session.author_info.participant_id
-        agent_participant_id = session.ai_agent_info.participant_id
-        if not customer_participant_id or not agent_participant_id:
-            raise RuntimeError(
-                f"Unable to send {channel_name} message: session for conversation "
-                f"{conversation_id} is missing participant ids."
-            )
-
+        agent_address = (
+            session.ai_agent_info.address
+            if session.ai_agent_info
+            else self.get_agent_address(session).address
+        )
         channel_settings = self._build_channel_settings(conversation_id, session)
 
         try:
             action_request = SendMessageActionRequest(
                 payload=SendMessageActionPayload(
-                    from_=ActionParticipantRef(
-                        channel=channel_name,
-                        participant_id=agent_participant_id,
+                    from_=self._participant_ref(
+                        agent_address,
+                        session.ai_agent_info.participant_id if session.ai_agent_info else None,
                     ),
                     to=[
-                        ActionParticipantRef(
-                            channel=channel_name,
-                            participant_id=customer_participant_id,
+                        self._participant_ref(
+                            session.author_info.address,
+                            session.author_info.participant_id,
                         )
                     ],
                     content=ActionTextContent(text=response),
@@ -266,12 +369,15 @@ class MessagingChannel(BaseChannel):
         """Process messaging channel webhook event and manage conversation lifecycle.
 
         Handles:
-        - COMMUNICATION_CREATED: Process incoming messages from customers
-        - CONVERSATION_UPDATED: Clean up when conversation is closed
 
-        Note: Conversation tracking uses instance-local memory. In multi-instance
-        deployments, webhooks may route to a different instance, preventing cleanup.
-        See CLAUDE.md for horizontal scaling considerations.
+        - COMMUNICATION_CREATED: Process incoming messages from customers
+        - CONVERSATION_UPDATED: Fire `on_conversation_ended` when the
+          conversation closes
+
+        Any replica can handle any webhook. The idempotency cache is
+        per-process, though, so a Twilio retry landing on a different replica
+        is processed again — `on_message_ready` handlers must tolerate being
+        called twice for the same message.
 
         Args:
             webhook_data: Raw webhook event data from Twilio
@@ -299,6 +405,26 @@ class MessagingChannel(BaseChannel):
         elif event_type == "CONVERSATION_UPDATED":
             await self._handle_conversation_updated(event_data)
 
+    def _resolve_session(self, conv_id: str, communication: Communication) -> ConversationSession:
+        """Build this request's session from the webhook payload and config.
+
+        Network-free — the author, the agent address and `channel_id` are all
+        in hand already. Reconciliation layers the participant ids on after.
+        """
+        session = ConversationSession(
+            conversation_id=conv_id,
+            channel=self.get_channel_name(),
+        )
+        session.author_info = AuthorInfo(
+            address=communication.author.address,
+            participant_id=communication.author.participant_id,
+        )
+        # Set before get_agent_address: chat's agent address carries channelId.
+        if communication.channel_id:
+            session.metadata["channel_id"] = communication.channel_id
+        session.ai_agent_info = AuthorInfo(address=self.get_agent_address(session).address)
+        return session
+
     async def _handle_communication_created(self, event_data: Any) -> None:
         """Handle COMMUNICATION_CREATED event (incoming message)."""
         communication_data = Communication.model_validate(event_data)
@@ -308,68 +434,56 @@ class MessagingChannel(BaseChannel):
         if not message_text or not message_text.strip():
             return
 
-        if await self._is_own_message(
-            communication_data.author.address,
-            conv_id,
-            communication_data.author.participant_id,
-        ):
+        # TAC's own echo costs zero API calls — the address is right there.
+        if self.is_default_agent_address(communication_data.author.address):
             return
 
-        if conv_id not in self._conversations:
-            self._start_conversation(conv_id, profile_id=None)
+        session = self._resolve_session(conv_id, communication_data)
+        channel = self.get_channel_name()
 
-        session = self._conversations[conv_id]
+        # One participant fetch per message, shared by the self-message check,
+        # reconciliation, and profile resolution. All three need it, and none
+        # can proceed without it.
+        participants = await self._list_participants(conv_id)
+        if participants is None:
+            await self._drop_inbound(
+                conv_id, channel, "Could not read participants; inbound message dropped"
+            )
+            return
 
-        session.author_info = AuthorInfo(
-            address=communication_data.author.address,
-            participant_id=communication_data.author.participant_id,
-        )
-
-        # Store channelId in session metadata for outbound reply channelSettings
-        if communication_data.channel_id:
-            session.metadata["channel_id"] = communication_data.channel_id
+        if self._is_own_message(communication_data.author.participant_id, participants, conv_id):
+            return
 
         # Reconcile participant types pre-LLM so v1-bridge's UNKNOWN gets
-        # promoted to CUSTOMER (with a Conversation Memory profile attached when possible)
-        # and to stash both participant ids on the session for send_response.
-        # If reconciliation can't identify both sides, any eventual reply would
-        # fail too — skip the callback so the LLM doesn't waste a turn on an
-        # un-replyable conversation.
-        #
-        # Skip reconcile entirely when both sides are already stashed from a
-        # prior turn — Conversation Orchestrator's state was written by us and doesn't drift.
-        if session.ai_agent_info is None or session.author_info is None:
-            resolved = await self._reconcile_participants(conv_id)
-            if resolved is None:
-                channel = self.get_channel_name()
-                self.logger.error(
-                    "Reconciliation failed; dropping inbound message",
-                    conversation_id=conv_id,
-                    channel=channel,
-                )
-                await self.tac.trigger_error(
-                    RuntimeError("Participant reconciliation failed; inbound message dropped"),
-                    {
-                        "conversation_id": conv_id,
-                        "channel": channel,
-                        "dropped_inbound": True,
-                    },
-                )
-                return
-
-            agent_participant, customer_participant = resolved
-            session.ai_agent_info = AuthorInfo(
-                address=self.get_agent_address(conv_id).address,
-                participant_id=agent_participant.id,
+        # promoted to CUSTOMER (with a Conversation Memory profile attached when
+        # possible) and to resolve both participant ids for the reply. If it
+        # can't identify both sides, any eventual reply would fail too — skip
+        # the callback rather than waste an LLM turn on an un-replyable
+        # conversation. Running it every message is free: it reuses the list
+        # above, and the happy-path row issues no writes.
+        resolved = await self._reconcile_participants(session, participants)
+        if resolved is None:
+            await self._drop_inbound(
+                conv_id, channel, "Participant reconciliation failed; inbound message dropped"
             )
-            # When reconcile resolved a customer (SMS path — chat disables
-            # customer reconciliation and uses the author_info captured from
-            # the webhook above), use its authoritative participant id and
-            # lift any resolved profile.
-            if customer_participant is not None and session.author_info is not None:
-                session.author_info.participant_id = customer_participant.id
-                if customer_participant.profile_id and not session.profile_id:
-                    session.profile_id = customer_participant.profile_id
+            return
+
+        agent_participant, customer_participant = resolved
+        assert session.ai_agent_info is not None  # set by _resolve_session
+        session.ai_agent_info.participant_id = agent_participant.id
+        # When reconcile resolved a customer (chat disables customer
+        # reconciliation and keeps the webhook author), its participant id is
+        # the authoritative reply recipient — the author of an inbound message
+        # is not necessarily the customer.
+        if customer_participant is not None and session.author_info is not None:
+            session.author_info.participant_id = customer_participant.id
+            if customer_participant.profile_id:
+                session.profile_id = customer_participant.profile_id
+
+        if session.profile_id is None and self.memory_mode != "never":
+            # Free, and more reliable than Memory's address-based lookup, which
+            # infers the identifier type and misses on CHAT and RCS.
+            session.profile_id = self._profile_id_from_participants(session, participants)
 
         memory_response = await self._retrieve_memory_if_enabled(session, message_text, conv_id)
 
@@ -377,7 +491,7 @@ class MessagingChannel(BaseChannel):
             response = await self.tac.trigger_message_ready(message_text, session, memory_response)
             # Auto-send if callback returned a string (None = manual send_response flow)
             if response is not None:
-                await self.send_response(conv_id, response, role="assistant")
+                await self.send_response(session, response, role="assistant")
         except Exception as e:
             self.logger.error(
                 "Error in message ready callback",
@@ -386,35 +500,50 @@ class MessagingChannel(BaseChannel):
                 exc_info=True,
             )
 
+    def _profile_id_from_participants(
+        self, session: ConversationSession, participants: list[ParticipantResponse]
+    ) -> str | None:
+        """Read the customer's profile id off the participant list already fetched."""
+        author_participant_id = session.author_info.participant_id if session.author_info else None
+        if not author_participant_id:
+            return None
+        author = next((p for p in participants if p.id == author_participant_id), None)
+        return author.profile_id if author else None
+
+    async def _drop_inbound(self, conv_id: str, channel: str, reason: str) -> None:
+        """Log a dropped inbound message and surface it via ``on_error``."""
+        self.logger.error(reason, conversation_id=conv_id, channel=channel)
+        await self.tac.trigger_error(
+            RuntimeError(reason),
+            {"conversation_id": conv_id, "channel": channel, "dropped_inbound": True},
+        )
+
     async def _handle_conversation_updated(self, event_data: Any) -> None:
         """Handle CONVERSATION_UPDATED event.
 
-        - CLOSED: Remove session (clears cache)
-        - INACTIVE: Invalidate cached memory (Orchestrator updates memory on INACTIVE)
+        Only CLOSED is acted on, and only when an `on_conversation_ended`
+        handler is registered, so the common case costs nothing. The rebuild
+        also confirms the conversation belongs to this channel (a CHAT close
+        must not fire on SMS), and is what lets the hook fire on whichever
+        replica Twilio picked.
         """
         conversation_data = ConversationResponse.model_validate(event_data)
         conv_id = conversation_data.id
-        status = conversation_data.status
 
         if conversation_data.configuration_id != self.tac.config.conversation_configuration_id:
             return
-
-        session = self._conversations.get(conv_id)
-        if not session or session.channel != self.get_channel_name():
+        if conversation_data.status != "CLOSED":
+            return
+        if not self.tac._has_conversation_ended_callback():
             return
 
-        if status == "CLOSED":
-            await self._end_conversation(conv_id)
-        elif status == "INACTIVE" and self.memory_mode == "once":
-            # Invalidate cached memory when conversation becomes inactive
-            # Memory is updated by Conversation Orchestrator on INACTIVE transition
-            async with session.cache_lock:
-                if session.cached_memory is not None:
-                    session.cached_memory = None
-                    self.logger.debug(
-                        "Invalidated cached memory on INACTIVE status",
-                        conversation_id=conv_id,
-                    )
+        participants = await self._list_participants(conv_id)
+        if participants is None:
+            return
+        session = self._session_from_participants(conv_id, participants)
+        if session is None:
+            return
+        await self._trigger_conversation_ended(session)
 
     async def _initiate_messaging_conversation(
         self,
@@ -484,7 +613,10 @@ class MessagingChannel(BaseChannel):
             if not agent:
                 raise RuntimeError("Agent participant not found after conversation creation")
 
-            session = self._start_conversation(conversation_id)
+            session = ConversationSession(
+                conversation_id=conversation_id,
+                channel=channel_type,
+            )
             session.author_info = AuthorInfo(address=options.to, participant_id=customer.id)
             session.ai_agent_info = AuthorInfo(address=from_address, participant_id=agent.id)
             session.metadata.update(
@@ -515,8 +647,6 @@ class MessagingChannel(BaseChannel):
             return InitiateConversationResult(conversation_id=conversation_id, session=session)
 
         except Exception:
-            if conversation_id:
-                self._conversations.pop(conversation_id, None)
             if conversation_id and not reused:
                 try:
                     await self.conversation_orchestrator_client.update_conversation(
@@ -532,7 +662,8 @@ class MessagingChannel(BaseChannel):
 
     async def _reconcile_participants(
         self,
-        conversation_id: str,
+        session: ConversationSession,
+        participants: list[ParticipantResponse],
     ) -> tuple[ParticipantResponse, ParticipantResponse | None] | None:
         """Reconcile Conversation Orchestrator's participants to the types TAC needs for sending.
 
@@ -568,21 +699,14 @@ class MessagingChannel(BaseChannel):
             (`_handle_communication_created`) treats `None` as a hard stop
             and skips the message-ready callback, since any eventual reply
             would fail too.
+
+        Args:
+            session: Supplies the conversation id and agent address to match on.
+            participants: Already fetched by the caller — reusing that response
+                is what makes running this on every message free.
         """
-        agent_address = self.get_agent_address(conversation_id)
-
-        try:
-            participants = await self.conversation_orchestrator_client.list_participants(
-                conversation_id
-            )
-        except Exception as e:
-            self.logger.error(
-                "Failed to list participants for reconciliation",
-                conversation_id=conversation_id,
-                error=str(e),
-            )
-            return None
-
+        conversation_id = session.conversation_id
+        agent_address = self.get_agent_address(session)
         channel = agent_address.channel
 
         def _owns_agent_address(p: ParticipantResponse) -> bool:

@@ -28,8 +28,12 @@ class BaseChannel(ABC):
     Channels handle protocol-specific webhook processing and response delivery
     for different communication channels (SMS, Voice, etc.).
 
-    This class provides common conversation lifecycle management that is shared
-    across all channel types.
+    Provides only what every channel family shares: webhook deduplication,
+    participant-matching helpers, and memory retrieval.
+
+    Session storage deliberately isn't here. ``VoiceChannel`` owns its
+    sessions (a call is pinned to one process); messaging channels derive a
+    session per request and hold nothing between them.
     """
 
     def __init__(
@@ -45,8 +49,8 @@ class BaseChannel(ABC):
             tac: TAC instance for memory/context operations
             memory_mode: Memory retrieval mode. Default is "never".
                 - "always": Retrieve memory for every message with the query string
-                - "once": Retrieve memory once at conversation start with empty query and cache it.
-                         Cache is invalidated when conversation becomes INACTIVE.
+                - "once" (Voice only): Retrieve once with an empty query and cache it on
+                         the session. Invalidated when the conversation becomes INACTIVE.
                 - "never": Skip memory retrieval
             dedup_capacity: Maximum number of idempotency tokens to track for
                 webhook deduplication. Default 10000. Must be positive.
@@ -57,9 +61,6 @@ class BaseChannel(ABC):
         self.tac = tac
         self.logger = get_logger(self.__class__.__module__)
         self.memory_mode = memory_mode
-
-        # Track active conversations (shared across all channel types)
-        self._conversations: dict[str, ConversationSession] = {}
 
         # Webhook deduplication
         self._processed_tokens: OrderedDict[str, bool] = OrderedDict()
@@ -138,8 +139,10 @@ class BaseChannel(ABC):
         """Self-filtering: check if webhook event belongs to this channel.
 
         For COMMUNICATION_CREATED: require author.channel matches this channel type.
-        For CONVERSATION_UPDATED: only process if conversation is tracked locally.
-        Other events pass through.
+        Other events pass through, including CONVERSATION_UPDATED — the
+        per-channel handler filters that one. Filtering it here on locally
+        tracked state would drop it on any instance that didn't serve the
+        conversation's messages.
         """
         event_type = webhook_data.get("eventType")
         event_data = webhook_data.get("data")
@@ -154,13 +157,6 @@ class BaseChannel(ABC):
             if not author_channel:
                 return False
             return bool(author_channel == self.get_channel_name())
-
-        if event_type == "CONVERSATION_UPDATED":
-            if not isinstance(event_data, dict):
-                return False
-            conv_id = event_data.get("id")
-            if conv_id and conv_id not in self._conversations:
-                return False
 
         return True
 
@@ -211,71 +207,20 @@ class BaseChannel(ABC):
             None,
         )
 
-    def _start_conversation(
-        self,
-        conv_id: str,
-        profile_id: str | None = None,
-    ) -> ConversationSession:
+    async def _trigger_conversation_ended(self, session: ConversationSession) -> None:
+        """Fire ``on_conversation_ended`` for a session, swallowing handler errors.
+
+        A developer callback raising must not abort the channel's own cleanup
+        or fail the webhook, so the exception is logged and dropped here.
         """
-        Initialize new conversation session with optional profile_id.
-
-        Profile data is fetched lazily during retrieve_memory() when needed.
-
-        Args:
-            conv_id: Conversation ID
-            profile_id: Profile ID for the conversation (optional)
-
-        Returns:
-            The new or existing ConversationSession.
-        """
-        if conv_id in self._conversations:
-            self.logger.debug(
-                "Conversation already exists, skipping initialization",
-                conversation_id=conv_id,
-                channel=self.get_channel_name(),
-            )
-            return self._conversations[conv_id]
-
-        # Store conversation session
-        self._conversations[conv_id] = ConversationSession(
-            conversation_id=conv_id,
-            profile_id=profile_id,
-            channel=self.get_channel_name(),
-        )
-
-        self.logger.info(
-            f"CONVERSATION | Started {self.get_channel_name()} conversation",
-            conversation_id=conv_id,
-            profile_id=profile_id,
-        )
-        return self._conversations[conv_id]
-
-    async def _end_conversation(self, conv_id: str) -> None:
-        """
-        Clean up conversation session.
-
-        Pops the session from the conversation dict, then triggers the
-        on_conversation_ended callback with the removed session data.
-
-        Args:
-            conv_id: Conversation ID
-        """
-        session = self._conversations.pop(conv_id, None)
-        if session is not None:
-            try:
-                await self.tac.trigger_conversation_ended(session)
-            except Exception as e:
-                self.logger.error(
-                    "Error in conversation ended callback",
-                    conversation_id=conv_id,
-                    error=str(e),
-                    exc_info=True,
-                )
-
-            self.logger.debug(
-                "Ended conversation",
-                conversation_id=conv_id,
-                channel=self.get_channel_name(),
+        try:
+            await self.tac.trigger_conversation_ended(session)
+        except Exception as e:
+            self.logger.error(
+                "Error in conversation ended callback",
+                conversation_id=session.conversation_id,
+                error=str(e),
+                exc_info=True,
             )
 
     async def _retrieve_memory_if_enabled(

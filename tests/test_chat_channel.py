@@ -158,7 +158,10 @@ class TestChatChannel:
         tac = TAC(get_test_config())
         channel = ChatChannel(tac)
 
-        tac.on_message_ready(lambda msg, ctx, mem: None)
+        from tac.models.conversation import ParticipantAddress, ParticipantResponse
+
+        captured: list[ConversationSession] = []
+        tac.on_message_ready(lambda msg, ctx, mem: captured.append(ctx))
 
         webhook = create_communication_created_webhook(
             "CH123",
@@ -167,10 +170,27 @@ class TestChatChannel:
             "2025-11-18T00:00:00.000Z",
             channel_id="CH_CHAT_SID_456",
         )
-        await channel.process_webhook(webhook)
+        agent = ParticipantResponse(
+            id="PA_AGENT",
+            account_id="ACtest123",
+            conversation_id="CH123",
+            name="Test Agent",
+            type="AI_AGENT",
+            addresses=[
+                ParticipantAddress(
+                    channel="CHAT", address="ai-assistant", channel_id="CH_CHAT_SID_456"
+                )
+            ],
+        )
+        with patch.object(
+            tac.conversation_orchestrator_client,
+            "list_participants",
+            new=AsyncMock(return_value=[agent]),
+        ):
+            await channel.process_webhook(webhook)
 
-        session = channel._conversations["CH123"]
-        assert session.metadata["channel_id"] == "CH_CHAT_SID_456"
+        assert len(captured) == 1
+        assert captured[0].metadata["channel_id"] == "CH_CHAT_SID_456"
 
     @pytest.mark.asyncio
     async def test_ignores_sms_messages(self) -> None:
@@ -228,17 +248,18 @@ class TestChatChannel:
 
     @pytest.mark.asyncio
     async def test_process_conversation_ended(self) -> None:
+        """No handler registered → fast exit with no rebuild."""
         tac = TAC(get_test_config())
         channel = ChatChannel(tac)
 
-        channel._conversations["CH123"] = ConversationSession(
-            conversation_id="CH123", channel="CHAT", profile_id="profile_123"
-        )
+        with patch.object(
+            tac.conversation_orchestrator_client, "list_participants", new=AsyncMock()
+        ) as mock_list:
+            await channel.process_webhook(
+                create_conversation_updated_webhook("CH123", "CLOSED", "2025-11-18T00:10:00.000Z")
+            )
 
-        await channel.process_webhook(
-            create_conversation_updated_webhook("CH123", "CLOSED", "2025-11-18T00:10:00.000Z")
-        )
-        assert "CH123" not in channel._conversations
+        mock_list.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_conversation_ended_callback(self) -> None:
@@ -248,16 +269,30 @@ class TestChatChannel:
 
         tac.on_conversation_ended(lambda ctx: captured.append(ctx))
 
-        channel._conversations["CH123"] = ConversationSession(
-            conversation_id="CH123", channel="CHAT", profile_id="profile_123"
+        from tac.models.conversation import ParticipantAddress, ParticipantResponse
+
+        customer = ParticipantResponse(
+            id="PA_USER",
+            account_id="ACtest123",
+            conversation_id="CH123",
+            name="user@example.com",
+            type="CUSTOMER",
+            profile_id="profile_123",
+            addresses=[ParticipantAddress(channel="CHAT", address="user@example.com")],
         )
-        await channel.process_webhook(
-            create_conversation_updated_webhook("CH123", "CLOSED", "2025-11-18T00:10:00.000Z")
-        )
+        with patch.object(
+            tac.conversation_orchestrator_client,
+            "list_participants",
+            new=AsyncMock(return_value=[customer]),
+        ):
+            await channel.process_webhook(
+                create_conversation_updated_webhook("CH123", "CLOSED", "2025-11-18T00:10:00.000Z")
+            )
 
         assert len(captured) == 1
         assert captured[0].conversation_id == "CH123"
         assert captured[0].channel == "CHAT"
+        assert captured[0].profile_id == "profile_123"
 
     @pytest.mark.asyncio
     async def test_send_response_uses_stashed_ids(self) -> None:
@@ -265,8 +300,8 @@ class TestChatChannel:
         tac = TAC(get_test_config())
         channel = ChatChannel(tac)
 
-        # Session is pre-populated as if reconcile (or outbound initiation) ran.
-        channel._conversations["CH123"] = ConversationSession(
+        # Session shaped the way an inbound webhook (or outbound initiation) leaves it.
+        session = ConversationSession(
             conversation_id="CH123",
             channel="CHAT",
             author_info=AuthorInfo(address="user@example.com", participant_id="PA_USER"),
@@ -275,7 +310,7 @@ class TestChatChannel:
         )
 
         with patch.object(tac.conversation_orchestrator_client, "create_action") as mock_send:
-            await channel.send_response("CH123", "Hello from bot!")
+            await channel.send_response(session, "Hello from bot!")
 
             mock_send.assert_called_once()
             call_args = mock_send.call_args
@@ -293,11 +328,47 @@ class TestChatChannel:
             assert request.payload.channel_settings.channel_id == "CH_CHAT_SID_123"
 
     @pytest.mark.asyncio
-    async def test_send_response_no_session(self) -> None:
-        """Missing session → send_response raises (no conversation to reply to)."""
+    async def test_send_response_by_id_rebuilds_from_participants(self) -> None:
+        """The bare-id form works, at the cost of one participant lookup."""
+        from tac.models.conversation import ParticipantAddress, ParticipantResponse
+
         tac = TAC(get_test_config())
         channel = ChatChannel(tac)
-        with pytest.raises(RuntimeError, match="without a reconciled session"):
+
+        customer = ParticipantResponse(
+            id="PA_USER",
+            account_id="ACtest123",
+            conversation_id="CH999",
+            name="user@example.com",
+            type="CUSTOMER",
+            addresses=[ParticipantAddress(channel="CHAT", address="user@example.com")],
+        )
+        with (
+            patch.object(
+                tac.conversation_orchestrator_client,
+                "list_participants",
+                new=AsyncMock(return_value=[customer]),
+            ),
+            patch.object(tac.conversation_orchestrator_client, "create_action") as mock_send,
+        ):
+            # CHAT still needs channelId, which only a session carries.
+            with pytest.raises(RuntimeError, match=r"channel_id"):
+                await channel.send_response("CH999", "Hello!")
+            mock_send.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_send_response_no_recipient(self) -> None:
+        """No customer participant → nothing to reply to."""
+        tac = TAC(get_test_config())
+        channel = ChatChannel(tac)
+        with (
+            patch.object(
+                tac.conversation_orchestrator_client,
+                "list_participants",
+                new=AsyncMock(return_value=[]),
+            ),
+            pytest.raises(RuntimeError, match="no recipient resolved"),
+        ):
             await channel.send_response("CH999", "Hello!")
 
     @pytest.mark.asyncio
@@ -306,7 +377,7 @@ class TestChatChannel:
         tac = TAC(get_test_config())
         channel = ChatChannel(tac)
 
-        channel._conversations["CH123"] = ConversationSession(
+        session = ConversationSession(
             conversation_id="CH123",
             channel="CHAT",
             author_info=AuthorInfo(address="user@example.com", participant_id="PA_USER"),
@@ -316,28 +387,33 @@ class TestChatChannel:
 
         with patch.object(tac.conversation_orchestrator_client, "create_action") as mock_send:
             with pytest.raises(RuntimeError, match=r"session\.metadata\['channel_id'\]"):
-                await channel.send_response("CH123", "Hello!")
+                await channel.send_response(session, "Hello!")
             mock_send.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_send_response_raises_when_missing_ai_agent_info(self) -> None:
-        """If author_info is stashed but ai_agent_info is not (reconcile failed),
-        send_response raises — it will not invent ids."""
+    async def test_send_response_falls_back_to_the_configured_agent_address(self) -> None:
+        """No agent participant id on the session → address-mode `from`.
+
+        Conversation Orchestrator resolves a `from` by explicit
+        (channel, address) too, so a session that never got an agent
+        participant id can still reply.
+        """
         tac = TAC(get_test_config())
         channel = ChatChannel(tac)
 
-        channel._conversations["CH123"] = ConversationSession(
+        session = ConversationSession(
             conversation_id="CH123",
             channel="CHAT",
             author_info=AuthorInfo(address="user@example.com", participant_id="PA_USER"),
-            # ai_agent_info is intentionally missing
             metadata={"channel_id": "CH_CHAT_SID_123"},
         )
 
         with patch.object(tac.conversation_orchestrator_client, "create_action") as mock_send:
-            with pytest.raises(RuntimeError, match="without a reconciled session"):
-                await channel.send_response("CH123", "Hello!")
-            mock_send.assert_not_called()
+            await channel.send_response(session, "Hello!")
+
+        request = mock_send.call_args[0][1]
+        assert request.payload.from_.participant_id is None
+        assert request.payload.from_.address == "ai-assistant"
 
     @pytest.mark.asyncio
     async def test_send_response_rejects_non_string(self) -> None:
@@ -401,7 +477,6 @@ class TestChatChannel:
         await channel.process_webhook({"eventType": "COMMUNICATION_CREATED", "data": None})
 
         assert len(captured) == 0
-        assert len(channel._conversations) == 0
 
     @pytest.mark.asyncio
     async def test_memory_mode(self) -> None:
@@ -416,11 +491,6 @@ class TestChatChannel:
         )
         channel = ChatChannel(tac, config={"memory_mode": "always"})
 
-        # Pre-seed session with profile_id so retrieve_memory skips the
-        # lookup_profile fallback path.
-        channel._conversations["CH123"] = ConversationSession(
-            conversation_id="CH123", channel="CHAT", profile_id="profile_test_123"
-        )
         tac.conversation_memory_client.get_profile = AsyncMock(
             side_effect=Exception("skip profile")
         )
@@ -453,17 +523,40 @@ class TestChatChannel:
             }
         )
 
+        # Chat identities are opaque strings, so Memory's address-based
+        # lookup can't find the profile — it has to come off the participant.
+        author = ParticipantResponse(
+            id="PA_USER",
+            account_id="ACtest123",
+            conversation_id="CH123",
+            name="user@example.com",
+            type="CUSTOMER",
+            profile_id="profile_test_123",
+            addresses=[ParticipantAddress(channel="CHAT", address="user@example.com")],
+        )
+
         webhook = create_communication_created_webhook(
             "CH123", "PA_USER", "Memory test", "2025-11-18T00:00:02.000Z"
         )
-        with patch.object(
-            channel,
-            "_reconcile_participants",
-            new=AsyncMock(return_value=(mock_agent, None)),
+        with (
+            patch.object(
+                tac.conversation_orchestrator_client,
+                "list_participants",
+                new=AsyncMock(return_value=[mock_agent, author]),
+            ),
+            patch.object(
+                channel,
+                "_reconcile_participants",
+                new=AsyncMock(return_value=(mock_agent, None)),
+            ),
         ):
             await channel.process_webhook(webhook)
 
         tac.conversation_memory_client.retrieve_memory.assert_called_once()
+        assert (
+            tac.conversation_memory_client.retrieve_memory.call_args.kwargs["profile_id"]
+            == "profile_test_123"
+        )
 
     @pytest.mark.asyncio
     async def test_callback_auto_send_response(self) -> None:

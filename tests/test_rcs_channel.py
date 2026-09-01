@@ -160,8 +160,7 @@ async def test_conversation_created_webhook(rcs_channel: RCSChannel) -> None:
     # CONVERSATION_CREATED events are ignored (no action needed)
     await rcs_channel.process_webhook(webhook)
 
-    # Conversations are not started until COMMUNICATION_CREATED
-    assert "conv_123" not in rcs_channel._conversations
+    # Nothing to assert on locally — the channel stores no sessions.
 
 
 @pytest.mark.asyncio
@@ -336,8 +335,6 @@ async def test_conversation_updated_closed(rcs_channel: RCSChannel) -> None:
         mock_reconcile.return_value = (mock_agent, mock_customer)
         await rcs_channel.process_webhook(webhook)
 
-    assert conversation_id in rcs_channel._conversations
-
     # Mock the conversation ended callback
     callback_called = False
     callback_context = None
@@ -355,10 +352,15 @@ async def test_conversation_updated_closed(rcs_channel: RCSChannel) -> None:
         timestamp="2025-01-15T10:20:30Z",
     )
 
-    await rcs_channel.process_webhook(close_webhook)
+    with patch.object(
+        rcs_channel.tac.conversation_orchestrator_client,
+        "list_participants",
+        new=AsyncMock(return_value=[mock_agent, mock_customer]),
+    ):
+        await rcs_channel.process_webhook(close_webhook)
 
-    # Verify conversation was ended
-    assert conversation_id not in rcs_channel._conversations
+    # The session handed to the callback is rebuilt from Conversation
+    # Orchestrator, so it fires on any instance — not just this one.
     assert callback_called
     assert callback_context.conversation_id == conversation_id
 

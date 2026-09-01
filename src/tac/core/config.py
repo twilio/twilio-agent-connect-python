@@ -103,6 +103,14 @@ class TwilioMemoryConfig(BaseModel):
         description="Min relevance score for observations and summaries (0.0-1.0).",
     )
 
+    fetch_profile_traits: bool = Field(
+        default=True,
+        description="Whether to fetch profile traits alongside a recall. Recall returns "
+        "observations, summaries and communications but never traits, so this is a second "
+        "API call. Traits populate `ConversationSession.profile`, which is what "
+        "`build_profile_prompt()` renders — set False if your prompts don't use them.",
+    )
+
     phone_trait_group: str = Field(
         default="Contact",
         description="Trait group name that holds the phone identifier on newly created profiles. "
@@ -292,6 +300,17 @@ class TACConfig(BaseModel):
         "are stripped automatically.",
     )
 
+    instance_public_domain: str | None = Field(
+        default=None,
+        description="Directly-routable host for *this process* (e.g. a Kubernetes pod's own "
+        "address). When set, every URL TAC hands Twilio for a live call — WebSocket, action "
+        "callback, status/AMD/recording — points here instead of at `voice_public_domain`, so "
+        "a call's out-of-band webhooks return to the process holding its socket. Requires "
+        "per-pod addressability; without it, leave this unset and route by `CallSid` at the "
+        "load balancer. Schemes and trailing slashes are stripped, same as "
+        "`voice_public_domain`.",
+    )
+
     voice_websocket_path: str = Field(
         default="/ws",
         description="Path the voice WebSocket is served at. Combined with "
@@ -316,6 +335,14 @@ class TACConfig(BaseModel):
         "event. Same role as voice_action_path.",
     )
 
+    @property
+    def voice_callback_domain(self) -> str | None:
+        """Host Twilio should reach for a call in progress.
+
+        `instance_public_domain` if set, else the shared `voice_public_domain`.
+        """
+        return self.instance_public_domain or self.voice_public_domain
+
     def call_event_path(self, kind: CallEventKind) -> str:
         """Path a call-event callback is served at.
 
@@ -326,14 +353,15 @@ class TACConfig(BaseModel):
 
     def call_event_url(self, kind: CallEventKind) -> str | None:
         """Public URL for a call-event callback, or None without a public domain."""
-        if not self.voice_public_domain:
+        domain = self.voice_callback_domain
+        if not domain:
             return None
-        return f"https://{self.voice_public_domain}{self.call_event_path(kind)}"
+        return f"https://{domain}{self.call_event_path(kind)}"
 
-    @field_validator("voice_public_domain", mode="before")
+    @field_validator("voice_public_domain", "instance_public_domain", mode="before")
     @classmethod
     def _normalize_voice_public_domain(cls, v: str | None) -> str | None:
-        """Strip whitespace, schemes, and trailing slashes from voice_public_domain.
+        """Strip whitespace, schemes, and trailing slashes from a public domain.
 
         A naive copy-paste from a browser address bar produces values like
         ``https://example.ngrok.app/`` which would otherwise concatenate into
@@ -406,6 +434,8 @@ class TACConfig(BaseModel):
         - `TWILIO_REGION`: Twilio region for data residency (e.g., 'au1', 'ie1')
         - `TWILIO_STUDIO_HANDOFF_FLOW_SID`: Studio Flow SID (FWxxx...) for handoff tool
         - `TWILIO_VOICE_PUBLIC_DOMAIN`: Public domain for voice routes (required for voice)
+        - `TWILIO_INSTANCE_PUBLIC_DOMAIN`: This process's own directly-routable host, for
+          pinning a call's out-of-band webhooks to the instance holding its WebSocket
         - `TWILIO_VOICE_WEBSOCKET_PATH`: Path for voice WebSocket (default: /ws)
         - `TWILIO_VOICE_ACTION_PATH`: Path for ConversationRelay action callback
           (default: /conversation-relay-callback)
@@ -448,6 +478,7 @@ class TACConfig(BaseModel):
             region=os.environ.get("TWILIO_REGION"),
             studio_handoff_flow_sid=os.environ.get("TWILIO_STUDIO_HANDOFF_FLOW_SID"),
             voice_public_domain=os.environ.get("TWILIO_VOICE_PUBLIC_DOMAIN"),
+            instance_public_domain=os.environ.get("TWILIO_INSTANCE_PUBLIC_DOMAIN"),
             voice_websocket_path=os.environ.get("TWILIO_VOICE_WEBSOCKET_PATH", "/ws"),
             voice_action_path=os.environ.get(
                 "TWILIO_VOICE_ACTION_PATH", "/conversation-relay-callback"
