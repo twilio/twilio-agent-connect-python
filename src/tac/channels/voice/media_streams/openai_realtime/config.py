@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import os
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
-from pydantic import Field, model_validator
+from pydantic import Field
 
-from tac.channels.voice.media_streams.config import MediaStreamsProviderConfig
 from tac.channels.voice.media_streams.openai_realtime.provider import OpenAIRealtimeProvider
+from tac.channels.voice.media_streams.shared.config import MediaStreamsOpenAIProviderConfig
 from tac.channels.voice.provider import VoiceProvider
 from tac.core.config import TACConfig
 from tac.models.voice import TwiMLRequest
@@ -19,15 +18,9 @@ if TYPE_CHECKING:
     from tac.channels.voice.channel import VoiceChannel
 
 
-class OpenAIRealtimeProviderConfig(MediaStreamsProviderConfig):
+class OpenAIRealtimeProviderConfig(MediaStreamsOpenAIProviderConfig):
     """Configuration for ``OpenAIRealtimeProvider``."""
 
-    model_config = {"extra": "forbid", "arbitrary_types_allowed": True}
-
-    openai_api_key: str | None = Field(
-        default_factory=lambda: os.environ.get("OPENAI_API_KEY"),
-        description="OpenAI API key. Defaults to the OPENAI_API_KEY environment variable.",
-    )
     tools: list[TACTool] = Field(
         default_factory=list,
         description=(
@@ -61,15 +54,6 @@ class OpenAIRealtimeProviderConfig(MediaStreamsProviderConfig):
         "`default_session_config`); return None to fall back to it. Outbound calls don't use "
         "this — see `InitiateVoiceConversationOptionsOpenAIRealtime`.",
     )
-
-    @model_validator(mode="after")
-    def _validate(self) -> OpenAIRealtimeProviderConfig:
-        if not self.openai_api_key:
-            raise ValueError(
-                "openai_api_key is required. Set the OPENAI_API_KEY environment "
-                "variable or provide openai_api_key in OpenAIRealtimeProviderConfig."
-            )
-        return self
 
     def create_provider(self, channel: VoiceChannel, tac_config: TACConfig) -> VoiceProvider:
         return OpenAIRealtimeProvider(channel, tac_config, self)

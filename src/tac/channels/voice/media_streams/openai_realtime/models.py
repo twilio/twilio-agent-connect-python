@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
 
-from tac.channels.websocket_protocol import WebSocketProtocol
+from tac.channels.voice.media_streams.shared.models import MediaStreamsOpenAICallState
 
 
 @dataclass
@@ -31,19 +30,7 @@ class _BargeInState:
 
 
 @dataclass
-class _CallState:
-    """Per-call bookkeeping this provider needs beyond ``ConversationSession``.
+class _CallState(MediaStreamsOpenAICallState):
+    """Per-call bookkeeping this provider needs beyond ``ConversationSession``."""
 
-    Both legs of one call's audio bridge — the Twilio-facing socket and the
-    OpenAI Realtime socket — live here together, rather than in two parallel
-    dicts keyed by conversation id that could drift out of sync.
-
-    ``stream_sid`` and ``transcript`` live on ``ConversationSession.metadata``
-    instead, not here — this dict is popped before ``on_conversation_ended``
-    fires, so anything a handler needs to read after the call ends must
-    survive on the session, not in here.
-    """
-
-    twilio_ws: WebSocketProtocol | None = None
-    model_ws: Any = None
     barge_in: _BargeInState = field(default_factory=_BargeInState)

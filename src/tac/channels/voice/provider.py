@@ -1,7 +1,5 @@
 """``VoiceProvider``: the interface that lets ``VoiceChannel`` host more than
 one kind of real-time media provider.
-
-``ConversationRelayProvider`` is the only implementation today.
 """
 
 from __future__ import annotations
@@ -114,12 +112,7 @@ class VoiceProvider:
 
 
 class VoiceProviderConfig(BaseModel):
-    """Base configuration for a ``VoiceChannel``'s real-time media provider.
-
-    ``ConversationRelayProviderConfig`` is the only subclass today. Lives
-    here (not in ``config.py``) so a future provider's config only needs to
-    import this module, not anything ConversationRelay-specific.
-    """
+    """Base configuration for a ``VoiceChannel``'s real-time media provider."""
 
     memory_mode: MemoryMode = Field(
         default="never", description="Memory retrieval mode for this channel"

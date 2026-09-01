@@ -9,12 +9,7 @@ from tac.models.voice import VoiceTwiMLOptionsMediaStreams
 
 
 class MediaStreamsProviderConfig(VoiceProviderConfig):
-    """Base configuration for a Media Streams (``<Connect><Stream>``) provider.
-
-    ``OpenAIRealtimeProviderConfig`` is the only subclass today. Lives here
-    (not in ``openai_realtime/config.py``) so a future Media Streams provider's
-    config only needs to import this module, not anything OpenAI-specific.
-    """
+    """Base configuration for a Media Streams (``<Connect><Stream>``) provider."""
 
     default_twiml_options: VoiceTwiMLOptionsMediaStreams | None = Field(
         default=None,
