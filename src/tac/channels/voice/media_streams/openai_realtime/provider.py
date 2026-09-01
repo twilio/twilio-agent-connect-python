@@ -451,10 +451,11 @@ class OpenAIRealtimeProvider(MediaStreamsOpenAIProvider[_CallState]):
     async def _handle_function_call(self, conv_id: str, item: dict[str, Any]) -> None:
         """Run a model-requested tool call and hand the result back.
 
-        Always sends a function_call_output — even a tool that ran
-        successfully can return a non-JSON-serializable object (a datetime,
-        a Pydantic model, ...), and the model would otherwise be left
-        waiting on a call_id it never gets a result for.
+        Always sends a function_call_output when call_id is present — even a
+        tool that ran successfully can return a non-JSON-serializable object
+        (a datetime, a Pydantic model, ...), and the model would otherwise be
+        left waiting on a call_id it never gets a result for. Without a
+        call_id there's nothing to reply to, so the item is dropped instead.
         """
         call_id = item.get("call_id")
         if not call_id:
