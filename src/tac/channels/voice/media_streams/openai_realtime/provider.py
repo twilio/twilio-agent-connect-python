@@ -458,7 +458,7 @@ class OpenAIRealtimeProvider(MediaStreamsOpenAIProvider[_CallState]):
         call_id there's nothing to reply to, so the item is dropped instead.
         """
         call_id = item.get("call_id")
-        if not call_id:
+        if not isinstance(call_id, str) or not call_id:
             self.logger.error(
                 "Received malformed function_call item without call_id",
                 conversation_id=conv_id,
@@ -467,7 +467,7 @@ class OpenAIRealtimeProvider(MediaStreamsOpenAIProvider[_CallState]):
             return
 
         name = item.get("name")
-        if not name:
+        if not isinstance(name, str) or not name:
             self.logger.error(
                 "Received malformed function_call item without tool name",
                 conversation_id=conv_id,
