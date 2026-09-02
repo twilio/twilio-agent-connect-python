@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import inspect
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -573,7 +574,7 @@ class TAC:
         if self._model_event_callback is None:
             return
         try:
-            callback_event = event.copy()
+            callback_event = copy.deepcopy(event)
             result = self._model_event_callback(conversation_id, callback_event)
             if inspect.isawaitable(result):
                 await result
