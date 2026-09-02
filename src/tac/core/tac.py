@@ -130,6 +130,12 @@ class TAC:
             | None
         ) = None
 
+        self._model_event_callback: (
+            Callable[[str, dict[str, Any]], None]
+            | Callable[[str, dict[str, Any]], Awaitable[None]]
+            | None
+        ) = None
+
     def is_orchestrator_enabled(self) -> bool:
         """True if TAC is configured with Conversation Orchestrator (not relay-only mode)."""
         return self.conversation_orchestrator_client is not None
@@ -374,6 +380,38 @@ class TAC:
         """
         self._error_callback = callback
 
+    def on_model_event(
+        self,
+        callback: (
+            Callable[[str, dict[str, Any]], None] | Callable[[str, dict[str, Any]], Awaitable[None]]
+        ),
+    ) -> None:
+        """Register callback invoked for every raw event received from the underlying model.
+
+        A generic passthrough for model events TAC does not otherwise surface as a
+        dedicated callback (e.g. transcript fragments, usage updates) — not tied to any
+        specific model or provider.
+
+        Fire-and-forget: the return value is ignored, and an exception raised by the
+        callback is logged and swallowed rather than affecting call handling. The event
+        stream can be high-frequency and its shape is provider-specific and may change,
+        so read fields defensively and check `event["type"]` first.
+
+        Example:
+            ```python
+            def handle_model_event(conversation_id: str, event: dict) -> None:
+                if event.get("type") == "response.audio_transcript.delta":
+                    print(event.get("delta"))
+
+
+            tac.on_model_event(handle_model_event)
+            ```
+
+        Args:
+            callback: Function to call with (conversation_id, event). Supports sync and async.
+        """
+        self._model_event_callback = callback
+
     def register_partner_connector(
         self,
         connector: PartnerConnector,
@@ -512,5 +550,35 @@ class TAC:
         except Exception:
             self.logger.error(
                 "on_error callback raised an exception",
+                exc_info=True,
+            )
+
+    async def trigger_model_event(
+        self,
+        conversation_id: str,
+        event: dict[str, Any],
+    ) -> None:
+        """Trigger the registered model event callback.
+
+        No-op when no handler is registered, so callers can invoke it
+        unconditionally. The handler is invoked defensively: an exception
+        raised by the handler itself is logged and swallowed so a broken
+        handler cannot affect call handling.
+
+        Args:
+            conversation_id: The conversation the event belongs to.
+            event: The raw, provider-specific event payload.
+        """
+        if self._model_event_callback is None:
+            return
+        try:
+            result = self._model_event_callback(conversation_id, event)
+            if inspect.isawaitable(result):
+                await result
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            self.logger.error(
+                "on_model_event callback raised an exception",
                 exc_info=True,
             )
