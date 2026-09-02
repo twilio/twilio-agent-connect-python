@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import functools
 import json
 import uuid
 from typing import TYPE_CHECKING, Any
@@ -75,10 +76,12 @@ class GPTLiveProvider(MediaStreamsOpenAIProvider[_CallState]):
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
-        # Strong references for fire-and-forget _expire_session_config_token
-        # tasks — asyncio only weakly references a task with no other
-        # referrer, so without this the task can be GC'd mid-sleep.
-        self._pending_token_expiries: set[asyncio.Task[None]] = set()
+        # Keyed by session_config_token so _register_call can cancel a
+        # call's expiry task as soon as the token is claimed, instead of
+        # leaving it sleeping for the full TTL. Also the strong reference
+        # asyncio needs — it only weakly references a task with no other
+        # referrer, so without this the task could be GC'd mid-sleep.
+        self._pending_token_expiries: dict[str, asyncio.Task[None]] = {}
 
     @property
     def channel_name(self) -> str:
@@ -182,8 +185,10 @@ class GPTLiveProvider(MediaStreamsOpenAIProvider[_CallState]):
                 expiry_task = asyncio.create_task(
                     self._expire_session_config_token(session_config_token)
                 )
-                self._pending_token_expiries.add(expiry_task)
-                expiry_task.add_done_callback(self._pending_token_expiries.discard)
+                self._pending_token_expiries[session_config_token] = expiry_task
+                expiry_task.add_done_callback(
+                    functools.partial(self._forget_token_expiry, session_config_token)
+                )
 
             return InitiateVoiceConversationResult(call_sid=call.sid)
 
@@ -203,9 +208,14 @@ class GPTLiveProvider(MediaStreamsOpenAIProvider[_CallState]):
 
         Covers no-answer, busy, and other outbound-call outcomes that never
         trigger ``_register_call`` — the only other place this token is popped.
+        Cancelled by ``_register_call`` as soon as it claims the token, so
+        this only actually runs to completion when the call never connects.
         """
         await asyncio.sleep(_SESSION_CONFIG_TOKEN_TTL_SECONDS)
         self._call_session_configs.pop(token, None)
+
+    def _forget_token_expiry(self, token: str, _task: asyncio.Task[None]) -> None:
+        self._pending_token_expiries.pop(token, None)
 
     async def handle_websocket(self, websocket: WebSocketProtocol) -> None:
         """Drive one Twilio Media Stream connection from accept to disconnect.
@@ -261,7 +271,12 @@ class GPTLiveProvider(MediaStreamsOpenAIProvider[_CallState]):
         except WebSocketDisconnectError:
             self.logger.info("Media stream WebSocket closed", conversation_id=conv_id)
         except Exception as e:
-            self.logger.error(f"Media stream WebSocket error: {e}", exc_info=True)
+            self.logger.error(
+                "Media stream WebSocket error",
+                error=str(e),
+                conversation_id=conv_id,
+                exc_info=True,
+            )
         finally:
             if conv_id is not None:
                 await self._cleanup_call(conv_id)
@@ -281,6 +296,9 @@ class GPTLiveProvider(MediaStreamsOpenAIProvider[_CallState]):
             session_config = self._call_session_configs.pop(token, None)
             if session_config is not None:
                 self._call_session_configs[conv_id] = session_config
+            expiry_task = self._pending_token_expiries.get(token)
+            if expiry_task is not None:
+                expiry_task.cancel()
 
         self._calls[conv_id] = _CallState(twilio_ws=websocket)
 
@@ -420,7 +438,7 @@ class GPTLiveProvider(MediaStreamsOpenAIProvider[_CallState]):
             self.logger.error(
                 "Received malformed function_call item without call_id",
                 conversation_id=conv_id,
-                item=item,
+                item_keys=list(item.keys()),
             )
             return
 
@@ -430,7 +448,7 @@ class GPTLiveProvider(MediaStreamsOpenAIProvider[_CallState]):
                 "Received malformed function_call item without tool name",
                 conversation_id=conv_id,
                 call_id=call_id,
-                item=item,
+                item_keys=list(item.keys()),
             )
             output_json = json.dumps({"error": "Malformed function call: missing tool name."})
         else:
@@ -462,12 +480,30 @@ class GPTLiveProvider(MediaStreamsOpenAIProvider[_CallState]):
     async def _cleanup_call(self, conv_id: str) -> None:
         call = self._calls.get(conv_id)
         if call is not None and call.model_ws is not None:
-            with contextlib.suppress(Exception):
+            try:
                 await call.model_ws.send(json.dumps({"type": "session.close"}))
-                await asyncio.wait_for(call.closed_event.wait(), timeout=_CLOSE_TIMEOUT_SECONDS)
+            except Exception as e:
+                self.logger.debug(
+                    "Error sending session.close to model socket",
+                    error=str(e),
+                    conversation_id=conv_id,
+                )
+            else:
+                try:
+                    await asyncio.wait_for(call.closed_event.wait(), timeout=_CLOSE_TIMEOUT_SECONDS)
+                except asyncio.TimeoutError:
+                    self.logger.debug(
+                        "Timed out waiting for session.closed", conversation_id=conv_id
+                    )
+                except Exception as e:
+                    self.logger.debug(
+                        "Error waiting for session.closed", error=str(e), conversation_id=conv_id
+                    )
             try:
                 await call.model_ws.close()
             except Exception as e:
-                self.logger.debug(f"Error closing model socket: {e}", conversation_id=conv_id)
+                self.logger.debug(
+                    "Error closing model socket", error=str(e), conversation_id=conv_id
+                )
         self._calls.pop(conv_id, None)
         await self.channel._end_conversation(conv_id)
