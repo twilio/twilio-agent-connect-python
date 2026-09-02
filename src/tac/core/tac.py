@@ -392,10 +392,11 @@ class TAC:
         dedicated callback (e.g. transcript fragments, usage updates) — not tied to any
         specific model or provider.
 
-        Fire-and-forget: the return value is ignored, and an exception raised by the
-        callback is logged and swallowed rather than affecting call handling. The event
-        stream can be high-frequency and its shape is provider-specific and may change,
-        so read fields defensively and check `event["type"]` first.
+        Best-effort: the return value is ignored; if the callback is async it is awaited
+        (so keep it fast), and an exception raised by the callback is logged and swallowed
+        rather than affecting call handling. The event stream can be high-frequency and
+        provider-specific and may change, so read fields defensively and check
+        `event.get("type")`.
 
         Example:
             ```python
@@ -572,7 +573,8 @@ class TAC:
         if self._model_event_callback is None:
             return
         try:
-            result = self._model_event_callback(conversation_id, event)
+            callback_event = event.copy()
+            result = self._model_event_callback(conversation_id, callback_event)
             if inspect.isawaitable(result):
                 await result
         except asyncio.CancelledError:
