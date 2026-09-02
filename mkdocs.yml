@@ -54,7 +54,7 @@ plugins:
             signature_crossrefs: true
             merge_init_into_class: true
             filters:
-              ["!^_", "!^trigger_message_ready$", "!^trigger_interrupt$", "!^trigger_conversation_ended$", "!^register_partner_connector$", "!^is_orchestrator_enabled$"]
+              ["!^_", "!^trigger_message_ready$", "!^trigger_interrupt$", "!^trigger_conversation_ended$", "!^trigger_model_event$", "!^register_partner_connector$", "!^is_orchestrator_enabled$"]
 
 markdown_extensions:
   - admonition
