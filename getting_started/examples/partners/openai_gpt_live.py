@@ -34,9 +34,7 @@ Install the extra dependencies this example needs:
 
 Usage:
     python openai_gpt_live.py                    # inbound only
-    # also place an outbound call — make sure you have permission to call
-    # this number; unsolicited calls risk the number being flagged as spam
-    python openai_gpt_live.py --to +16505551234
+    python openai_gpt_live.py --to +16505551234  # place an outbound call
 """
 
 import argparse
