@@ -193,6 +193,59 @@ class TestModelEventWiring:
         ]
 
     @pytest.mark.asyncio
+    async def test_callback_mutation_does_not_affect_dispatch(self) -> None:
+        """A callback that mutates its event (including nested payloads) must not
+        alter what _dispatch_model_event subsequently sees for the same event."""
+        channel = make_channel()
+        provider = channel._provider
+
+        def mutating_handler(conv_id: str, event: dict[str, Any]) -> None:
+            if event.get("type") == "response.done":
+                event["response"]["output"] = []
+
+        channel.tac.on_model_event(mutating_handler)
+
+        twilio_ws = FakeTwilioWebSocket(
+            events=[
+                {"event": "start", "start": {"callSid": "CA777", "streamSid": "MZ777"}},
+                {"event": "stop"},
+            ]
+        )
+        model_ws = FakeModelWebSocket(
+            events=[
+                {
+                    "type": "response.done",
+                    "response": {
+                        "output": [
+                            {
+                                "role": "assistant",
+                                "content": [{"transcript": "hello there"}],
+                            }
+                        ]
+                    },
+                },
+            ]
+        )
+
+        captured_transcripts: list[list[dict[str, Any]]] = []
+        original_dispatch = provider._dispatch_model_event
+
+        async def spying_dispatch(conv_id: str, session: Any, event: dict[str, Any]) -> None:
+            await original_dispatch(conv_id, session, event)
+            captured_transcripts.append(list(session.metadata.get("transcript", [])))
+
+        with (
+            patch(
+                "tac.channels.voice.media_streams.openai_realtime.provider.websockets.connect",
+                new=AsyncMock(return_value=model_ws),
+            ),
+            patch.object(provider, "_dispatch_model_event", side_effect=spying_dispatch),
+        ):
+            await asyncio.wait_for(provider.handle_websocket(twilio_ws), timeout=5)
+
+        assert captured_transcripts == [[{"role": "assistant", "text": "hello there"}]]
+
+    @pytest.mark.asyncio
     async def test_no_handler_registered_does_not_break_dispatch(self) -> None:
         """Without on_model_event registered, model events are still dispatched
         normally (trigger_model_event is a no-op, not an error)."""
