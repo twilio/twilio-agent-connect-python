@@ -56,6 +56,11 @@ TWILIO_MEDIA_STREAM_AUDIO_FORMAT: dict[str, Any] = {"type": "audio/pcmu", "rate"
 #: How long to wait for `session.closed` before closing the socket anyway.
 _CLOSE_TIMEOUT_SECONDS = 5.0
 
+#: How long a _call_session_configs entry can outlive its outbound call
+#: before it's purged — covers no-answer, busy, and other cases where
+#: Twilio never connects the Media Stream to consume it via _register_call.
+_SESSION_CONFIG_TOKEN_TTL_SECONDS = 120.0
+
 
 class GPTLiveProvider(MediaStreamsOpenAIProvider[_CallState]):
     """``VoiceProvider`` bridging Twilio Media Streams to OpenAI's GPT-Live alpha.
@@ -67,6 +72,13 @@ class GPTLiveProvider(MediaStreamsOpenAIProvider[_CallState]):
     """
 
     config: GPTLiveProviderConfig
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        # Strong references for fire-and-forget _expire_session_config_token
+        # tasks — asyncio only weakly references a task with no other
+        # referrer, so without this the task can be GC'd mid-sleep.
+        self._pending_token_expiries: set[asyncio.Task[None]] = set()
 
     @property
     def channel_name(self) -> str:
@@ -166,6 +178,13 @@ class GPTLiveProvider(MediaStreamsOpenAIProvider[_CallState]):
                 to=mask_phone(options.to),
             )
 
+            if session_config_token is not None:
+                expiry_task = asyncio.create_task(
+                    self._expire_session_config_token(session_config_token)
+                )
+                self._pending_token_expiries.add(expiry_task)
+                expiry_task.add_done_callback(self._pending_token_expiries.discard)
+
             return InitiateVoiceConversationResult(call_sid=call.sid)
 
         except Exception as e:
@@ -178,6 +197,15 @@ class GPTLiveProvider(MediaStreamsOpenAIProvider[_CallState]):
                 exc_info=True,
             )
             raise
+
+    async def _expire_session_config_token(self, token: str) -> None:
+        """Purge a stashed session_config token if it's still unclaimed after the TTL.
+
+        Covers no-answer, busy, and other outbound-call outcomes that never
+        trigger ``_register_call`` — the only other place this token is popped.
+        """
+        await asyncio.sleep(_SESSION_CONFIG_TOKEN_TTL_SECONDS)
+        self._call_session_configs.pop(token, None)
 
     async def handle_websocket(self, websocket: WebSocketProtocol) -> None:
         """Drive one Twilio Media Stream connection from accept to disconnect.
