@@ -23,9 +23,7 @@ from tac.models.voice import TwiMLRequest
 from tac.tools import function_tool
 
 _VALID_SESSION_CONFIG = {
-    # No "model" here — GPT-Live's WebSocket docs say not to repeat it in
-    # session.update; the model is selected via the ?model= query param
-    # (GPTLiveProviderConfig.model) instead.
+    "model": "gpt-live-1-diamond-alpha",
     "audio": {"format": TWILIO_MEDIA_STREAM_AUDIO_FORMAT},
 }
 
@@ -97,6 +95,7 @@ class FakeModelWebSocket:
     def __init__(self, events: list[dict] | None = None, stay_open: bool = False) -> None:
         self._events = list(events or [])
         self._stay_open = stay_open
+        self._ended = False
         self.sent: list[dict] = []
         self.closed = False
 
@@ -108,9 +107,12 @@ class FakeModelWebSocket:
             return json.dumps(self._events.pop(0))
         if self._stay_open:
             await asyncio.Event().wait()
+        self._ended = True
         raise StopAsyncIteration
 
     async def send(self, data: str) -> None:
+        if self._ended:
+            raise RuntimeError("connection closed")
         self.sent.append(json.loads(data))
 
     async def close(self) -> None:
@@ -135,11 +137,11 @@ class TestConfigValidation:
 
         GPTLiveProviderConfig(openai_api_key="sk-test", on_inbound_call_session_config=customizer)
 
-    def test_model_defaults(self) -> None:
+    def test_default_session_config_carries_model(self) -> None:
         config = GPTLiveProviderConfig(
             openai_api_key="sk-test", default_session_config=dict(_VALID_SESSION_CONFIG)
         )
-        assert config.model == "gpt-live-1-marble-alpha"
+        assert config.default_session_config["model"] == "gpt-live-1-diamond-alpha"
 
 
 class TestOutboundCallSessionConfig:
@@ -185,6 +187,7 @@ class TestOutboundCallSessionConfig:
                 InitiateVoiceConversationOptionsGPTLive(
                     to="+15551234567",
                     session_config={
+                        "model": "gpt-live-1-diamond-alpha",
                         "audio": {"format": TWILIO_MEDIA_STREAM_AUDIO_FORMAT},
                         "instructions": "outbound override",
                     },
@@ -214,7 +217,7 @@ class TestOutboundCallSessionConfig:
         ):
             await asyncio.wait_for(provider.handle_websocket(twilio_ws), timeout=5)
 
-        sent_session = next(m for m in model_ws.sent if m["type"] == "session.update")
+        sent_session = next(m for m in model_ws.sent if m["type"] == "session.start")
         assert sent_session["session"]["instructions"] == "outbound override"
         assert provider._call_session_configs == {}
 
@@ -297,7 +300,7 @@ class TestOutboundCallSessionConfig:
         ) as mock_connect:
             await asyncio.wait_for(provider.handle_websocket(twilio_ws), timeout=5)
 
-        assert "v1/live?model=gpt-live-1-marble-alpha" in mock_connect.call_args.args[0]
+        assert mock_connect.call_args.args[0] == "wss://api.openai.com/v1/live/sessions"
 
     @pytest.mark.asyncio
     async def test_session_config_token_not_leaked_if_twiml_build_fails(self) -> None:
@@ -346,8 +349,6 @@ class TestHandleWebSocketLifecycle:
 
     @pytest.mark.asyncio
     async def test_input_audio_forwarded_with_gpt_live_event_shape(self) -> None:
-        """Unlike Realtime's input_audio_buffer.append, GPT-Live uses
-        input_audio.append."""
         channel = make_channel()
         provider = channel._provider
 
@@ -358,7 +359,7 @@ class TestHandleWebSocketLifecycle:
                 {"event": "stop"},
             ]
         )
-        model_ws = FakeModelWebSocket(events=[], stay_open=True)
+        model_ws = FakeModelWebSocket(events=[{"type": "session.closed"}], stay_open=True)
 
         with patch(
             "tac.channels.voice.media_streams.gpt_live.provider.websockets.connect",
@@ -366,7 +367,7 @@ class TestHandleWebSocketLifecycle:
         ):
             await asyncio.wait_for(provider.handle_websocket(twilio_ws), timeout=5)
 
-        assert {"type": "input_audio.append", "audio": "abcd"} in model_ws.sent
+        assert {"type": "session.input_audio.append", "audio": "abcd"} in model_ws.sent
 
     @pytest.mark.asyncio
     async def test_session_close_sent_on_teardown(self) -> None:
@@ -379,7 +380,7 @@ class TestHandleWebSocketLifecycle:
                 {"event": "stop"},
             ]
         )
-        model_ws = FakeModelWebSocket(events=[], stay_open=True)
+        model_ws = FakeModelWebSocket(events=[{"type": "session.closed"}], stay_open=True)
 
         with patch(
             "tac.channels.voice.media_streams.gpt_live.provider.websockets.connect",
@@ -401,21 +402,18 @@ class TestConnectModelSessionConfig:
             await provider._connect_model("CA_BAD")
 
     @pytest.mark.asyncio
-    async def test_model_key_in_session_config_raises_at_connect_time(self) -> None:
-        """GPT-Live rejects repeating 'model' in the initial session.update — it
-        comes from the ?model= query param (GPTLiveProviderConfig.model) instead."""
+    async def test_missing_model_raises_at_connect_time(self) -> None:
         channel = make_channel()
         provider = channel._provider
         provider._call_session_configs["CA_MODEL"] = {
-            "model": "gpt-live-1-marble-alpha",
             "audio": {"format": TWILIO_MEDIA_STREAM_AUDIO_FORMAT},
         }
 
-        with pytest.raises(ValueError, match="must not include 'model'"):
+        with pytest.raises(ValueError, match="must include 'model'"):
             await provider._connect_model("CA_MODEL")
 
     @pytest.mark.asyncio
-    async def test_wss_url_uses_configured_model(self) -> None:
+    async def test_wss_connect_uses_configured_model_and_alpha_header(self) -> None:
         channel = make_channel()
         provider = channel._provider
 
@@ -430,9 +428,12 @@ class TestConnectModelSessionConfig:
         ) as mock_connect:
             await asyncio.wait_for(provider.handle_websocket(twilio_ws), timeout=5)
 
-        assert "v1/live?model=gpt-live-1-marble-alpha" in mock_connect.call_args.args[0]
+        assert mock_connect.call_args.args[0] == "wss://api.openai.com/v1/live/sessions"
         headers = mock_connect.call_args.kwargs["additional_headers"]
-        assert headers["OpenAI-Alpha"] == "quicksilver=v2"
+        assert headers["OpenAI-Alpha"] == "quicksilver=v3"
+
+        sent_session = next(m for m in model_ws.sent if m["type"] == "session.start")
+        assert sent_session["session"]["model"] == "gpt-live-1-diamond-alpha"
 
 
 class TestInboundCallSessionConfig:
@@ -441,6 +442,7 @@ class TestInboundCallSessionConfig:
         async def customizer(req: TwiMLRequest) -> dict | None:
             if req.caller_country == "MX":
                 return {
+                    "model": "gpt-live-1-diamond-alpha",
                     "instructions": "Habla en español.",
                     "audio": {"format": TWILIO_MEDIA_STREAM_AUDIO_FORMAT},
                 }
@@ -465,14 +467,14 @@ class TestInboundCallSessionConfig:
         ):
             await asyncio.wait_for(provider.handle_websocket(twilio_ws), timeout=5)
 
-        sent_session = next(m for m in model_ws.sent if m["type"] == "session.update")
+        sent_session = next(m for m in model_ws.sent if m["type"] == "session.start")
         assert sent_session["session"]["instructions"] == "Habla en español."
         assert "CA_MX" not in provider._call_session_configs
 
 
-class TestTurnDoneTranscript:
+class TestTranscriptDeltas:
     @pytest.mark.asyncio
-    async def test_turn_done_captures_transcript(self) -> None:
+    async def test_input_transcript_delta_appends_user_turn(self) -> None:
         channel = make_channel()
         provider = channel._provider
 
@@ -480,10 +482,29 @@ class TestTurnDoneTranscript:
         session = channel._start_conversation("CA1", profile_id=None)
 
         await provider._dispatch_model_event(
-            "CA1", session, {"type": "turn.done", "turn": {"role": "user", "transcript": "hi"}}
+            "CA1",
+            session,
+            {"type": "session.input_transcript.delta", "delta": "hi"},
         )
 
         assert session.metadata["transcript"] == [{"role": "user", "text": "hi"}]
+
+    @pytest.mark.asyncio
+    async def test_consecutive_same_role_deltas_merge_into_one_entry(self) -> None:
+        channel = make_channel()
+        provider = channel._provider
+
+        provider._calls["CA1b"] = _CallState()
+        session = channel._start_conversation("CA1b", profile_id=None)
+
+        for chunk in ("he", "llo"):
+            await provider._dispatch_model_event(
+                "CA1b",
+                session,
+                {"type": "session.output_transcript.delta", "delta": chunk},
+            )
+
+        assert session.metadata["transcript"] == [{"role": "assistant", "text": "hello"}]
 
 
 class TestOutputAudioDelta:
@@ -498,7 +519,7 @@ class TestOutputAudioDelta:
         session.metadata["stream_sid"] = "MZ2"
 
         await provider._dispatch_model_event(
-            "CA2", session, {"type": "output_audio.delta", "audio": "xyz"}
+            "CA2", session, {"type": "session.output_audio.delta", "delta": "xyz"}
         )
 
         assert twilio_ws.sent == [
@@ -517,11 +538,7 @@ class TestToolCalls:
         assert result == {"error": "Unknown tool 'does_not_exist'"}
 
     @pytest.mark.asyncio
-    async def test_function_call_uses_delegation_event_with_no_followup(self) -> None:
-        """Unlike Realtime's two-send pattern (function_call_output +
-        response.create), GPT-Live's Responses delegation only needs one
-        send — no follow-up response.create."""
-
+    async def test_function_call_sends_output_then_continues_response(self) -> None:
         @function_tool()
         def add(a: int, b: int) -> int:
             """Add two numbers."""
@@ -542,11 +559,12 @@ class TestToolCalls:
             },
         )
 
-        assert len(model_ws.sent) == 1
-        sent = model_ws.sent[0]
-        assert sent["type"] == "delegation.function_call_output.create"
-        assert sent["item"]["call_id"] == "call_1"
-        assert json.loads(sent["item"]["output"]) == 5
+        assert len(model_ws.sent) == 2
+        output_sent, continue_sent = model_ws.sent
+        assert output_sent["type"] == "response.item.create"
+        assert output_sent["item"]["call_id"] == "call_1"
+        assert json.loads(output_sent["item"]["output"]) == 5
+        assert continue_sent == {"type": "response.create"}
 
     @pytest.mark.asyncio
     async def test_non_serializable_output_still_sends_function_call_output(self) -> None:
@@ -565,9 +583,10 @@ class TestToolCalls:
             "CA4", {"call_id": "call_1", "name": "broken_output", "arguments": "{}"}
         )
 
-        assert len(model_ws.sent) == 1
+        assert len(model_ws.sent) == 2
         payload = json.loads(model_ws.sent[0]["item"]["output"])
         assert "error" in payload
+        assert model_ws.sent[1] == {"type": "response.create"}
 
     @pytest.mark.asyncio
     async def test_missing_call_id_is_dropped_without_sending_anything(self) -> None:
@@ -614,7 +633,8 @@ class TestToolCalls:
         )
 
         assert ran is False
-        assert len(model_ws.sent) == 1
+        assert len(model_ws.sent) == 2
+        assert model_ws.sent[1] == {"type": "response.create"}
         sent = model_ws.sent[0]
         assert sent["item"]["call_id"] == "call_1"
         payload = json.loads(sent["item"]["output"])

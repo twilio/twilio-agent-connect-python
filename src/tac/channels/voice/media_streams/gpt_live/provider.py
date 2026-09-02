@@ -2,10 +2,9 @@
 
 GPT-Live is an unreleased OpenAI alpha API.
 
-Unlike ``OpenAIRealtimeProvider``, GPT-Live is full-duplex — there's no
-client-driven barge-in truncate, the model handles interruption itself — and
-tool calls go through Responses delegation instead of direct function-calling
-events.
+GPT-Live is full-duplex — the model handles interruption server-side, so
+there's no client-driven barge-in truncate to manage — and tool calls go
+through Responses delegation rather than direct function-calling events.
 """
 
 from __future__ import annotations
@@ -40,7 +39,7 @@ if TYPE_CHECKING:
 # TODO: remove once GPT-Live is released (GA drops the alpha header requirement).
 #: Required on every GPT-Live alpha request — omitting it is rejected.
 _OPENAI_ALPHA_HEADER_NAME = "OpenAI-Alpha"
-_OPENAI_ALPHA_HEADER_VALUE = "quicksilver=v2"
+_OPENAI_ALPHA_HEADER_VALUE = "quicksilver=v3"
 
 #: Reserved <Stream> custom_parameters key used to correlate an outbound
 #: call's session_config override to its WebSocket start event. calls.create()
@@ -49,11 +48,13 @@ _OPENAI_ALPHA_HEADER_VALUE = "quicksilver=v2"
 #: before the call is placed, can.
 _SESSION_CONFIG_TOKEN_PARAM = "_tac_session_config_token"
 
-#: GPT-Live speaks Twilio's exact wire format natively — unlike the Realtime
-#: API's separate session.audio.input/output.format, this is a single shared
+#: GPT-Live speaks Twilio's exact wire format natively — a single shared
 #: session.audio.format, selected once at WebSocket startup and immutable
 #: after. No transcoding needed on either leg between Twilio and GPT-Live.
 TWILIO_MEDIA_STREAM_AUDIO_FORMAT: dict[str, Any] = {"type": "audio/pcmu", "rate": 8000}
+
+#: How long to wait for `session.closed` before closing the socket anyway.
+_CLOSE_TIMEOUT_SECONDS = 5.0
 
 
 class GPTLiveProvider(MediaStreamsOpenAIProvider[_CallState]):
@@ -222,7 +223,7 @@ class GPTLiveProvider(MediaStreamsOpenAIProvider[_CallState]):
                     if conv_id is not None and media.get("payload"):
                         await self._model_send(
                             conv_id,
-                            {"type": "input_audio.append", "audio": media["payload"]},
+                            {"type": "session.input_audio.append", "audio": media["payload"]},
                         )
 
                 elif event == "stop":
@@ -234,13 +235,13 @@ class GPTLiveProvider(MediaStreamsOpenAIProvider[_CallState]):
         except Exception as e:
             self.logger.error(f"Media stream WebSocket error: {e}", exc_info=True)
         finally:
+            if conv_id is not None:
+                await self._cleanup_call(conv_id)
             if model_reader is not None and not model_reader.done():
                 model_reader.cancel()
             if model_reader is not None:
                 with contextlib.suppress(asyncio.CancelledError):
                     await model_reader
-            if conv_id is not None:
-                await self._cleanup_call(conv_id)
 
     def _register_call(self, start: dict[str, Any], websocket: WebSocketProtocol) -> str:
         """Handle Twilio's ``start`` event, returning the conversation id."""
@@ -286,17 +287,11 @@ class GPTLiveProvider(MediaStreamsOpenAIProvider[_CallState]):
                 f"Twilio Media Streams always sends/expects {TWILIO_MEDIA_STREAM_AUDIO_FORMAT!r}, "
                 "this isn't configurable. Set audio.format to TWILIO_MEDIA_STREAM_AUDIO_FORMAT."
             )
-        if "model" in session_config:
-            # The model is selected via the WebSocket URL's ?model= query
-            # param; GPT-Live rejects repeating it in the initial session.update.
-            raise ValueError(
-                f"session_config for call {conv_id} must not include 'model' — GPT-Live "
-                "selects it from the ?model= query param (GPTLiveProviderConfig.model), "
-                "not from session_config."
-            )
+        if "model" not in session_config:
+            raise ValueError(f"session_config for call {conv_id} must include 'model'.")
 
         model_ws = await websockets.connect(
-            f"wss://api.openai.com/v1/live?model={self.config.model}",
+            "wss://api.openai.com/v1/live/sessions",
             additional_headers={
                 "Authorization": f"Bearer {self.config.openai_api_key}",
                 "User-Agent": OPENAI_USER_AGENT,
@@ -308,7 +303,7 @@ class GPTLiveProvider(MediaStreamsOpenAIProvider[_CallState]):
             call.model_ws = model_ws
         self.logger.info("Connected to GPT-Live", conversation_id=conv_id)
 
-        await self._model_send(conv_id, {"type": "session.update", "session": session_config})
+        await self._model_send(conv_id, {"type": "session.start", "session": session_config})
         # welcome_instruction is sent once session.started arrives — see _dispatch_model_event.
 
     async def _dispatch_model_event(
@@ -321,8 +316,13 @@ class GPTLiveProvider(MediaStreamsOpenAIProvider[_CallState]):
                 "GPT-Live error event", conversation_id=conv_id, error=event.get("error")
             )
 
+        elif event_type == "session.closed":
+            call = self._calls.get(conv_id)
+            if call is not None:
+                call.closed_event.set()
+
         elif event_type == "session.started":
-            # session.context.append before this event is undocumented behavior.
+            # session.commentary.append before this event is undocumented behavior.
             instruction = self.config.welcome_instruction
             if instruction is not None:
                 # Sent verbatim — caller must word it as an instruction, not a
@@ -330,44 +330,57 @@ class GPTLiveProvider(MediaStreamsOpenAIProvider[_CallState]):
                 await self._model_send(
                     conv_id,
                     {
-                        "type": "session.context.append",
-                        "channel": "speakable",
-                        "content": [{"type": "input_text", "text": instruction}],
+                        "type": "session.commentary.append",
+                        "delegation_id": None,
+                        "content": instruction,
                     },
                 )
 
-        elif event_type == "turn.done":
-            # One assembled entry per turn — unlike Realtime's fragment-level
-            # *_transcript.added events.
-            turn = event.get("turn") or {}
-            text = turn.get("transcript")
-            role = turn.get("role")
-            if text and role:
-                session.metadata.setdefault("transcript", []).append({"role": role, "text": text})
+        elif event_type == "session.input_transcript.delta":
+            self._append_transcript_delta(session, "user", event)
 
-        elif event_type == "output_audio.delta" and event.get("audio"):
+        elif event_type == "session.output_transcript.delta":
+            self._append_transcript_delta(session, "assistant", event)
+
+        elif event_type == "session.output_audio.delta":
             # No item_id/barge-in bookkeeping needed — GPT-Live is
             # full-duplex and handles interruption server-side.
-            await self._twilio_send(
-                conv_id,
-                {
-                    "event": "media",
-                    "streamSid": session.metadata.get("stream_sid"),
-                    "media": {"payload": event["audio"]},
-                },
-            )
+            delta = event.get("delta")
+            if delta:
+                await self._twilio_send(
+                    conv_id,
+                    {
+                        "event": "media",
+                        "streamSid": session.metadata.get("stream_sid"),
+                        "media": {"payload": delta},
+                    },
+                )
 
-        elif event_type == "response.output_item.done":
-            # "completed" excludes calls cut short mid-generation.
-            item = event.get("item") or {}
-            if item.get("type") == "function_call" and item.get("status") == "completed":
-                await self._handle_function_call(conv_id, item)
+        elif event_type == "response.event":
+            inner = event.get("event") or {}
+            if inner.get("type") == "response.output_item.done":
+                # "completed" excludes calls cut short mid-generation.
+                item = inner.get("item") or {}
+                if item.get("type") == "function_call" and item.get("status") == "completed":
+                    await self._handle_function_call(conv_id, item)
+
+    @staticmethod
+    def _append_transcript_delta(
+        session: ConversationSession, role: str, event: dict[str, Any]
+    ) -> None:
+        """Accumulate one transcript delta into the in-progress turn."""
+        text = event.get("delta")
+        if not text:
+            return
+        transcript: list[dict[str, str]] = session.metadata.setdefault("transcript", [])
+        if transcript and transcript[-1]["role"] == role:
+            transcript[-1]["text"] += text
+        else:
+            transcript.append({"role": role, "text": text})
 
     async def _handle_function_call(self, conv_id: str, item: dict[str, Any]) -> None:
         """Run a Responses-delegated tool call and hand the result back.
 
-        Unlike Realtime, no follow-up ``response.create`` is sent — GPT-Live
-        continues on its own once the delegation output is acknowledged.
         Always sends a function_call_output when call_id is present — even a
         tool that ran successfully can return a non-JSON-serializable object
         (a datetime, a Pydantic model, ...), and the model would otherwise be
@@ -408,7 +421,7 @@ class GPTLiveProvider(MediaStreamsOpenAIProvider[_CallState]):
         await self._model_send(
             conv_id,
             {
-                "type": "delegation.function_call_output.create",
+                "type": "response.item.create",
                 "item": {
                     "type": "function_call_output",
                     "call_id": call_id,
@@ -416,16 +429,17 @@ class GPTLiveProvider(MediaStreamsOpenAIProvider[_CallState]):
                 },
             },
         )
+        await self._model_send(conv_id, {"type": "response.create"})
 
     async def _cleanup_call(self, conv_id: str) -> None:
-        call = self._calls.pop(conv_id, None)
+        call = self._calls.get(conv_id)
         if call is not None and call.model_ws is not None:
-            # Known limitation: doesn't wait for session.closed before
-            # closing the socket out from under it.
             with contextlib.suppress(Exception):
                 await call.model_ws.send(json.dumps({"type": "session.close"}))
+                await asyncio.wait_for(call.closed_event.wait(), timeout=_CLOSE_TIMEOUT_SECONDS)
             try:
                 await call.model_ws.close()
             except Exception as e:
                 self.logger.debug(f"Error closing model socket: {e}", conversation_id=conv_id)
+        self._calls.pop(conv_id, None)
         await self.channel._end_conversation(conv_id)

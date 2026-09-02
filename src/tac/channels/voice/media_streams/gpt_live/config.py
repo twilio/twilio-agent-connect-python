@@ -21,8 +21,6 @@ from tac.tools import TACTool
 if TYPE_CHECKING:
     from tac.channels.voice.channel import VoiceChannel
 
-DEFAULT_GPT_LIVE_MODEL = "gpt-live-1-marble-alpha"
-
 
 class GPTLiveProviderConfig(MediaStreamsOpenAIProviderConfig):
     """Configuration for ``GPTLiveProvider``."""
@@ -31,11 +29,6 @@ class GPTLiveProviderConfig(MediaStreamsOpenAIProviderConfig):
         default_factory=lambda: os.environ.get("OPENAI_API_KEY"),
         description="OpenAI API key for a GPT-Live alpha-approved project. A key from a "
         "non-approved project will fail to connect.",
-    )
-    model: str = Field(
-        default=DEFAULT_GPT_LIVE_MODEL,
-        description="GPT-Live model id, sent as the ?model= query param. Unlike "
-        "OpenAIRealtimeProviderConfig, this is not part of session_config.",
     )
     tools: list[TACTool] = Field(
         default_factory=list,
@@ -46,18 +39,19 @@ class GPTLiveProviderConfig(MediaStreamsOpenAIProviderConfig):
     )
     welcome_instruction: str | None = Field(
         default=None,
-        description="If set, sent verbatim as a `session.context.append` "
-        "(channel='speakable') once `session.started` arrives. Word it as an "
+        description="If set, sent verbatim as a `session.commentary.append` "
+        "once `session.started` arrives. Word it as an "
         "instruction, not just a greeting, e.g. 'Greet the caller immediately "
         "using: Hi, how can I help you today?' — a bare greeting won't make the "
         "model speak first.",
     )
     default_session_config: dict[str, Any] | None = Field(
         default=None,
-        description="The session.update payload's 'session' body, sent once the model "
+        description="The session.start payload's 'session' body, sent once the model "
         "connects — used for any call that doesn't supply its own via "
         "`on_inbound_call_session_config` or `InitiateVoiceConversationOptionsGPTLive`. "
-        "Set `audio.format` to `TWILIO_MEDIA_STREAM_AUDIO_FORMAT` and, for tool calling, "
+        "Must include `model` (e.g. 'gpt-live-1-diamond-alpha'). Set `audio.format` to "
+        "`TWILIO_MEDIA_STREAM_AUDIO_FORMAT` and, for tool calling, "
         "`delegation = {'type': 'responses', 'responses': {'model': ..., 'tools': [...]}}`.",
     )
     on_inbound_call_session_config: (

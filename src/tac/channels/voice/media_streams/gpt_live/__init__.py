@@ -3,10 +3,7 @@
 GPT-Live is an unreleased OpenAI alpha API.
 """
 
-from tac.channels.voice.media_streams.gpt_live.config import (
-    DEFAULT_GPT_LIVE_MODEL,
-    GPTLiveProviderConfig,
-)
+from tac.channels.voice.media_streams.gpt_live.config import GPTLiveProviderConfig
 from tac.channels.voice.media_streams.gpt_live.provider import (
     TWILIO_MEDIA_STREAM_AUDIO_FORMAT,
     GPTLiveProvider,
@@ -17,7 +14,6 @@ from tac.models.stream import StreamStartMessage
 from tac.models.voice import VoiceTwiMLOptionsMediaStreams
 
 __all__ = [
-    "DEFAULT_GPT_LIVE_MODEL",
     "GPTLiveProvider",
     "GPTLiveProviderConfig",
     "InitiateVoiceConversationOptionsGPTLive",

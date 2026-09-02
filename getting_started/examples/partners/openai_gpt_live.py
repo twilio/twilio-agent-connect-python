@@ -6,21 +6,20 @@ This example will fail to connect unless OPENAI_API_KEY belongs to a
 GPT-Live alpha-approved project.
 
 Twilio streams call audio to our own WebSocket, and this provider relays it
-to/from the GPT-Live WebSocket. Unlike the Realtime API provider:
+to/from the GPT-Live WebSocket:
 - GPT-Live is full-duplex — there's no barge-in/truncate to configure, the
   model handles interruption itself.
-- Tool calls go through Responses delegation (`session_config["delegation"]`),
-  not direct function-calling — `web_search` below is a hosted tool OpenAI
-  runs server-side, no code needed here for it to work.
-- The greeting is sent via `welcome_instruction` (a `session.context.append`
-  once `session.started` arrives), not a `response.create`-equivalent. Unlike
-  Realtime's `welcome_greeting_response`, the caller supplies the full
-  instruction verbatim — GPT-Live won't speak first from a bare greeting
-  string, so word it as an instruction, e.g. "Greet the caller using: ...".
+- Tool calls go through Responses delegation (`session_config["delegation"]`)
+  — `web_search` below is a hosted tool OpenAI runs server-side, no code
+  needed here for it to work.
+- The greeting is sent via `welcome_instruction` (a `session.commentary.append`
+  once `session.started` arrives). The caller supplies the full instruction
+  verbatim — GPT-Live won't speak first from a bare greeting string, so word
+  it as an instruction, e.g. "Greet the caller using: ...".
 
-Unlike the ConversationRelay examples, this runs in relay-only mode
-regardless of TAC's Conversation Orchestrator configuration — there's no
-profile lookup or CO conversation for a Media Streams call.
+This runs in relay-only mode regardless of TAC's Conversation Orchestrator
+configuration — there's no profile lookup or CO conversation for a Media
+Streams call.
 
 One-time account setup: same as openai_realtime.py.
 
@@ -71,6 +70,7 @@ def get_weather(city: str) -> str:
 
 
 DEFAULT_SESSION_CONFIG = {
+    "model": "gpt-live-1-diamond-alpha",
     "instructions": (
         "You are a warm, friendly voice assistant speaking with a caller over the phone. "
         "Keep responses short — a sentence or two per turn. No markdown, emojis, or "

@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import asyncio
+from dataclasses import dataclass, field
 
 from tac.channels.voice.media_streams.shared.models import MediaStreamsOpenAICallState
 
 
 @dataclass
 class _CallState(MediaStreamsOpenAICallState):
-    """Per-call bookkeeping this provider needs beyond ``ConversationSession``.
+    """Per-call bookkeeping this provider needs beyond ``ConversationSession``."""
 
-    No barge-in state, unlike ``OpenAIRealtimeProvider``'s ``_CallState`` —
-    GPT-Live is full-duplex and handles interruption itself; there's no
-    client-driven truncate/cancel to track state for.
-    """
+    #: Set once ``session.closed`` arrives, so ``_cleanup_call`` can wait for
+    #: graceful finalization before tearing down the socket.
+    closed_event: asyncio.Event = field(default_factory=asyncio.Event)
