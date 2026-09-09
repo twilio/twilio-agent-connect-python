@@ -55,6 +55,7 @@ Production-ready examples integrating TAC with partner SDKs:
 
 - **`voice_streaming.py`**: Stream LLM responses token-by-token for ~40-50% faster time-to-first-audio
 - **`handoff.py`**: Hand the conversation off to a human agent via a Twilio Studio Flow (works on voice and SMS)
+- **`knowledge.py`**: Answer user questions by searching a Twilio Knowledge Base (works on voice and SMS)
 - **`rcs.py`**: RCS (Rich Communication Services) channel with automatic memory retrieval
 - **`whatsapp.py`**: WhatsApp channel with automatic memory retrieval
 - **`outbound.py`**: Agent-initiated outbound conversations via SMS, RCS, WhatsApp, or Voice channels
@@ -91,6 +92,7 @@ uv run getting_started/examples/partners/aws_bedrock_agentcore.py
 uv run getting_started/examples/partners/aws_strands.py
 uv run getting_started/examples/features/voice_streaming.py
 uv run getting_started/examples/features/handoff.py
+uv run getting_started/examples/features/knowledge.py
 uv run getting_started/examples/features/relay_only.py
 ```
 
@@ -127,8 +129,9 @@ See `examples/.env.example` for all available configuration options. Key variabl
 ### Optional (OpenAI Example)
 - `OPENAI_API_KEY`: Your OpenAI API key (only needed to run OpenAI examples)
 
-### Optional (Channel-Specific)
+### Optional
 - `TWILIO_STUDIO_HANDOFF_FLOW_SID`: Studio Flow SID used by `create_studio_handoff_tool` (required for `features/handoff.py`)
+- `TWILIO_KNOWLEDGE_BASE_ID`: Knowledge Base ID used by `create_knowledge_tool` (required for `features/knowledge.py`)
 - `TWILIO_RCS_SENDER_ID`: RCS Sender ID (required for `features/rcs.py`)
 - `TWILIO_WHATSAPP_NUMBER`: WhatsApp-enabled phone number in format `whatsapp:+1234567890` (required for `features/whatsapp.py`)
 - `TWILIO_CONVERSATIONS_SERVICE_SID`: Conversations Service SID (required for Chat channel examples)
