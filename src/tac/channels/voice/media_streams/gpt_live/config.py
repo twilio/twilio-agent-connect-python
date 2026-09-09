@@ -1,11 +1,7 @@
-"""``GPTLiveProvider`` configuration.
-
-GPT-Live is an unreleased OpenAI alpha API.
-"""
+"""``GPTLiveProvider`` configuration."""
 
 from __future__ import annotations
 
-import os
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
@@ -25,11 +21,6 @@ if TYPE_CHECKING:
 class GPTLiveProviderConfig(MediaStreamsOpenAIProviderConfig):
     """Configuration for ``GPTLiveProvider``."""
 
-    openai_api_key: str | None = Field(
-        default_factory=lambda: os.environ.get("OPENAI_API_KEY"),
-        description="OpenAI API key for a GPT-Live alpha-approved project. A key from a "
-        "non-approved project will fail to connect.",
-    )
     tools: list[TACTool] = Field(
         default_factory=list,
         description="Executable TACTool implementations, looked up by name to run "
@@ -50,8 +41,8 @@ class GPTLiveProviderConfig(MediaStreamsOpenAIProviderConfig):
         description="The session.start payload's 'session' body, sent once the model "
         "connects — used for any call that doesn't supply its own via "
         "`on_inbound_call_session_config` or `InitiateVoiceConversationOptionsGPTLive`. "
-        "Must include `model` (e.g. 'gpt-live-1-diamond-alpha'). Set `audio.format` to "
-        "`TWILIO_MEDIA_STREAM_AUDIO_FORMAT` and, for tool calling, "
+        "Must include `model` (e.g. 'gpt-live-1'). Set `audio.format` to "
+        "`TWILIO_AUDIO_FORMAT_FOR_GPT_LIVE` and, for tool calling, "
         "`delegation = {'type': 'responses', 'responses': {'model': ..., 'tools': [...]}}`.",
     )
     on_inbound_call_session_config: (

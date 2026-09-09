@@ -1,10 +1,6 @@
 """
 Example: OpenAI GPT-Live voice calls via Twilio Media Streams.
 
-GPT-Live is an unreleased OpenAI alpha API, approved-project access only.
-This example will fail to connect unless OPENAI_API_KEY belongs to a
-GPT-Live alpha-approved project.
-
 Twilio streams call audio to our own WebSocket, and this provider relays it
 to/from the GPT-Live WebSocket:
 - GPT-Live is full-duplex — there's no barge-in/truncate to configure, the
@@ -27,7 +23,7 @@ Env vars required:
 - TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_API_KEY, TWILIO_API_SECRET
 - TWILIO_PHONE_NUMBER
 - TWILIO_VOICE_PUBLIC_DOMAIN (your ngrok domain or similar)
-- OPENAI_API_KEY (must belong to a GPT-Live alpha-approved project)
+- OPENAI_API_KEY
 
 Install the extra dependencies this example needs:
     pip install "tac[server,gpt-live]"
@@ -48,7 +44,7 @@ from fastapi import FastAPI
 from tac import TAC, TACConfig
 from tac.channels.voice import VoiceChannel
 from tac.channels.voice.media_streams.gpt_live import (
-    TWILIO_MEDIA_STREAM_AUDIO_FORMAT,
+    TWILIO_AUDIO_FORMAT_FOR_GPT_LIVE,
     GPTLiveProviderConfig,
 )
 from tac.models.outbound import InitiateVoiceConversationOptionsGPTLive
@@ -68,14 +64,14 @@ def get_weather(city: str) -> str:
 
 
 DEFAULT_SESSION_CONFIG = {
-    "model": "gpt-live-1-diamond-alpha",
+    "model": "gpt-live-1",
     "instructions": (
         "You are a warm, friendly voice assistant speaking with a caller over the phone. "
         "Keep responses short — a sentence or two per turn. No markdown, emojis, or "
         "bullet lists; your words will be spoken aloud."
     ),
     "audio": {
-        "format": TWILIO_MEDIA_STREAM_AUDIO_FORMAT,
+        "format": TWILIO_AUDIO_FORMAT_FOR_GPT_LIVE,
         "output": {"voice": "marin"},
     },
     "delegation": {

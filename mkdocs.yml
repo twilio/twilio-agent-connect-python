@@ -44,6 +44,9 @@ plugins:
         python:
           paths: [src]
           options:
+            extensions:
+              - griffe_pydantic:
+                  schema: false
             docstring_style: google
             show_source: false
             show_root_heading: true
@@ -72,6 +75,7 @@ nav:
   - API Reference:
       - Core: api/core.md
       - Channels: api/channels.md
+      - Media Streams Providers: api/media_streams.md
       - Context: api/context.md
       - Tools: api/tools.md
       - Adapters: api/adapters.md

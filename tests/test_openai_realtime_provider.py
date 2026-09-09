@@ -14,7 +14,7 @@ from tac.channels.voice.media_streams.openai_realtime import OpenAIRealtimeProvi
 from tac.channels.voice.media_streams.openai_realtime.models import _BargeInState, _CallState
 from tac.channels.voice.media_streams.openai_realtime.provider import (
     _SESSION_CONFIG_TOKEN_PARAM,
-    TWILIO_MEDIA_STREAM_AUDIO_FORMAT,
+    TWILIO_AUDIO_FORMAT_FOR_REALTIME,
 )
 from tac.models.outbound import (
     InitiateVoiceConversationOptions,
@@ -24,8 +24,8 @@ from tac.models.voice import TwiMLRequest
 from tac.tools import function_tool
 
 _VALID_AUDIO = {
-    "input": {"format": TWILIO_MEDIA_STREAM_AUDIO_FORMAT},
-    "output": {"format": TWILIO_MEDIA_STREAM_AUDIO_FORMAT},
+    "input": {"format": TWILIO_AUDIO_FORMAT_FOR_REALTIME},
+    "output": {"format": TWILIO_AUDIO_FORMAT_FOR_REALTIME},
 }
 
 

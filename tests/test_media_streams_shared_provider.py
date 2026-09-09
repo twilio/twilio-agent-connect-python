@@ -14,7 +14,7 @@ from tac import TAC
 from tac.channels.voice import VoiceChannel
 from tac.channels.voice.media_streams.openai_realtime import OpenAIRealtimeProviderConfig
 from tac.channels.voice.media_streams.openai_realtime.provider import (
-    TWILIO_MEDIA_STREAM_AUDIO_FORMAT,
+    TWILIO_AUDIO_FORMAT_FOR_REALTIME,
 )
 from tac.models.voice import (
     TwiMLRequest,
@@ -23,8 +23,8 @@ from tac.models.voice import (
 )
 
 _VALID_AUDIO = {
-    "input": {"format": TWILIO_MEDIA_STREAM_AUDIO_FORMAT},
-    "output": {"format": TWILIO_MEDIA_STREAM_AUDIO_FORMAT},
+    "input": {"format": TWILIO_AUDIO_FORMAT_FOR_REALTIME},
+    "output": {"format": TWILIO_AUDIO_FORMAT_FOR_REALTIME},
 }
 
 

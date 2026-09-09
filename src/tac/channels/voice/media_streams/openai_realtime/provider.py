@@ -41,13 +41,11 @@ if TYPE_CHECKING:
     )
 
 
-#: Twilio Media Streams always sends/expects 8kHz G.711 u-law audio — per
-#: https://www.twilio.com/docs/voice/media-streams/websocket-messages, this
-#: isn't a provider choice or a default, it's the only format Twilio's
-#: bidirectional Stream supports. No ``rate`` field — OpenAI's Realtime
-#: ``session.audio.*.format`` schema rejects it as unknown (g711 is
-#: inherently fixed-rate, so it isn't settable).
-TWILIO_MEDIA_STREAM_AUDIO_FORMAT: dict[str, Any] = {"type": "audio/pcmu"}
+#: Twilio Media Streams always sends/expects 8kHz G.711 u-law — see
+#: https://www.twilio.com/docs/voice/media-streams/websocket-messages. Not
+#: configurable. No ``rate`` key — Realtime's schema rejects it as unknown
+#: (g711 is inherently fixed-rate).
+TWILIO_AUDIO_FORMAT_FOR_REALTIME: dict[str, Any] = {"type": "audio/pcmu"}
 
 #: G.711 u-law at 8kHz is 1 byte/sample, 8000 samples/sec — a fixed,
 #: non-configurable rate, so audio byte count converts to milliseconds by
@@ -296,12 +294,12 @@ class OpenAIRealtimeProvider(MediaStreamsOpenAIProvider[_CallState]):
             )
         for direction in ("input", "output"):
             fmt = ((session_config.get("audio") or {}).get(direction) or {}).get("format")
-            if fmt != TWILIO_MEDIA_STREAM_AUDIO_FORMAT:
+            if fmt != TWILIO_AUDIO_FORMAT_FOR_REALTIME:
                 raise ValueError(
-                    f"session_config for call {conv_id} has audio.{direction}.format={fmt!r} — "
-                    f"Twilio Media Streams always sends/expects "
-                    f"{TWILIO_MEDIA_STREAM_AUDIO_FORMAT!r}, this isn't configurable. Set "
-                    f"audio.{direction}.format to TWILIO_MEDIA_STREAM_AUDIO_FORMAT."
+                    f"session_config for call {conv_id} has audio.{direction}.format={fmt!r}, "
+                    f"expected {TWILIO_AUDIO_FORMAT_FOR_REALTIME!r}. Twilio Media Streams is "
+                    f"always 8kHz G.711 u-law; set audio.{direction}.format to "
+                    "TWILIO_AUDIO_FORMAT_FOR_REALTIME."
                 )
 
         model_ws = await websockets.connect(

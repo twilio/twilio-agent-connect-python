@@ -1,6 +1,4 @@
-"""``GPTLiveProvider``: bridges Twilio Media Streams to OpenAI's GPT-Live alpha.
-
-GPT-Live is an unreleased OpenAI alpha API.
+"""``GPTLiveProvider``: bridges Twilio Media Streams to OpenAI's GPT-Live API.
 
 GPT-Live is full-duplex — the model handles interruption server-side, so
 there's no client-driven barge-in truncate to manage — and tool calls go
@@ -37,11 +35,6 @@ from tac.utils.redaction import mask_phone, redact_twiml_parameters
 if TYPE_CHECKING:
     from tac.channels.voice.media_streams.gpt_live.config import GPTLiveProviderConfig
 
-# TODO: remove once GPT-Live is released (GA drops the alpha header requirement).
-#: Required on every GPT-Live alpha request — omitting it is rejected.
-_OPENAI_ALPHA_HEADER_NAME = "OpenAI-Alpha"
-_OPENAI_ALPHA_HEADER_VALUE = "quicksilver=v3"
-
 #: Reserved <Stream> custom_parameters key used to correlate an outbound
 #: call's session_config override to its WebSocket start event. calls.create()
 #: returning call.sid doesn't happen-before Twilio connecting the stream, so
@@ -49,10 +42,11 @@ _OPENAI_ALPHA_HEADER_VALUE = "quicksilver=v3"
 #: before the call is placed, can.
 _SESSION_CONFIG_TOKEN_PARAM = "_tac_session_config_token"
 
-#: GPT-Live speaks Twilio's exact wire format natively — a single shared
-#: session.audio.format, selected once at WebSocket startup and immutable
-#: after. No transcoding needed on either leg between Twilio and GPT-Live.
-TWILIO_MEDIA_STREAM_AUDIO_FORMAT: dict[str, Any] = {"type": "audio/pcmu", "rate": 8000}
+#: Twilio Media Streams always sends/expects 8kHz G.711 u-law — see
+#: https://www.twilio.com/docs/voice/media-streams/websocket-messages. Not
+#: configurable. Spelled with an explicit ``rate``, which GPT-Live's schema
+#: wants and Realtime's rejects.
+TWILIO_AUDIO_FORMAT_FOR_GPT_LIVE: dict[str, Any] = {"type": "audio/pcmu", "rate": 8000}
 
 #: How long to wait for `session.closed` before closing the socket anyway.
 _CLOSE_TIMEOUT_SECONDS = 5.0
@@ -64,7 +58,7 @@ _SESSION_CONFIG_TOKEN_TTL_SECONDS = 120.0
 
 
 class GPTLiveProvider(MediaStreamsOpenAIProvider[_CallState]):
-    """``VoiceProvider`` bridging Twilio Media Streams to OpenAI's GPT-Live alpha.
+    """``VoiceProvider`` bridging Twilio Media Streams to OpenAI's GPT-Live API.
 
     Example:
         ```python
@@ -327,11 +321,11 @@ class GPTLiveProvider(MediaStreamsOpenAIProvider[_CallState]):
                 "and default_session_config isn't set either."
             )
         audio_format = (session_config.get("audio") or {}).get("format")
-        if audio_format != TWILIO_MEDIA_STREAM_AUDIO_FORMAT:
+        if audio_format != TWILIO_AUDIO_FORMAT_FOR_GPT_LIVE:
             raise ValueError(
-                f"session_config for call {conv_id} has audio.format={audio_format!r} — "
-                f"Twilio Media Streams always sends/expects {TWILIO_MEDIA_STREAM_AUDIO_FORMAT!r}, "
-                "this isn't configurable. Set audio.format to TWILIO_MEDIA_STREAM_AUDIO_FORMAT."
+                f"session_config for call {conv_id} has audio.format={audio_format!r}, "
+                f"expected {TWILIO_AUDIO_FORMAT_FOR_GPT_LIVE!r}. Twilio Media Streams is "
+                "always 8kHz G.711 u-law; set audio.format to TWILIO_AUDIO_FORMAT_FOR_GPT_LIVE."
             )
         if "model" not in session_config:
             raise ValueError(f"session_config for call {conv_id} must include 'model'.")
@@ -341,7 +335,6 @@ class GPTLiveProvider(MediaStreamsOpenAIProvider[_CallState]):
             additional_headers={
                 "Authorization": f"Bearer {self.config.openai_api_key}",
                 "User-Agent": OPENAI_USER_AGENT,
-                _OPENAI_ALPHA_HEADER_NAME: _OPENAI_ALPHA_HEADER_VALUE,
             },
         )
         call = self._calls.get(conv_id)

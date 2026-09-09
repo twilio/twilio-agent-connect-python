@@ -10,7 +10,7 @@ import pytest
 from tac import TAC
 from tac.channels.voice import VoiceChannel
 from tac.channels.voice.media_streams.gpt_live import (
-    TWILIO_MEDIA_STREAM_AUDIO_FORMAT,
+    TWILIO_AUDIO_FORMAT_FOR_GPT_LIVE,
     GPTLiveProviderConfig,
 )
 from tac.channels.voice.media_streams.gpt_live.models import _CallState
@@ -23,8 +23,8 @@ from tac.models.voice import TwiMLRequest
 from tac.tools import function_tool
 
 _VALID_SESSION_CONFIG = {
-    "model": "gpt-live-1-diamond-alpha",
-    "audio": {"format": TWILIO_MEDIA_STREAM_AUDIO_FORMAT},
+    "model": "gpt-live-1",
+    "audio": {"format": TWILIO_AUDIO_FORMAT_FOR_GPT_LIVE},
 }
 
 
@@ -141,7 +141,7 @@ class TestConfigValidation:
         config = GPTLiveProviderConfig(
             openai_api_key="sk-test", default_session_config=dict(_VALID_SESSION_CONFIG)
         )
-        assert config.default_session_config["model"] == "gpt-live-1-diamond-alpha"
+        assert config.default_session_config["model"] == "gpt-live-1"
 
 
 class TestOutboundCallSessionConfig:
@@ -187,8 +187,8 @@ class TestOutboundCallSessionConfig:
                 InitiateVoiceConversationOptionsGPTLive(
                     to="+15551234567",
                     session_config={
-                        "model": "gpt-live-1-diamond-alpha",
-                        "audio": {"format": TWILIO_MEDIA_STREAM_AUDIO_FORMAT},
+                        "model": "gpt-live-1",
+                        "audio": {"format": TWILIO_AUDIO_FORMAT_FOR_GPT_LIVE},
                         "instructions": "outbound override",
                     },
                 )
@@ -406,14 +406,14 @@ class TestConnectModelSessionConfig:
         channel = make_channel()
         provider = channel._provider
         provider._call_session_configs["CA_MODEL"] = {
-            "audio": {"format": TWILIO_MEDIA_STREAM_AUDIO_FORMAT},
+            "audio": {"format": TWILIO_AUDIO_FORMAT_FOR_GPT_LIVE},
         }
 
         with pytest.raises(ValueError, match="must include 'model'"):
             await provider._connect_model("CA_MODEL")
 
     @pytest.mark.asyncio
-    async def test_wss_connect_uses_configured_model_and_alpha_header(self) -> None:
+    async def test_wss_connect_uses_configured_model(self) -> None:
         channel = make_channel()
         provider = channel._provider
 
@@ -430,10 +430,11 @@ class TestConnectModelSessionConfig:
 
         assert mock_connect.call_args.args[0] == "wss://api.openai.com/v1/live/sessions"
         headers = mock_connect.call_args.kwargs["additional_headers"]
-        assert headers["OpenAI-Alpha"] == "quicksilver=v3"
+        assert headers["Authorization"] == "Bearer sk-test"
+        assert headers["User-Agent"].startswith("twilio-agent-connect-python/Python ")
 
         sent_session = next(m for m in model_ws.sent if m["type"] == "session.start")
-        assert sent_session["session"]["model"] == "gpt-live-1-diamond-alpha"
+        assert sent_session["session"]["model"] == "gpt-live-1"
 
 
 class TestInboundCallSessionConfig:
@@ -442,9 +443,9 @@ class TestInboundCallSessionConfig:
         async def customizer(req: TwiMLRequest) -> dict | None:
             if req.caller_country == "MX":
                 return {
-                    "model": "gpt-live-1-diamond-alpha",
+                    "model": "gpt-live-1",
                     "instructions": "Habla en español.",
-                    "audio": {"format": TWILIO_MEDIA_STREAM_AUDIO_FORMAT},
+                    "audio": {"format": TWILIO_AUDIO_FORMAT_FOR_GPT_LIVE},
                 }
             return None
 

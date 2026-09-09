@@ -49,7 +49,7 @@ from fastapi import FastAPI
 from tac import TAC, TACConfig
 from tac.channels.voice import VoiceChannel
 from tac.channels.voice.media_streams.openai_realtime import (
-    TWILIO_MEDIA_STREAM_AUDIO_FORMAT,
+    TWILIO_AUDIO_FORMAT_FOR_REALTIME,
     OpenAIRealtimeProviderConfig,
 )
 from tac.models.outbound import InitiateVoiceConversationOptionsOpenAIRealtime
@@ -80,11 +80,11 @@ DEFAULT_SESSION_CONFIG = {
     ),
     "audio": {
         "input": {
-            "format": TWILIO_MEDIA_STREAM_AUDIO_FORMAT,
+            "format": TWILIO_AUDIO_FORMAT_FOR_REALTIME,
             "turn_detection": {"type": "semantic_vad", "eagerness": "high"},
             "transcription": {"model": "gpt-live-transcribe"},
         },
-        "output": {"format": TWILIO_MEDIA_STREAM_AUDIO_FORMAT, "voice": "marin"},
+        "output": {"format": TWILIO_AUDIO_FORMAT_FOR_REALTIME, "voice": "marin"},
     },
     "tools": [get_weather.to_realtime_format()],
     "tool_choice": "auto",

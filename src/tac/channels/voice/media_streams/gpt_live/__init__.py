@@ -1,11 +1,8 @@
-"""``GPTLiveProvider``: bridges Twilio Media Streams to OpenAI's GPT-Live alpha.
-
-GPT-Live is an unreleased OpenAI alpha API.
-"""
+"""``GPTLiveProvider``: bridges Twilio Media Streams to OpenAI's GPT-Live API."""
 
 from tac.channels.voice.media_streams.gpt_live.config import GPTLiveProviderConfig
 from tac.channels.voice.media_streams.gpt_live.provider import (
-    TWILIO_MEDIA_STREAM_AUDIO_FORMAT,
+    TWILIO_AUDIO_FORMAT_FOR_GPT_LIVE,
     GPTLiveProvider,
 )
 from tac.channels.voice.media_streams.twiml import generate_twiml
@@ -18,7 +15,7 @@ __all__ = [
     "GPTLiveProviderConfig",
     "InitiateVoiceConversationOptionsGPTLive",
     "StreamStartMessage",
-    "TWILIO_MEDIA_STREAM_AUDIO_FORMAT",
+    "TWILIO_AUDIO_FORMAT_FOR_GPT_LIVE",
     "VoiceTwiMLOptionsMediaStreams",
     "generate_twiml",
 ]
