@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 
 #: Identifies this SDK to OpenAI on every WebSocket connection, per OpenAI's
 #: requested User-Agent pattern: [Company/Library name]/[Language] [Version].
-OPENAI_USER_AGENT = f"twilio-agent-connect-python/Python {__version__}"
+OPENAI_USER_AGENT = f"twilio-agent-connect/Python {__version__}"
 
 TCallState = TypeVar("TCallState", bound=MediaStreamsOpenAICallState)
 

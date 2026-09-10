@@ -432,7 +432,7 @@ class TestConnectModelSessionConfig:
         assert mock_connect.call_args.args[0] == "wss://api.openai.com/v1/live/sessions"
         headers = mock_connect.call_args.kwargs["additional_headers"]
         assert headers["Authorization"] == "Bearer sk-test"
-        assert headers["User-Agent"].startswith("twilio-agent-connect-python/Python ")
+        assert headers["User-Agent"].startswith("twilio-agent-connect/Python ")
 
         sent_session = next(m for m in model_ws.sent if m["type"] == "session.start")
         assert sent_session["session"]["model"] == "gpt-live-1"
