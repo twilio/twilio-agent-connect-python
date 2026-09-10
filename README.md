@@ -39,7 +39,7 @@ Seamlessly integrate with Twilio Conversation Memory and Conversation Orchestrat
 
 ## Key Features
 
-- **Multi-Channel Support**: Built-in handling for Voice (ConversationRelay), SMS, RCS, WhatsApp, and Chat
+- **Multi-Channel Support**: Built-in handling for Voice (Twilio ConversationRelay, OpenAI GPT-Live, OpenAI Realtime API), SMS, RCS, WhatsApp, and Chat
 - **Outbound Conversations**: Agent-initiated conversations across all supported channels
 - **ConversationRelay-Only Mode**: Get started quickly with TAC's voice plumbing (TwiML, WebSocket, callbacks) before adding Conversation Orchestrator or Conversation Memory
 - **Memory Management**: Automatic integration with Twilio Conversation Memory for persistent user context
@@ -56,6 +56,13 @@ For server support (includes FastAPI and uvicorn for TACFastAPIServer):
 
 ```bash
 pip install "twilio-agent-connect[server]"
+```
+
+For speech-to-speech voice over Twilio Media Streams:
+
+```bash
+pip install "twilio-agent-connect[server,gpt-live]"         # OpenAI GPT-Live
+pip install "twilio-agent-connect[server,openai-realtime]"  # OpenAI Realtime
 ```
 
 TAC requires **Python 3.10 or newer**.
@@ -171,6 +178,7 @@ For detailed architecture and advanced usage, see [CLAUDE.md](https://github.com
 **Examples & Guides:**
 - **[Getting Started Guide](https://github.com/twilio/twilio-agent-connect-python/tree/main/getting_started/)** - Setup wizard, examples, and comprehensive documentation
 - **[Partner SDK Examples](https://github.com/twilio/twilio-agent-connect-python/tree/main/getting_started/examples/partners/)** - Integration examples for OpenAI, AWS Bedrock Agent, AWS Bedrock AgentCore, and AWS Strands
+- **Speech-to-Speech Voice** - Twilio Media Streams bridged to [OpenAI GPT-Live](https://github.com/twilio/twilio-agent-connect-python/blob/main/getting_started/examples/partners/openai_gpt_live.py) or the [OpenAI Realtime API](https://github.com/twilio/twilio-agent-connect-python/blob/main/getting_started/examples/partners/openai_realtime.py)
 - **[ConversationRelay-Only Mode](https://github.com/twilio/twilio-agent-connect-python/blob/main/getting_started/examples/features/relay_only.py)** - Get started with voice using just ConversationRelay
 - More examples coming soon
 

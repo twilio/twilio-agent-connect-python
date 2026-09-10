@@ -47,6 +47,8 @@ Learn the core pattern for manually extracting and injecting TAC memory into **a
 Production-ready examples integrating TAC with partner SDKs:
 - **`openai_chat_completions.py`**: OpenAI Chat Completions API with automatic memory injection via `with_tac_memory()`
 - **`openai_responses_api.py`**: OpenAI Responses API with automatic memory injection
+- **`openai_realtime.py`**: Speech-to-speech voice calls bridging Twilio Media Streams to the OpenAI Realtime API
+- **`openai_gpt_live.py`**: Speech-to-speech voice calls bridging Twilio Media Streams to OpenAI GPT-Live
 - **`aws_bedrock_agent.py`**: AWS Bedrock Agent integration
 - **`aws_bedrock_agentcore.py`**: AWS Bedrock AgentCore integration
 - **`aws_strands.py`**: AWS Strands agents integration
@@ -86,6 +88,8 @@ walks up from the script's directory, so it'll find
 uv run getting_started/examples/overview.py
 uv run getting_started/examples/partners/openai_chat_completions.py
 uv run getting_started/examples/partners/openai_responses_api.py
+uv run getting_started/examples/partners/openai_realtime.py
+uv run getting_started/examples/partners/openai_gpt_live.py
 uv run getting_started/examples/partners/aws_bedrock_agent.py
 uv run getting_started/examples/partners/aws_bedrock_agentcore.py
 uv run getting_started/examples/partners/aws_strands.py

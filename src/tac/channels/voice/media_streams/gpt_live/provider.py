@@ -1,25 +1,22 @@
-"""``OpenAIRealtimeProvider``: bridges Twilio Media Streams to OpenAI's
-Realtime API.
+"""``GPTLiveProvider``: bridges Twilio Media Streams to OpenAI's GPT-Live API.
 
-Twilio streams call audio to our own WebSocket via ``<Connect><Stream>``, and
-this provider relays it to/from a second WebSocket it opens to OpenAI's
-Realtime API. Session lifecycle is independent of Conversation Orchestrator —
-this provider always starts the local session with ``profile_id=None``, the
-same as ConversationRelay's relay-only mode.
+GPT-Live is full-duplex — the model handles interruption server-side, so
+there's no client-driven barge-in truncate to manage — and tool calls go
+through Responses delegation rather than direct function-calling events.
 """
 
 from __future__ import annotations
 
 import asyncio
-import base64
 import contextlib
+import functools
 import json
 import uuid
 from typing import TYPE_CHECKING, Any
 
 import websockets
 
-from tac.channels.voice.media_streams.openai_realtime.models import _CallState
+from tac.channels.voice.media_streams.gpt_live.models import _CallState
 from tac.channels.voice.media_streams.shared.openai_provider import (
     OPENAI_USER_AGENT,
     MediaStreamsOpenAIProvider,
@@ -27,7 +24,7 @@ from tac.channels.voice.media_streams.shared.openai_provider import (
 from tac.channels.websocket_protocol import WebSocketDisconnectError, WebSocketProtocol
 from tac.models.outbound import (
     InitiateVoiceConversationOptions,
-    InitiateVoiceConversationOptionsOpenAIRealtime,
+    InitiateVoiceConversationOptionsGPTLive,
     InitiateVoiceConversationResult,
 )
 from tac.models.session import ConversationSession
@@ -36,21 +33,7 @@ from tac.models.voice import VoiceTwiMLOptionsMediaStreams
 from tac.utils.redaction import mask_phone, redact_twiml_parameters
 
 if TYPE_CHECKING:
-    from tac.channels.voice.media_streams.openai_realtime.config import (
-        OpenAIRealtimeProviderConfig,
-    )
-
-
-#: Twilio Media Streams always sends/expects 8kHz G.711 u-law — see
-#: https://www.twilio.com/docs/voice/media-streams/websocket-messages. Not
-#: configurable. No ``rate`` key — Realtime's schema rejects it as unknown
-#: (g711 is inherently fixed-rate).
-TWILIO_AUDIO_FORMAT_FOR_REALTIME: dict[str, Any] = {"type": "audio/pcmu"}
-
-#: G.711 u-law at 8kHz is 1 byte/sample, 8000 samples/sec — a fixed,
-#: non-configurable rate, so audio byte count converts to milliseconds by
-#: this constant alone, regardless of session_config.
-_PCMU_BYTES_PER_MS = 8
+    from tac.channels.voice.media_streams.gpt_live.config import GPTLiveProviderConfig
 
 #: Reserved <Stream> custom_parameters key used to correlate an outbound
 #: call's session_config override to its WebSocket start event. calls.create()
@@ -59,21 +42,58 @@ _PCMU_BYTES_PER_MS = 8
 #: before the call is placed, can.
 _SESSION_CONFIG_TOKEN_PARAM = "_tac_session_config_token"
 
+#: Twilio Media Streams always sends/expects 8kHz G.711 u-law — see
+#: https://www.twilio.com/docs/voice/media-streams/websocket-messages. Not
+#: configurable. Spelled with an explicit ``rate``, which GPT-Live's schema
+#: wants and Realtime's rejects.
+TWILIO_AUDIO_FORMAT_FOR_GPT_LIVE: dict[str, Any] = {"type": "audio/pcmu", "rate": 8000}
 
-class OpenAIRealtimeProvider(MediaStreamsOpenAIProvider[_CallState]):
-    """``VoiceProvider`` bridging Twilio Media Streams to OpenAI Realtime.
+#: ``ConversationSession.metadata`` key holding OpenAI's id for the GPT-Live
+#: session behind this call, set once ``session.started`` arrives. Quote it to
+#: OpenAI support when reporting a session. Opaque — the prefix differs across
+#: the alpha (``rtc_``) and GA (``live_``), so don't parse or assert on it.
+GPT_LIVE_SESSION_ID_METADATA_KEY = "gpt_live_session_id"
+
+#: How long to wait for `session.closed` before closing the socket anyway.
+_CLOSE_TIMEOUT_SECONDS = 5.0
+
+#: How long a _call_session_configs entry can outlive its outbound call
+#: before it's purged — covers no-answer, busy, and other cases where
+#: Twilio never connects the Media Stream to consume it via _register_call.
+_SESSION_CONFIG_TOKEN_TTL_SECONDS = 120.0
+
+
+class GPTLiveProvider(MediaStreamsOpenAIProvider[_CallState]):
+    """``VoiceProvider`` bridging Twilio Media Streams to OpenAI's GPT-Live API.
 
     Example:
         ```python
-        channel = VoiceChannel(tac, config=OpenAIRealtimeProviderConfig(default_session_config=...))
+        channel = VoiceChannel(tac, config=GPTLiveProviderConfig(default_session_config=...))
         ```
+
+    OpenAI's id for the GPT-Live session behind a call is exposed on the
+    session under `GPT_LIVE_SESSION_ID_METADATA_KEY` — quote it to OpenAI
+    support when reporting a session:
+
+    ```python
+    session.metadata[GPT_LIVE_SESSION_ID_METADATA_KEY]  # e.g. "live_123"
+    ```
     """
 
-    config: OpenAIRealtimeProviderConfig
+    config: GPTLiveProviderConfig
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        # Keyed by session_config_token so _register_call can cancel a
+        # call's expiry task as soon as the token is claimed, instead of
+        # leaving it sleeping for the full TTL. Also the strong reference
+        # asyncio needs — it only weakly references a task with no other
+        # referrer, so without this the task could be GC'd mid-sleep.
+        self._pending_token_expiries: dict[str, asyncio.Task[None]] = {}
 
     @property
     def channel_name(self) -> str:
-        return "VOICE_MEDIA_STREAM_OPENAI_REALTIME"
+        return "VOICE_MEDIA_STREAM_OPENAI_GPT_LIVE"
 
     async def initiate_outbound_conversation(
         self,
@@ -91,15 +111,15 @@ class OpenAIRealtimeProvider(MediaStreamsOpenAIProvider[_CallState]):
         ``TACConfig.voice_websocket_path``, unless overridden per-call via
         ``options.websocket_url``.
 
-        Pass ``InitiateVoiceConversationOptionsOpenAIRealtime`` with
-        ``session_config`` set to override the default for this call.
+        Pass ``InitiateVoiceConversationOptionsGPTLive`` with ``session_config``
+        set to override the default for this call.
         """
         twiml_options = options.twiml_options
         if twiml_options is not None and not isinstance(
             twiml_options, VoiceTwiMLOptionsMediaStreams
         ):
             raise TypeError(
-                "OpenAIRealtimeProvider.initiate_outbound_conversation requires "
+                "GPTLiveProvider.initiate_outbound_conversation requires "
                 "options.twiml_options to be a VoiceTwiMLOptionsMediaStreams, got "
                 f"{type(twiml_options).__name__}"
             )
@@ -112,7 +132,7 @@ class OpenAIRealtimeProvider(MediaStreamsOpenAIProvider[_CallState]):
         # so a failure in _twiml.build() has nothing to leak.
         session_config = (
             options.session_config
-            if isinstance(options, InitiateVoiceConversationOptionsOpenAIRealtime)
+            if isinstance(options, InitiateVoiceConversationOptionsGPTLive)
             else None
         )
         session_config_token: str | None = None
@@ -169,6 +189,15 @@ class OpenAIRealtimeProvider(MediaStreamsOpenAIProvider[_CallState]):
                 to=mask_phone(options.to),
             )
 
+            if session_config_token is not None:
+                expiry_task = asyncio.create_task(
+                    self._expire_session_config_token(session_config_token)
+                )
+                self._pending_token_expiries[session_config_token] = expiry_task
+                expiry_task.add_done_callback(
+                    functools.partial(self._forget_token_expiry, session_config_token)
+                )
+
             return InitiateVoiceConversationResult(call_sid=call.sid)
 
         except Exception as e:
@@ -182,10 +211,24 @@ class OpenAIRealtimeProvider(MediaStreamsOpenAIProvider[_CallState]):
             )
             raise
 
+    async def _expire_session_config_token(self, token: str) -> None:
+        """Purge a stashed session_config token if it's still unclaimed after the TTL.
+
+        Covers no-answer, busy, and other outbound-call outcomes that never
+        trigger ``_register_call`` — the only other place this token is popped.
+        Cancelled by ``_register_call`` as soon as it claims the token, so
+        this only actually runs to completion when the call never connects.
+        """
+        await asyncio.sleep(_SESSION_CONFIG_TOKEN_TTL_SECONDS)
+        self._call_session_configs.pop(token, None)
+
+    def _forget_token_expiry(self, token: str, _task: asyncio.Task[None]) -> None:
+        self._pending_token_expiries.pop(token, None)
+
     async def handle_websocket(self, websocket: WebSocketProtocol) -> None:
         """Drive one Twilio Media Stream connection from accept to disconnect.
 
-        Races the Twilio read against the OpenAI model-event reader so that
+        Races the Twilio read against the GPT-Live model-event reader so that
         if the model side disconnects first, we stop pumping caller audio
         into a dead socket and tear the call down immediately instead of
         leaving the caller connected to silence.
@@ -223,15 +266,11 @@ class OpenAIRealtimeProvider(MediaStreamsOpenAIProvider[_CallState]):
 
                 elif event == "media":
                     media = data.get("media") or {}
-                    if conv_id is not None:
-                        if media.get("payload"):
-                            await self._model_send(
-                                conv_id,
-                                {
-                                    "type": "input_audio_buffer.append",
-                                    "audio": media["payload"],
-                                },
-                            )
+                    if conv_id is not None and media.get("payload"):
+                        await self._model_send(
+                            conv_id,
+                            {"type": "session.input_audio.append", "audio": media["payload"]},
+                        )
 
                 elif event == "stop":
                     self.logger.info("Media stream stopped", conversation_id=conv_id)
@@ -240,15 +279,20 @@ class OpenAIRealtimeProvider(MediaStreamsOpenAIProvider[_CallState]):
         except WebSocketDisconnectError:
             self.logger.info("Media stream WebSocket closed", conversation_id=conv_id)
         except Exception as e:
-            self.logger.error(f"Media stream WebSocket error: {e}", exc_info=True)
+            self.logger.error(
+                "Media stream WebSocket error",
+                error=str(e),
+                conversation_id=conv_id,
+                exc_info=True,
+            )
         finally:
+            if conv_id is not None:
+                await self._cleanup_call(conv_id)
             if model_reader is not None and not model_reader.done():
                 model_reader.cancel()
             if model_reader is not None:
                 with contextlib.suppress(asyncio.CancelledError):
                     await model_reader
-            if conv_id is not None:
-                await self._cleanup_call(conv_id)
 
     def _register_call(self, start: dict[str, Any], websocket: WebSocketProtocol) -> str:
         """Handle Twilio's ``start`` event, returning the conversation id."""
@@ -260,6 +304,9 @@ class OpenAIRealtimeProvider(MediaStreamsOpenAIProvider[_CallState]):
             session_config = self._call_session_configs.pop(token, None)
             if session_config is not None:
                 self._call_session_configs[conv_id] = session_config
+            expiry_task = self._pending_token_expiries.get(token)
+            if expiry_task is not None:
+                expiry_task.cancel()
 
         self._calls[conv_id] = _CallState(twilio_ws=websocket)
 
@@ -273,7 +320,7 @@ class OpenAIRealtimeProvider(MediaStreamsOpenAIProvider[_CallState]):
         return conv_id
 
     async def _connect_model(self, conv_id: str) -> None:
-        """Open the OpenAI Realtime WebSocket and send the session config.
+        """Open the GPT-Live WebSocket and send the session config.
 
         Uses this call's ``_call_session_configs`` entry if one was stashed
         (by ``handle_incoming_call`` or ``initiate_outbound_conversation``),
@@ -287,23 +334,18 @@ class OpenAIRealtimeProvider(MediaStreamsOpenAIProvider[_CallState]):
                 f"No session_config available for call {conv_id} — this call supplied none "
                 "and default_session_config isn't set either."
             )
-        if not session_config.get("model"):
+        audio_format = (session_config.get("audio") or {}).get("format")
+        if audio_format != TWILIO_AUDIO_FORMAT_FOR_GPT_LIVE:
             raise ValueError(
-                f"session_config for call {conv_id} must include a 'model' field — it's "
-                "used as the ?model= query param when opening the OpenAI Realtime WebSocket."
+                f"session_config for call {conv_id} has audio.format={audio_format!r}, "
+                f"expected {TWILIO_AUDIO_FORMAT_FOR_GPT_LIVE!r}. Twilio Media Streams is "
+                "always 8kHz G.711 u-law; set audio.format to TWILIO_AUDIO_FORMAT_FOR_GPT_LIVE."
             )
-        for direction in ("input", "output"):
-            fmt = ((session_config.get("audio") or {}).get(direction) or {}).get("format")
-            if fmt != TWILIO_AUDIO_FORMAT_FOR_REALTIME:
-                raise ValueError(
-                    f"session_config for call {conv_id} has audio.{direction}.format={fmt!r}, "
-                    f"expected {TWILIO_AUDIO_FORMAT_FOR_REALTIME!r}. Twilio Media Streams is "
-                    f"always 8kHz G.711 u-law; set audio.{direction}.format to "
-                    "TWILIO_AUDIO_FORMAT_FOR_REALTIME."
-                )
+        if "model" not in session_config:
+            raise ValueError(f"session_config for call {conv_id} must include 'model'.")
 
         model_ws = await websockets.connect(
-            f"wss://api.openai.com/v1/realtime?model={session_config['model']}",
+            "wss://api.openai.com/v1/live/sessions",
             additional_headers={
                 "Authorization": f"Bearer {self.config.openai_api_key}",
                 "User-Agent": OPENAI_USER_AGENT,
@@ -312,142 +354,110 @@ class OpenAIRealtimeProvider(MediaStreamsOpenAIProvider[_CallState]):
         call = self._calls.get(conv_id)
         if call is not None:
             call.model_ws = model_ws
-        self.logger.info("Connected to OpenAI Realtime", conversation_id=conv_id)
+        self.logger.info("Connected to GPT-Live", conversation_id=conv_id)
 
-        await self._model_send(conv_id, {"type": "session.update", "session": session_config})
-
-        # VAD waits for the caller to speak first; request a response to greet.
-        response = self.config.welcome_greeting_response
-        if response is not None:
-            await self._model_send(conv_id, {"type": "response.create", "response": response})
+        await self._model_send(conv_id, {"type": "session.start", "session": session_config})
+        # welcome_instruction is sent once session.started arrives — see _dispatch_model_event.
 
     async def _dispatch_model_event(
         self, conv_id: str, session: ConversationSession, event: dict[str, Any]
     ) -> None:
         event_type = event.get("type")
-        call = self._calls.get(conv_id)
-        if call is None:
-            return
 
         if event_type == "error":
-            error = event.get("error") or {}
-            if error.get("code") == "response_cancel_not_active":
-                # Benign race: our response.cancel (sent while
-                # barge_in.response_active was true) lost to the model's own
-                # response.done arriving first. Nothing to cancel anymore,
-                # which is exactly what we wanted.
-                self.logger.debug(
-                    "response.cancel raced response.done", conversation_id=conv_id, error=error
-                )
-            else:
-                self.logger.error(
-                    "OpenAI Realtime error event", conversation_id=conv_id, error=error
-                )
-
-        elif event_type == "input_audio_buffer.speech_started":
-            self.logger.debug("Caller speech detected (VAD)", conversation_id=conv_id)
-            await self._handle_barge_in(conv_id, session, call)
-
-        elif event_type == "response.created":
-            call.barge_in.response_active = True
-
-        elif event_type == "conversation.item.input_audio_transcription.completed":
-            if event.get("transcript"):
-                session.metadata.setdefault("transcript", []).append(
-                    {"role": "user", "text": event["transcript"]}
-                )
-
-        elif event_type == "response.output_item.done":
-            # Fires per-item, ahead of response.done — lower tool-call latency.
-            # "completed" excludes calls cut short by an interruption, whose
-            # arguments JSON may be a truncated fragment.
-            item = event.get("item", {})
-            if item.get("type") == "function_call" and item.get("status") == "completed":
-                await self._handle_function_call(conv_id, item)
-
-        elif event_type == "response.done":
-            # last_assistant_item stays set — the model generates faster than
-            # realtime, so Twilio may still be playing this when it arrives.
-            # response_active clears though: nothing left to cancel.
-            call.barge_in.response_active = False
-            for item in event.get("response", {}).get("output", []):
-                if item.get("role") != "assistant":
-                    continue
-                for content in item.get("content", []):
-                    if content.get("transcript"):
-                        session.metadata.setdefault("transcript", []).append(
-                            {"role": "assistant", "text": content["transcript"]}
-                        )
-
-        elif event_type == "response.output_audio.delta" and event.get("delta"):
-            barge_in = call.barge_in
-            item_id = event.get("item_id")
-            if item_id and item_id == barge_in.muted_item_id:
-                # Stale audio for an item already truncated by barge-in.
-                return
-
-            if item_id and item_id != barge_in.last_assistant_item:
-                barge_in.last_assistant_item = item_id
-                barge_in.current_item_audio_ms = 0
-
-            barge_in.current_item_audio_ms += (
-                len(base64.b64decode(event["delta"])) // _PCMU_BYTES_PER_MS
+            self.logger.error(
+                "GPT-Live error event", conversation_id=conv_id, error=event.get("error")
             )
 
-            await self._twilio_send(
-                conv_id,
-                {
-                    "event": "media",
-                    "streamSid": session.metadata.get("stream_sid"),
-                    "media": {"payload": event["delta"]},
-                },
-            )
+        elif event_type == "session.closed":
+            # Carries the session snapshot too — a backstop if session.started
+            # was missed.
+            self._record_gpt_live_session_id(conv_id, session, event)
+            call = self._calls.get(conv_id)
+            if call is not None:
+                call.closed_event.set()
 
-    async def _handle_barge_in(
-        self, conv_id: str, session: ConversationSession, call: _CallState
+        elif event_type == "session.started":
+            self._record_gpt_live_session_id(conv_id, session, event)
+            # session.commentary.append before this event is undocumented behavior.
+            instruction = self.config.welcome_instruction
+            if instruction is not None:
+                # Sent verbatim — caller must word it as an instruction, not a
+                # bare greeting, or the model won't speak first.
+                await self._model_send(
+                    conv_id,
+                    {
+                        "type": "session.commentary.append",
+                        "delegation_id": None,
+                        "content": instruction,
+                    },
+                )
+
+        elif event_type == "session.input_transcript.delta":
+            self._append_transcript_delta(session, "user", event)
+
+        elif event_type == "session.output_transcript.delta":
+            self._append_transcript_delta(session, "assistant", event)
+
+        elif event_type == "session.output_audio.delta":
+            # No item_id/barge-in bookkeeping needed — GPT-Live is
+            # full-duplex and handles interruption server-side.
+            delta = event.get("delta")
+            if delta:
+                await self._twilio_send(
+                    conv_id,
+                    {
+                        "event": "media",
+                        "streamSid": session.metadata.get("stream_sid"),
+                        "media": {"payload": delta},
+                    },
+                )
+
+        elif event_type == "response.event":
+            inner = event.get("event") or {}
+            if inner.get("type") == "response.output_item.done":
+                # "completed" excludes calls cut short mid-generation.
+                item = inner.get("item") or {}
+                if item.get("type") == "function_call" and item.get("status") == "completed":
+                    await self._handle_function_call(conv_id, item)
+
+    def _record_gpt_live_session_id(
+        self, conv_id: str, session: ConversationSession, event: dict[str, Any]
     ) -> None:
-        """Caller started talking. Cancel any response still generating,
-        truncate the model's memory of the last reply at the point actually
-        heard, then clear Twilio's buffered audio so playback stops
-        immediately. If no assistant audio has been sent since the last
-        barge-in, there's nothing queued at Twilio to clear, so this is a
-        no-op."""
-        barge_in = call.barge_in
+        """Surface the GPT-Live session id from a session-snapshot event.
 
-        last_assistant_item = barge_in.last_assistant_item
-        if last_assistant_item is None:
-            self.logger.debug("Barge-in: no assistant item to interrupt", conversation_id=conv_id)
+        OpenAI support asks for this id when investigating a session, so it's
+        put where a caller can reach it (``session.metadata``, which outlives
+        the call into ``on_conversation_ended``) and logged once per call.
+        Treated as an opaque string — the prefix differs across the alpha
+        (``rtc_``) and GA (``live_``), so it's never parsed or validated.
+        """
+        session_id = (event.get("session") or {}).get("id")
+        if not isinstance(session_id, str) or not session_id:
             return
-
-        self.logger.debug("Barge-in: truncating assistant reply", conversation_id=conv_id)
-        if barge_in.response_active:
-            # Stop the model from generating more of a reply nobody will
-            # hear — otherwise it keeps burning tokens on discarded audio.
-            # Only send this while a response is actually in flight —
-            # response.cancel with nothing to cancel is itself an error event.
-            await self._model_send(conv_id, {"type": "response.cancel"})
-            barge_in.response_active = False
-        await self._model_send(
-            conv_id,
-            {
-                "type": "conversation.item.truncate",
-                "item_id": last_assistant_item,
-                "content_index": 0,
-                # current_item_audio_ms is the exact duration of audio sent
-                # for this item, so it never exceeds the item's real content.
-                "audio_end_ms": barge_in.current_item_audio_ms,
-            },
-        )
-        await self._twilio_send(
-            conv_id, {"event": "clear", "streamSid": session.metadata.get("stream_sid")}
+        if session.metadata.get(GPT_LIVE_SESSION_ID_METADATA_KEY) == session_id:
+            return
+        session.metadata[GPT_LIVE_SESSION_ID_METADATA_KEY] = session_id
+        self.logger.info(
+            "GPT-Live session id", conversation_id=conv_id, gpt_live_session_id=session_id
         )
 
-        barge_in.muted_item_id = last_assistant_item
-        barge_in.last_assistant_item = None
-        barge_in.current_item_audio_ms = 0
+    @staticmethod
+    def _append_transcript_delta(
+        session: ConversationSession, role: str, event: dict[str, Any]
+    ) -> None:
+        """Accumulate one transcript delta into the in-progress turn."""
+        text = event.get("delta")
+        if not text:
+            return
+        transcript: list[dict[str, str]] = session.metadata.setdefault("transcript", [])
+        if transcript and transcript[-1]["role"] == role:
+            transcript[-1]["text"] += text
+        else:
+            transcript.append({"role": role, "text": text})
 
     async def _handle_function_call(self, conv_id: str, item: dict[str, Any]) -> None:
-        """Run a model-requested tool call and hand the result back.
+        """Run a Responses-delegated tool call and hand the result back.
 
         Always sends a function_call_output when call_id is present — even a
         tool that ran successfully can return a non-JSON-serializable object
@@ -460,7 +470,7 @@ class OpenAIRealtimeProvider(MediaStreamsOpenAIProvider[_CallState]):
             self.logger.error(
                 "Received malformed function_call item without call_id",
                 conversation_id=conv_id,
-                item=item,
+                item_keys=list(item.keys()),
             )
             return
 
@@ -470,7 +480,7 @@ class OpenAIRealtimeProvider(MediaStreamsOpenAIProvider[_CallState]):
                 "Received malformed function_call item without tool name",
                 conversation_id=conv_id,
                 call_id=call_id,
-                item=item,
+                item_keys=list(item.keys()),
             )
             output_json = json.dumps({"error": "Malformed function call: missing tool name."})
         else:
@@ -489,7 +499,7 @@ class OpenAIRealtimeProvider(MediaStreamsOpenAIProvider[_CallState]):
         await self._model_send(
             conv_id,
             {
-                "type": "conversation.item.create",
+                "type": "response.item.create",
                 "item": {
                     "type": "function_call_output",
                     "call_id": call_id,
@@ -500,10 +510,32 @@ class OpenAIRealtimeProvider(MediaStreamsOpenAIProvider[_CallState]):
         await self._model_send(conv_id, {"type": "response.create"})
 
     async def _cleanup_call(self, conv_id: str) -> None:
-        call = self._calls.pop(conv_id, None)
+        call = self._calls.get(conv_id)
         if call is not None and call.model_ws is not None:
+            try:
+                await call.model_ws.send(json.dumps({"type": "session.close"}))
+            except Exception as e:
+                self.logger.debug(
+                    "Error sending session.close to model socket",
+                    error=str(e),
+                    conversation_id=conv_id,
+                )
+            else:
+                try:
+                    await asyncio.wait_for(call.closed_event.wait(), timeout=_CLOSE_TIMEOUT_SECONDS)
+                except asyncio.TimeoutError:
+                    self.logger.debug(
+                        "Timed out waiting for session.closed", conversation_id=conv_id
+                    )
+                except Exception as e:
+                    self.logger.debug(
+                        "Error waiting for session.closed", error=str(e), conversation_id=conv_id
+                    )
             try:
                 await call.model_ws.close()
             except Exception as e:
-                self.logger.debug(f"Error closing model socket: {e}", conversation_id=conv_id)
+                self.logger.debug(
+                    "Error closing model socket", error=str(e), conversation_id=conv_id
+                )
+        self._calls.pop(conv_id, None)
         await self.channel._end_conversation(conv_id)
