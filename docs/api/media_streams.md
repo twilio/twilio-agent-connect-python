@@ -29,6 +29,7 @@ APIs describe that same audio with different schemas, so the constants are
         - GPTLiveProviderConfig
         - InitiateVoiceConversationOptionsGPTLive
         - TWILIO_AUDIO_FORMAT_FOR_GPT_LIVE
+        - GPT_LIVE_SESSION_ID_METADATA_KEY
 
 ## OpenAI Realtime
 

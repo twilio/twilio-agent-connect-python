@@ -48,6 +48,12 @@ _SESSION_CONFIG_TOKEN_PARAM = "_tac_session_config_token"
 #: wants and Realtime's rejects.
 TWILIO_AUDIO_FORMAT_FOR_GPT_LIVE: dict[str, Any] = {"type": "audio/pcmu", "rate": 8000}
 
+#: ``ConversationSession.metadata`` key holding OpenAI's id for the GPT-Live
+#: session behind this call, set once ``session.started`` arrives. Quote it to
+#: OpenAI support when reporting a session. Opaque — the prefix differs across
+#: the alpha (``rtc_``) and GA (``live_``), so don't parse or assert on it.
+GPT_LIVE_SESSION_ID_METADATA_KEY = "gpt_live_session_id"
+
 #: How long to wait for `session.closed` before closing the socket anyway.
 _CLOSE_TIMEOUT_SECONDS = 5.0
 
@@ -64,6 +70,14 @@ class GPTLiveProvider(MediaStreamsOpenAIProvider[_CallState]):
         ```python
         channel = VoiceChannel(tac, config=GPTLiveProviderConfig(default_session_config=...))
         ```
+
+    OpenAI's id for the GPT-Live session behind a call is exposed on the
+    session under `GPT_LIVE_SESSION_ID_METADATA_KEY` — quote it to OpenAI
+    support when reporting a session:
+
+    ```python
+    session.metadata[GPT_LIVE_SESSION_ID_METADATA_KEY]  # e.g. "live_123"
+    ```
     """
 
     config: GPTLiveProviderConfig
@@ -356,11 +370,15 @@ class GPTLiveProvider(MediaStreamsOpenAIProvider[_CallState]):
             )
 
         elif event_type == "session.closed":
+            # Carries the session snapshot too — a backstop if session.started
+            # was missed.
+            self._record_gpt_live_session_id(conv_id, session, event)
             call = self._calls.get(conv_id)
             if call is not None:
                 call.closed_event.set()
 
         elif event_type == "session.started":
+            self._record_gpt_live_session_id(conv_id, session, event)
             # session.commentary.append before this event is undocumented behavior.
             instruction = self.config.welcome_instruction
             if instruction is not None:
@@ -402,6 +420,27 @@ class GPTLiveProvider(MediaStreamsOpenAIProvider[_CallState]):
                 item = inner.get("item") or {}
                 if item.get("type") == "function_call" and item.get("status") == "completed":
                     await self._handle_function_call(conv_id, item)
+
+    def _record_gpt_live_session_id(
+        self, conv_id: str, session: ConversationSession, event: dict[str, Any]
+    ) -> None:
+        """Surface the GPT-Live session id from a session-snapshot event.
+
+        OpenAI support asks for this id when investigating a session, so it's
+        put where a caller can reach it (``session.metadata``, which outlives
+        the call into ``on_conversation_ended``) and logged once per call.
+        Treated as an opaque string — the prefix differs across the alpha
+        (``rtc_``) and GA (``live_``), so it's never parsed or validated.
+        """
+        session_id = (event.get("session") or {}).get("id")
+        if not isinstance(session_id, str) or not session_id:
+            return
+        if session.metadata.get(GPT_LIVE_SESSION_ID_METADATA_KEY) == session_id:
+            return
+        session.metadata[GPT_LIVE_SESSION_ID_METADATA_KEY] = session_id
+        self.logger.info(
+            "GPT-Live session id", conversation_id=conv_id, gpt_live_session_id=session_id
+        )
 
     @staticmethod
     def _append_transcript_delta(

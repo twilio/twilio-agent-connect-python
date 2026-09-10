@@ -10,6 +10,7 @@ import pytest
 from tac import TAC
 from tac.channels.voice import VoiceChannel
 from tac.channels.voice.media_streams.gpt_live import (
+    GPT_LIVE_SESSION_ID_METADATA_KEY,
     TWILIO_AUDIO_FORMAT_FOR_GPT_LIVE,
     GPTLiveProviderConfig,
 )
@@ -506,6 +507,53 @@ class TestTranscriptDeltas:
             )
 
         assert session.metadata["transcript"] == [{"role": "assistant", "text": "hello"}]
+
+
+class TestGPTLiveSessionId:
+    @pytest.mark.asyncio
+    async def test_session_started_records_session_id_on_the_session(self) -> None:
+        channel = make_channel()
+        provider = channel._provider
+
+        provider._calls["CA1c"] = _CallState()
+        session = channel._start_conversation("CA1c", profile_id=None)
+
+        await provider._dispatch_model_event(
+            "CA1c",
+            session,
+            {"type": "session.started", "session": {"id": "rtc_123", "status": "active"}},
+        )
+
+        assert session.metadata[GPT_LIVE_SESSION_ID_METADATA_KEY] == "rtc_123"
+
+    @pytest.mark.asyncio
+    async def test_session_closed_records_session_id_when_started_was_missed(self) -> None:
+        channel = make_channel()
+        provider = channel._provider
+
+        provider._calls["CA1d"] = _CallState()
+        session = channel._start_conversation("CA1d", profile_id=None)
+
+        await provider._dispatch_model_event(
+            "CA1d",
+            session,
+            {"type": "session.closed", "reason": "client_request", "session": {"id": "live_456"}},
+        )
+
+        assert session.metadata[GPT_LIVE_SESSION_ID_METADATA_KEY] == "live_456"
+        assert provider._calls["CA1d"].closed_event.is_set()
+
+    @pytest.mark.asyncio
+    async def test_snapshot_without_an_id_leaves_metadata_untouched(self) -> None:
+        channel = make_channel()
+        provider = channel._provider
+
+        provider._calls["CA1e"] = _CallState()
+        session = channel._start_conversation("CA1e", profile_id=None)
+
+        await provider._dispatch_model_event("CA1e", session, {"type": "session.started"})
+
+        assert GPT_LIVE_SESSION_ID_METADATA_KEY not in session.metadata
 
 
 class TestOutputAudioDelta:

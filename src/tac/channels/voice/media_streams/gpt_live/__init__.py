@@ -2,6 +2,7 @@
 
 from tac.channels.voice.media_streams.gpt_live.config import GPTLiveProviderConfig
 from tac.channels.voice.media_streams.gpt_live.provider import (
+    GPT_LIVE_SESSION_ID_METADATA_KEY,
     TWILIO_AUDIO_FORMAT_FOR_GPT_LIVE,
     GPTLiveProvider,
 )
@@ -11,6 +12,7 @@ from tac.models.stream import StreamStartMessage
 from tac.models.voice import VoiceTwiMLOptionsMediaStreams
 
 __all__ = [
+    "GPT_LIVE_SESSION_ID_METADATA_KEY",
     "GPTLiveProvider",
     "GPTLiveProviderConfig",
     "InitiateVoiceConversationOptionsGPTLive",

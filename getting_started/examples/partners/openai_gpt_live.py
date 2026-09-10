@@ -44,6 +44,7 @@ from fastapi import FastAPI
 from tac import TAC, TACConfig
 from tac.channels.voice import VoiceChannel
 from tac.channels.voice.media_streams.gpt_live import (
+    GPT_LIVE_SESSION_ID_METADATA_KEY,
     TWILIO_AUDIO_FORMAT_FOR_GPT_LIVE,
     GPTLiveProviderConfig,
 )
@@ -103,7 +104,8 @@ voice_channel = VoiceChannel(
 async def handle_conversation_ended(context: ConversationSession) -> None:
     """Print the full transcript once the Media Stream WebSocket closes."""
     transcript = context.metadata.get("transcript", [])
-    print(f"Call {context.conversation_id} ended. Transcript:")
+    session_id = context.metadata.get(GPT_LIVE_SESSION_ID_METADATA_KEY)
+    print(f"Call {context.conversation_id} ended (GPT-Live session {session_id}). Transcript:")
     for turn in transcript:
         print(f"  {turn['role']}: {turn['text']}")
 
