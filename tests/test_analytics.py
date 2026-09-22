@@ -341,7 +341,8 @@ class TestVoiceCallSites:
         self, mock_client: MagicMock, tac: TAC
     ) -> None:
         channel = VoiceChannel(tac)
-        channel._provider.send_response = AsyncMock()
+        channel._start_conversation("conv-1")
+        channel._provider._websocket_manager.add_websocket("conv-1", AsyncMock())
 
         await channel.send_response("conv-1", "hello")
 
@@ -357,11 +358,57 @@ class TestVoiceCallSites:
             yield "hello"
 
         channel = VoiceChannel(tac)
-        channel._provider.send_response = AsyncMock()
+        channel._start_conversation("conv-1")
+        channel._provider._websocket_manager.add_websocket("conv-1", AsyncMock())
 
         await channel.send_response("conv-1", stream())
 
         assert only(mock_client, "Response Sent")["properties"]["response_type"] == "streaming"
+
+    @pytest.mark.asyncio
+    async def test_auto_sent_reply_is_reported(self, mock_client: MagicMock, tac: TAC) -> None:
+        """A reply from the message-ready callback bypasses the channel wrapper.
+
+        The provider auto-sends it directly, so tracking on
+        ``VoiceChannel.send_response`` would never see it.
+        """
+        channel = VoiceChannel(tac)
+        channel._start_conversation("conv-1")
+        channel._provider._websocket_manager.add_websocket("conv-1", AsyncMock())
+
+        await channel._provider.send_response("conv-1", "hello", role="assistant")
+
+        assert only(mock_client, "Response Sent")["properties"]["channel"] == "voice"
+        assert_contract(mock_client)
+
+    @pytest.mark.asyncio
+    async def test_response_sent_suppressed_without_a_websocket(
+        self, mock_client: MagicMock, tac: TAC
+    ) -> None:
+        channel = VoiceChannel(tac)
+        channel._start_conversation("conv-1")
+
+        await channel.send_response("conv-1", "hello")
+
+        assert not [c for c in tracked(mock_client) if c["event"] == "Response Sent"]
+
+    @pytest.mark.asyncio
+    async def test_response_sent_suppressed_on_interrupt(
+        self, mock_client: MagicMock, tac: TAC
+    ) -> None:
+        """An interrupted reply never fully reached the caller."""
+        import asyncio
+
+        websocket = AsyncMock()
+        websocket.send_text.side_effect = asyncio.CancelledError()
+        channel = VoiceChannel(tac)
+        channel._start_conversation("conv-1")
+        channel._provider._websocket_manager.add_websocket("conv-1", websocket)
+
+        with pytest.raises(asyncio.CancelledError):
+            await channel.send_response("conv-1", "hello")
+
+        assert not [c for c in tracked(mock_client) if c["event"] == "Response Sent"]
 
     def test_relay_only_reports_orchestrator_disabled(self, mock_client: MagicMock) -> None:
         config = get_test_config()

@@ -758,6 +758,21 @@ class ConversationRelayProvider(VoiceProvider):
                             conversation_id=conversation_id,
                         )
 
+            # Tracked here rather than in `VoiceChannel.send_response` because
+            # a reply produced by the message-ready callback is auto-sent
+            # straight through this method, never through the channel. Inside
+            # the try, so an interrupt (CancelledError) or a closed socket
+            # reports nothing — the caller heard no complete response.
+            track_event(
+                "Response Sent",
+                self.channel.tac.config.account_sid,
+                channel="voice",
+                conversation_id=conversation_id,
+                response_type="full" if isinstance(response, str) else "streaming",
+                provider=self.provider_id,
+                orchestrator_enabled=self.channel.tac.is_orchestrator_enabled(),
+            )
+
         except asyncio.CancelledError:
             # Re-raise to propagate cancellation up the call stack.
             # Partial responses from interrupted streams are NOT saved to

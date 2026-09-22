@@ -496,17 +496,10 @@ class VoiceChannel(BaseChannel):
             role: Optional message role (not used by ConversationRelayProvider, but
                   kept for API consistency with BaseChannel interface)
         """
-        response_type = "full" if isinstance(response, str) else "streaming"
+        # Response Sent is reported by the provider, not here: a reply from the
+        # message-ready callback is auto-sent directly through the provider and
+        # would otherwise go unreported.
         await self._provider.send_response(conversation_id, response, role)
-        track_event(
-            "Response Sent",
-            self.tac.config.account_sid,
-            channel=self._telemetry_channel,
-            conversation_id=conversation_id,
-            response_type=response_type,
-            provider=self._provider.provider_id,
-            orchestrator_enabled=self.tac.is_orchestrator_enabled(),
-        )
 
     def get_channel_name(self) -> str:
         return self._provider.channel_name
