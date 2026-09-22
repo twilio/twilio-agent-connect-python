@@ -303,6 +303,47 @@ class TestMessagingCallSites:
         assert_contract(mock_client)
 
     @pytest.mark.asyncio
+    async def test_conversation_ended_duration_excludes_callback_latency(
+        self, mock_client: MagicMock, tac: TAC
+    ) -> None:
+        """The application callback is awaited, so its latency must not be
+        counted as conversation time."""
+        import asyncio
+
+        channel = SMSChannel(tac)
+        session = channel._start_conversation("conv-1")
+        session.started_at = datetime.now() - timedelta(milliseconds=500)
+
+        async def slow_teardown(ended: Any) -> None:
+            await asyncio.sleep(0.4)
+
+        tac.on_conversation_ended(slow_teardown)
+
+        await channel._end_conversation("conv-1")
+
+        duration = only(mock_client, "Conversation Ended")["properties"]["duration_ms"]
+        assert 500 <= duration < 900, f"callback latency leaked into duration: {duration}ms"
+
+    @pytest.mark.asyncio
+    async def test_conversation_ended_duration_survives_a_mutating_callback(
+        self, mock_client: MagicMock, tac: TAC
+    ) -> None:
+        """A callback that rewrites `started_at` must not rewrite the metric."""
+        channel = SMSChannel(tac)
+        session = channel._start_conversation("conv-1")
+        session.started_at = datetime.now() - timedelta(seconds=30)
+
+        def tamper(ended: Any) -> None:
+            ended.started_at = datetime.now()
+
+        tac.on_conversation_ended(tamper)
+
+        await channel._end_conversation("conv-1")
+
+        duration = only(mock_client, "Conversation Ended")["properties"]["duration_ms"]
+        assert duration >= 30_000
+
+    @pytest.mark.asyncio
     async def test_conversation_ended_silent_without_a_session(
         self, mock_client: MagicMock, tac: TAC
     ) -> None:

@@ -283,6 +283,12 @@ class BaseChannel(ABC):
         """
         session = self._conversations.pop(conv_id, None)
         if session is not None:
+            # Measured before the callback below, which is application-owned:
+            # it is awaited and may do network I/O or mutate the session, and
+            # neither its latency nor its edits belong in the conversation's
+            # reported duration.
+            duration_ms = int((datetime.now() - session.started_at).total_seconds() * 1000)
+
             try:
                 await self.tac.trigger_conversation_ended(session)
             except Exception as e:
@@ -298,7 +304,7 @@ class BaseChannel(ABC):
                 self.tac.config.account_sid,
                 channel=self._telemetry_channel,
                 conversation_id=conv_id,
-                duration_ms=int((datetime.now() - session.started_at).total_seconds() * 1000),
+                duration_ms=duration_ms,
             )
 
             self.logger.debug(
