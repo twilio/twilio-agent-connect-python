@@ -1,8 +1,8 @@
 """Tests for product usage telemetry.
 
-The tracking plan these events are validated against rejects an entire event
-when it carries an undeclared property or one of the wrong type, server-side
-and without any signal back to the SDK. The property-set and integer-type
+Events are validated against a fixed schema after they leave the SDK, and one
+carrying an unexpected property or the wrong type for a known one is discarded
+whole, with no signal back to the caller. The property-set and integer-type
 assertions here are what catch that before it ships.
 """
 
@@ -23,9 +23,9 @@ from tac.channels.whatsapp import WhatsAppChannel
 from tac.core import analytics
 from tac.core.analytics import _reset_analytics, shutdown_analytics, track_event
 
-# Every property the tracking plan declares per event. A key emitted outside
-# its event's set is silently dropped along with the whole event, so these sets
-# are the contract, not a convenience.
+# Every property each event is allowed to carry. A key emitted outside its
+# event's set is silently dropped along with the whole event, so these sets are
+# the contract, not a convenience.
 _COMMON = {"account_sid", "channel", "sdk_version", "sdk_package"}
 _VOICE_ONLY = {"provider", "orchestrator_enabled"}
 EXPECTED_PROPERTIES: dict[str, set[str]] = {
@@ -39,9 +39,9 @@ EXPECTED_PROPERTIES: dict[str, set[str]] = {
     "Websocket Disconnected": _COMMON | {"conversation_id"} | _VOICE_ONLY,
 }
 
-# Integer in the tracking plan, and a float is a violation that drops the
-# event. Python's duration arithmetic produces floats by default, so this is
-# the easiest property type to get wrong.
+# Typed as integers, and a float is a violation that drops the event. Python's
+# duration arithmetic produces floats by default, so this is the easiest
+# property type to get wrong.
 INTEGER_PROPERTIES = {"duration_ms", "duration_until_interrupt_ms"}
 
 
@@ -195,7 +195,7 @@ class TestPropertyContract:
 
 
 def assert_contract(client: MagicMock) -> None:
-    """Assert every tracked call matches the tracking plan's declared schema."""
+    """Assert every tracked call matches the schema declared above."""
     calls = tracked(client)
     assert calls, "expected at least one tracked event"
     for call in calls:
