@@ -94,6 +94,9 @@ def track_event(event: str, account_sid: str, **properties: Any) -> None:
         client.track(
             anonymous_id=account_sid,
             event=event,
+            # `sdk_version`/`sdk_package` last so a caller-supplied value
+            # cannot displace the SDK's own identity. `account_sid` is a named
+            # parameter, so it can never arrive in `properties` at all.
             properties={
                 "account_sid": account_sid,
                 **properties,

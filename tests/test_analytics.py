@@ -431,6 +431,133 @@ class TestVoiceCallSites:
         assert VoiceProvider(MagicMock()).provider_id == "custom"
 
 
+def media_streams_channel(kind: str) -> VoiceChannel:
+    """A VoiceChannel backed by one of the Media Streams providers."""
+    if kind == "gpt_live":
+        from tac.channels.voice.media_streams.gpt_live import GPTLiveProviderConfig
+
+        config: Any = GPTLiveProviderConfig(
+            openai_api_key="sk-test",
+            default_session_config={"model": "gpt-live-1"},
+        )
+    else:
+        from tac.channels.voice.media_streams.openai_realtime import (
+            OpenAIRealtimeProviderConfig,
+        )
+
+        config = OpenAIRealtimeProviderConfig(openai_api_key="sk-test")
+    return VoiceChannel(TAC(get_test_config()), config=config)
+
+
+@pytest.mark.parametrize(
+    ("kind", "expected_provider"),
+    [("gpt_live", "gpt_live"), ("openai_realtime", "openai_realtime")],
+)
+class TestMediaStreamsCallSites:
+    """The Media Streams providers emit their own lifecycle events.
+
+    These paths run under the other provider suites, which proves they don't
+    raise, but nothing there asserts what they report — so the event names and
+    properties are checked here.
+    """
+
+    def test_provider_id(self, kind: str, expected_provider: str) -> None:
+        assert media_streams_channel(kind)._provider.provider_id == expected_provider
+
+    def test_telemetry_channel_is_voice_not_the_transport(
+        self, kind: str, expected_provider: str
+    ) -> None:
+        """`get_channel_name()` returns the transport here, which is why the
+        telemetry label can't be derived from it."""
+        channel = media_streams_channel(kind)
+
+        assert channel.get_channel_name().startswith("VOICE_MEDIA_STREAM")
+        assert channel._telemetry_channel == "voice"
+
+    def test_conversation_initialized_on_stream_start(
+        self, mock_client: MagicMock, kind: str, expected_provider: str
+    ) -> None:
+        channel = media_streams_channel(kind)
+
+        channel._provider._register_call({"streamSid": "MZ123", "callSid": "CA123"}, MagicMock())
+
+        properties = only(mock_client, "Conversation Initialized")["properties"]
+        assert properties["conversation_id"] == "CA123"
+        assert properties["channel"] == "voice"
+        assert properties["provider"] == expected_provider
+        assert properties["orchestrator_enabled"] is True
+        assert_contract(mock_client)
+
+    @pytest.mark.asyncio
+    async def test_websocket_disconnected_precedes_conversation_ended(
+        self, mock_client: MagicMock, kind: str, expected_provider: str
+    ) -> None:
+        channel = media_streams_channel(kind)
+        channel._provider._register_call({"streamSid": "MZ123", "callSid": "CA123"}, MagicMock())
+
+        await channel._provider._cleanup_call("CA123")
+
+        events = [c["event"] for c in tracked(mock_client)]
+        assert events.index("Websocket Disconnected") < events.index("Conversation Ended")
+        properties = only(mock_client, "Websocket Disconnected")["properties"]
+        assert properties["conversation_id"] == "CA123"
+        assert properties["provider"] == expected_provider
+        assert_contract(mock_client)
+
+
+class TestOpenAIRealtimeBargeIn:
+    """Realtime reports its own barge-in; GPT-Live exposes no interrupt signal."""
+
+    @pytest.mark.asyncio
+    async def test_voice_interrupt_reports_audio_heard(self, mock_client: MagicMock) -> None:
+        from tac.channels.voice.media_streams.openai_realtime.models import _CallState
+
+        channel = media_streams_channel("openai_realtime")
+        provider = channel._provider
+        provider._model_send = AsyncMock()
+        provider._twilio_send = AsyncMock()
+        session = channel._start_conversation("CA123")
+        session.metadata["stream_sid"] = "MZ123"
+        call = _CallState(twilio_ws=MagicMock())
+        call.barge_in.last_assistant_item = "item-1"
+        call.barge_in.current_item_audio_ms = 1234
+        provider._calls["CA123"] = call
+
+        await provider._handle_barge_in("CA123", session, call)
+
+        properties = only(mock_client, "Voice Interrupt")["properties"]
+        assert properties["duration_until_interrupt_ms"] == 1234
+        assert isinstance(properties["duration_until_interrupt_ms"], int)
+        assert properties["provider"] == "openai_realtime"
+        assert_contract(mock_client)
+
+    @pytest.mark.asyncio
+    async def test_silent_when_no_reply_was_playing(self, mock_client: MagicMock) -> None:
+        """The early return means a bare VAD trigger is not an interrupt."""
+        from tac.channels.voice.media_streams.openai_realtime.models import _CallState
+
+        channel = media_streams_channel("openai_realtime")
+        provider = channel._provider
+        provider._model_send = AsyncMock()
+        provider._twilio_send = AsyncMock()
+        session = channel._start_conversation("CA123")
+        call = _CallState(twilio_ws=MagicMock())
+        assert call.barge_in.last_assistant_item is None
+        provider._calls["CA123"] = call
+
+        await provider._handle_barge_in("CA123", session, call)
+
+        assert not [c for c in tracked(mock_client) if c["event"] == "Voice Interrupt"]
+
+    def test_gpt_live_has_no_interrupt_site(self) -> None:
+        """Documents the accepted asymmetry, so removing it is a visible change."""
+        import inspect
+
+        from tac.channels.voice.media_streams.gpt_live import provider as gpt_live
+
+        assert "Voice Interrupt" not in inspect.getsource(gpt_live)
+
+
 class TestVoiceResponseDelivery:
     """`Response Sent` must mean a complete response reached the caller.
 
