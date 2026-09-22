@@ -9,6 +9,7 @@ if TYPE_CHECKING:
 
 from tac.channels.base import BaseChannel
 from tac.channels.websocket_protocol import WebSocketProtocol
+from tac.core.analytics import track_event
 from tac.core.tac import TAC
 from tac.models.outbound import (
     InitiateVoiceConversationOptions,
@@ -398,6 +399,16 @@ class VoiceChannel(BaseChannel):
         Args:
             websocket: Any WebSocket implementation satisfying WebSocketProtocol
         """
+        # Socket-open half of the Websocket Connected/Disconnected pair.
+        # Tracked here rather than in a provider so every transport is
+        # covered; no conversation identifier exists yet at this point.
+        track_event(
+            "Websocket Connected",
+            self.tac.config.account_sid,
+            channel=self._telemetry_channel,
+            provider=self._provider.provider_id,
+            orchestrator_enabled=self.tac.is_orchestrator_enabled(),
+        )
         await self._provider.handle_websocket(websocket)
 
     async def initiate_outbound_conversation(
@@ -485,10 +496,28 @@ class VoiceChannel(BaseChannel):
             role: Optional message role (not used by ConversationRelayProvider, but
                   kept for API consistency with BaseChannel interface)
         """
+        response_type = "full" if isinstance(response, str) else "streaming"
         await self._provider.send_response(conversation_id, response, role)
+        track_event(
+            "Response Sent",
+            self.tac.config.account_sid,
+            channel=self._telemetry_channel,
+            conversation_id=conversation_id,
+            response_type=response_type,
+            provider=self._provider.provider_id,
+            orchestrator_enabled=self.tac.is_orchestrator_enabled(),
+        )
 
     def get_channel_name(self) -> str:
         return self._provider.channel_name
+
+    @property
+    def _telemetry_channel(self) -> str:
+        # Not derived from `get_channel_name()` like the base class does: that
+        # returns the provider's transport (e.g.
+        # ``"VOICE_MEDIA_STREAM_OPENAI_GPT_LIVE"``), whereas telemetry reports
+        # the transport separately as `provider`.
+        return "voice"
 
     def get_websocket(self, conversation_id: str) -> WebSocketProtocol | None:
         """

@@ -17,6 +17,7 @@ from tac.channels.voice.conversation_relay.twiml import TwiMLBuilderConversation
 from tac.channels.voice.provider import VoiceProvider
 from tac.channels.websocket_manager import WebSocketManager
 from tac.channels.websocket_protocol import WebSocketDisconnectError, WebSocketProtocol
+from tac.core.analytics import track_event
 from tac.core.config import TACConfig
 from tac.models.outbound import (
     CallOptions,
@@ -71,6 +72,25 @@ class ConversationRelayProvider(VoiceProvider):
     @property
     def channel_name(self) -> str:
         return "VOICE"
+
+    @property
+    def provider_id(self) -> str:
+        return "conversation_relay"
+
+    def _track_conversation_initialized(self, conv_id: str) -> None:
+        """Report a conversation that is ready to exchange messages.
+
+        Shared by both initialization paths — the Conversation Orchestrator
+        lookup and the relay-only fallback — so each reports identically.
+        """
+        track_event(
+            "Conversation Initialized",
+            self.channel.tac.config.account_sid,
+            channel="voice",
+            conversation_id=conv_id,
+            provider=self.provider_id,
+            orchestrator_enabled=self.channel.tac.is_orchestrator_enabled(),
+        )
 
     @staticmethod
     def _caller_address(setup_msg: SetupMessage) -> str | None:
@@ -300,6 +320,8 @@ class ConversationRelayProvider(VoiceProvider):
                 participant_id=agent_participant.id,
             )
 
+        self._track_conversation_initialized(conv_id)
+
         return conv_id, session_state
 
     async def handle_websocket(self, websocket: WebSocketProtocol) -> None:
@@ -378,6 +400,8 @@ class ConversationRelayProvider(VoiceProvider):
                                     session_state = self.session_manager.get_or_create_session(
                                         conv_id
                                     )
+
+                                self._track_conversation_initialized(conv_id)
 
                         if conv_id:
                             await self._handle_prompt_async(conv_id, data, session_state)
@@ -817,6 +841,22 @@ class ConversationRelayProvider(VoiceProvider):
         if conv_id in self.channel._conversations:
             session = self.channel._conversations[conv_id]
             self.channel.tac.trigger_interrupt(session, message)
+
+            # Omitted rather than sent as null when ConversationRelay didn't
+            # report it.
+            duration: dict[str, int] = {}
+            if message.duration_until_interrupt_ms is not None:
+                duration["duration_until_interrupt_ms"] = int(message.duration_until_interrupt_ms)
+
+            track_event(
+                "Voice Interrupt",
+                self.channel.tac.config.account_sid,
+                channel="voice",
+                conversation_id=conv_id,
+                provider=self.provider_id,
+                orchestrator_enabled=self.channel.tac.is_orchestrator_enabled(),
+                **duration,
+            )
         else:
             self.logger.warning(
                 f"Received interrupt for unknown conversation {conv_id}, skipping callback"
@@ -844,6 +884,17 @@ class ConversationRelayProvider(VoiceProvider):
             # Cancel any running task (user hung up, no point continuing)
             await session_state.cancel_stream_task()
             self.session_manager.remove_session(conv_id)
+
+        # Before the relay-only end below, so Websocket Disconnected always
+        # precedes the Conversation Ended it can trigger.
+        track_event(
+            "Websocket Disconnected",
+            self.channel.tac.config.account_sid,
+            channel="voice",
+            conversation_id=conv_id,
+            provider=self.provider_id,
+            orchestrator_enabled=self.channel.tac.is_orchestrator_enabled(),
+        )
 
         if (
             not self.channel.tac.is_orchestrator_enabled()

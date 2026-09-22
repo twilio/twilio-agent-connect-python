@@ -40,6 +40,16 @@ class VoiceProvider:
         """
         return "VOICE"
 
+    @property
+    def provider_id(self) -> str:
+        """Stable snake_case identifier for this provider.
+
+        Reported on voice telemetry events so emissions from different
+        transports are distinguishable. Built-in providers override it; a
+        provider defined outside the SDK inherits ``"custom"``.
+        """
+        return "custom"
+
     async def handle_incoming_call(
         self,
         twiml_request: TwiMLRequest | None = None,

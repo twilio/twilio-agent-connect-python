@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from tac import TAC
 from tac.channels.base import AGENT_TYPES, BaseChannel
 from tac.context.conversation import ConversationClient
+from tac.core.analytics import track_event
 from tac.models.conversation import (
     ActionChannelSettings,
     ActionParticipantRef,
@@ -252,6 +253,17 @@ class MessagingChannel(BaseChannel):
                 to_address=mask_address(session.author_info.address),
                 channel_id=channel_settings.channel_id if channel_settings else None,
             )
+
+            # Inside the try, not after it: the handler below swallows the
+            # error rather than re-raising, so tracking after the block would
+            # report a failed send as delivered.
+            track_event(
+                "Response Sent",
+                self.tac.config.account_sid,
+                channel=self._telemetry_channel,
+                conversation_id=conversation_id,
+                response_type="full",
+            )
         except Exception as e:
             self.logger.error(
                 "Failed to create action",
@@ -372,6 +384,16 @@ class MessagingChannel(BaseChannel):
                     session.profile_id = customer_participant.profile_id
 
         memory_response = await self._retrieve_memory_if_enabled(session, message_text, conv_id)
+
+        # Before the callback rather than after it: the callback is awaited and
+        # may auto-send a reply, so tracking afterwards would report the
+        # response ahead of the message that prompted it.
+        track_event(
+            "Message Received",
+            self.tac.config.account_sid,
+            channel=self._telemetry_channel,
+            conversation_id=conv_id,
+        )
 
         try:
             response = await self.tac.trigger_message_ready(message_text, session, memory_response)

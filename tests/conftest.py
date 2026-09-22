@@ -1,10 +1,17 @@
 """Shared pytest fixtures for TAC tests."""
 
+import os
 from unittest.mock import patch
 
 import pytest
 
 from tac.models.conversation import ConversationConfiguration
+
+# Keep telemetry off for the whole suite so tests never construct a real
+# client or send fixture events. Set at import, before any test runs, because
+# a channel emits on the first conversation it starts. Tests that exercise the
+# analytics module clear this and mock the client themselves.
+os.environ["TAC_ANALYTICS_DISABLED"] = "true"
 
 
 @pytest.fixture(autouse=True)
