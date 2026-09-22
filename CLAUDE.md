@@ -87,6 +87,6 @@ Both APIs are fully supported with sync/async variants and streaming support.
 
 ## Dependencies
 
-- **Core**: `pydantic>=2`, `httpx>=0.27`, `twilio>=9.8.3`
+- **Core**: `pydantic>=2`, `httpx>=0.27`, `twilio>=9.8.3`, `segment-analytics-python>=2.3`
 - **Server** (optional): `fastapi`, `uvicorn`, `python-multipart` — install with `pip install tac[server]`
 - **Dev**: `pytest`, `ruff`, `mypy`, `openai`, `openai-agents`

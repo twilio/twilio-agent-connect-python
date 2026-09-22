@@ -4,9 +4,11 @@ import asyncio
 from abc import ABC, abstractmethod
 from collections import OrderedDict
 from collections.abc import AsyncGenerator
+from datetime import datetime
 from typing import Any
 
 from tac import TAC
+from tac.core.analytics import track_event
 from tac.core.logging import get_logger
 from tac.models.conversation import ParticipantResponse
 from tac.models.memory import MemoryMode
@@ -113,6 +115,16 @@ class BaseChannel(ABC):
         """
         # TODO: Parse Channel Type based on webhook data
         pass
+
+    @property
+    def _telemetry_channel(self) -> str:
+        """Lowercase channel label for telemetry, e.g. ``"sms"``.
+
+        Separate from :meth:`get_channel_name` because that name is also
+        stamped onto every session and is not a stable telemetry value — the
+        Media Streams voice providers return their transport there.
+        """
+        return self.get_channel_name().lower()
 
     def _is_duplicate_webhook(self, idempotency_token: str) -> bool:
         """Check if a webhook has already been processed using Twilio's idempotency token.
@@ -248,6 +260,15 @@ class BaseChannel(ABC):
             conversation_id=conv_id,
             profile_id=profile_id,
         )
+
+        track_event(
+            "Conversation Started",
+            self.tac.config.account_sid,
+            channel=self._telemetry_channel,
+            conversation_id=conv_id,
+            has_profile_id=profile_id is not None,
+        )
+
         return self._conversations[conv_id]
 
     async def _end_conversation(self, conv_id: str) -> None:
@@ -262,6 +283,12 @@ class BaseChannel(ABC):
         """
         session = self._conversations.pop(conv_id, None)
         if session is not None:
+            # Measured before the callback below, which is application-owned:
+            # it is awaited and may do network I/O or mutate the session, and
+            # neither its latency nor its edits belong in the conversation's
+            # reported duration.
+            duration_ms = int((datetime.now() - session.started_at).total_seconds() * 1000)
+
             try:
                 await self.tac.trigger_conversation_ended(session)
             except Exception as e:
@@ -271,6 +298,14 @@ class BaseChannel(ABC):
                     error=str(e),
                     exc_info=True,
                 )
+
+            track_event(
+                "Conversation Ended",
+                self.tac.config.account_sid,
+                channel=self._telemetry_channel,
+                conversation_id=conv_id,
+                duration_ms=duration_ms,
+            )
 
             self.logger.debug(
                 "Ended conversation",

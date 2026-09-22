@@ -25,6 +25,7 @@ from tac.channels.voice.media_streams.shared.openai_provider import (
     MediaStreamsOpenAIProvider,
 )
 from tac.channels.websocket_protocol import WebSocketDisconnectError, WebSocketProtocol
+from tac.core.analytics import track_event
 from tac.models.outbound import (
     InitiateVoiceConversationOptions,
     InitiateVoiceConversationOptionsOpenAIRealtime,
@@ -74,6 +75,10 @@ class OpenAIRealtimeProvider(MediaStreamsOpenAIProvider[_CallState]):
     @property
     def channel_name(self) -> str:
         return "VOICE_MEDIA_STREAM_OPENAI_REALTIME"
+
+    @property
+    def provider_id(self) -> str:
+        return "openai_realtime"
 
     async def initiate_outbound_conversation(
         self,
@@ -270,6 +275,16 @@ class OpenAIRealtimeProvider(MediaStreamsOpenAIProvider[_CallState]):
         self.logger.debug(
             "Media stream started", conversation_id=conv_id, media_format=message.media_format
         )
+
+        track_event(
+            "Conversation Initialized",
+            self.tac_config.account_sid,
+            channel="voice",
+            conversation_id=conv_id,
+            provider=self.provider_id,
+            orchestrator_enabled=self.channel.tac.is_orchestrator_enabled(),
+        )
+
         return conv_id
 
     async def _connect_model(self, conv_id: str) -> None:
@@ -442,6 +457,19 @@ class OpenAIRealtimeProvider(MediaStreamsOpenAIProvider[_CallState]):
             conv_id, {"event": "clear", "streamSid": session.metadata.get("stream_sid")}
         )
 
+        # Past the guard above, so a reply really was playing when the caller
+        # cut in. `current_item_audio_ms` is how much of it they heard — the
+        # same quantity ConversationRelay reports as duration_until_interrupt.
+        track_event(
+            "Voice Interrupt",
+            self.tac_config.account_sid,
+            channel="voice",
+            conversation_id=conv_id,
+            duration_until_interrupt_ms=int(barge_in.current_item_audio_ms),
+            provider=self.provider_id,
+            orchestrator_enabled=self.channel.tac.is_orchestrator_enabled(),
+        )
+
         barge_in.muted_item_id = last_assistant_item
         barge_in.last_assistant_item = None
         barge_in.current_item_audio_ms = 0
@@ -506,4 +534,16 @@ class OpenAIRealtimeProvider(MediaStreamsOpenAIProvider[_CallState]):
                 await call.model_ws.close()
             except Exception as e:
                 self.logger.debug(f"Error closing model socket: {e}", conversation_id=conv_id)
+
+        # Before the end below, so Websocket Disconnected always precedes the
+        # Conversation Ended it triggers.
+        track_event(
+            "Websocket Disconnected",
+            self.tac_config.account_sid,
+            channel="voice",
+            conversation_id=conv_id,
+            provider=self.provider_id,
+            orchestrator_enabled=self.channel.tac.is_orchestrator_enabled(),
+        )
+
         await self.channel._end_conversation(conv_id)

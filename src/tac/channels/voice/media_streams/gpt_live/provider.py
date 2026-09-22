@@ -22,6 +22,7 @@ from tac.channels.voice.media_streams.shared.openai_provider import (
     MediaStreamsOpenAIProvider,
 )
 from tac.channels.websocket_protocol import WebSocketDisconnectError, WebSocketProtocol
+from tac.core.analytics import track_event
 from tac.models.outbound import (
     InitiateVoiceConversationOptions,
     InitiateVoiceConversationOptionsGPTLive,
@@ -94,6 +95,10 @@ class GPTLiveProvider(MediaStreamsOpenAIProvider[_CallState]):
     @property
     def channel_name(self) -> str:
         return "VOICE_MEDIA_STREAM_OPENAI_GPT_LIVE"
+
+    @property
+    def provider_id(self) -> str:
+        return "gpt_live"
 
     async def initiate_outbound_conversation(
         self,
@@ -317,6 +322,16 @@ class GPTLiveProvider(MediaStreamsOpenAIProvider[_CallState]):
         self.logger.debug(
             "Media stream started", conversation_id=conv_id, media_format=message.media_format
         )
+
+        track_event(
+            "Conversation Initialized",
+            self.tac_config.account_sid,
+            channel="voice",
+            conversation_id=conv_id,
+            provider=self.provider_id,
+            orchestrator_enabled=self.channel.tac.is_orchestrator_enabled(),
+        )
+
         return conv_id
 
     async def _connect_model(self, conv_id: str) -> None:
@@ -538,4 +553,16 @@ class GPTLiveProvider(MediaStreamsOpenAIProvider[_CallState]):
                     "Error closing model socket", error=str(e), conversation_id=conv_id
                 )
         self._calls.pop(conv_id, None)
+
+        # Before the end below, so Websocket Disconnected always precedes the
+        # Conversation Ended it triggers.
+        track_event(
+            "Websocket Disconnected",
+            self.tac_config.account_sid,
+            channel="voice",
+            conversation_id=conv_id,
+            provider=self.provider_id,
+            orchestrator_enabled=self.channel.tac.is_orchestrator_enabled(),
+        )
+
         await self.channel._end_conversation(conv_id)

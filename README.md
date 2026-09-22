@@ -173,6 +173,18 @@ TAC simplifies building AI agents by handling the integration between Twilio's c
 
 For detailed architecture and advanced usage, see [CLAUDE.md](https://github.com/twilio/twilio-agent-connect-python/blob/main/CLAUDE.md).
 
+## Telemetry
+
+The SDK reports usage events to help improve the product — conversation started and ended, messages received, responses sent, and voice connection and interrupt events. Each event includes your Twilio account SID, the channel, and the SDK name and version, plus a conversation ID once one has been established and timing such as conversation duration.
+
+Message content, transcripts, phone numbers, and other end-user identifiers are never collected.
+
+Telemetry is on by default. To disable it, set the following environment variable:
+
+```bash
+TAC_ANALYTICS_DISABLED=true
+```
+
 ## Learn More
 
 **Examples & Guides:**

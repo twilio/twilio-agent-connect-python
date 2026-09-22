@@ -17,6 +17,7 @@ from tac.channels.voice.conversation_relay.twiml import TwiMLBuilderConversation
 from tac.channels.voice.provider import VoiceProvider
 from tac.channels.websocket_manager import WebSocketManager
 from tac.channels.websocket_protocol import WebSocketDisconnectError, WebSocketProtocol
+from tac.core.analytics import track_event
 from tac.core.config import TACConfig
 from tac.models.outbound import (
     CallOptions,
@@ -71,6 +72,25 @@ class ConversationRelayProvider(VoiceProvider):
     @property
     def channel_name(self) -> str:
         return "VOICE"
+
+    @property
+    def provider_id(self) -> str:
+        return "conversation_relay"
+
+    def _track_conversation_initialized(self, conv_id: str) -> None:
+        """Report a conversation that is ready to exchange messages.
+
+        Shared by both initialization paths — the Conversation Orchestrator
+        lookup and the relay-only fallback — so each reports identically.
+        """
+        track_event(
+            "Conversation Initialized",
+            self.channel.tac.config.account_sid,
+            channel="voice",
+            conversation_id=conv_id,
+            provider=self.provider_id,
+            orchestrator_enabled=self.channel.tac.is_orchestrator_enabled(),
+        )
 
     @staticmethod
     def _caller_address(setup_msg: SetupMessage) -> str | None:
@@ -300,6 +320,8 @@ class ConversationRelayProvider(VoiceProvider):
                 participant_id=agent_participant.id,
             )
 
+        self._track_conversation_initialized(conv_id)
+
         return conv_id, session_state
 
     async def handle_websocket(self, websocket: WebSocketProtocol) -> None:
@@ -378,6 +400,8 @@ class ConversationRelayProvider(VoiceProvider):
                                     session_state = self.session_manager.get_or_create_session(
                                         conv_id
                                     )
+
+                                self._track_conversation_initialized(conv_id)
 
                         if conv_id:
                             await self._handle_prompt_async(conv_id, data, session_state)
@@ -665,6 +689,11 @@ class ConversationRelayProvider(VoiceProvider):
             return
 
         full_response = ""
+        # Set only once a terminal send has been acknowledged, so the four
+        # ways a send can fall short — a socket that dies mid-stream, a final
+        # marker that never lands, an empty stream, an empty string — are not
+        # reported as a delivered response.
+        delivered = False
 
         try:
             # Check if response is an async generator (streaming)
@@ -704,6 +733,7 @@ class ConversationRelayProvider(VoiceProvider):
                             await websocket.send_text(
                                 json.dumps({"type": "text", "token": "", "last": True})
                             )
+                            delivered = bool(full_response)
                         except (WebSocketDisconnectError, RuntimeError):
                             self.logger.info(
                                 "WebSocket closed before sending final marker",
@@ -716,6 +746,7 @@ class ConversationRelayProvider(VoiceProvider):
                 await websocket.send_text(
                     json.dumps({"type": "text", "token": response, "last": True})
                 )
+                delivered = bool(response)
 
             # If a handoff is pending, send the WS "end" message now that the
             # LLM's final response has been delivered to the caller.
@@ -733,6 +764,20 @@ class ConversationRelayProvider(VoiceProvider):
                             "caller will not be transferred",
                             conversation_id=conversation_id,
                         )
+
+            # Tracked here rather than in `VoiceChannel.send_response` because
+            # a reply produced by the message-ready callback is auto-sent
+            # straight through this method, never through the channel.
+            if delivered:
+                track_event(
+                    "Response Sent",
+                    self.channel.tac.config.account_sid,
+                    channel="voice",
+                    conversation_id=conversation_id,
+                    response_type="full" if isinstance(response, str) else "streaming",
+                    provider=self.provider_id,
+                    orchestrator_enabled=self.channel.tac.is_orchestrator_enabled(),
+                )
 
         except asyncio.CancelledError:
             # Re-raise to propagate cancellation up the call stack.
@@ -816,6 +861,22 @@ class ConversationRelayProvider(VoiceProvider):
         # Trigger interrupt callback if conversation exists
         if conv_id in self.channel._conversations:
             session = self.channel._conversations[conv_id]
+
+            # Before the callback, not after: `trigger_interrupt` does not
+            # guard a synchronous callback, so a raising one would otherwise
+            # erase the record of an interrupt that really happened.
+            # ConversationRelay doesn't always report the duration; None is
+            # dropped rather than sent as a null.
+            track_event(
+                "Voice Interrupt",
+                self.channel.tac.config.account_sid,
+                channel="voice",
+                conversation_id=conv_id,
+                duration_until_interrupt_ms=message.duration_until_interrupt_ms,
+                provider=self.provider_id,
+                orchestrator_enabled=self.channel.tac.is_orchestrator_enabled(),
+            )
+
             self.channel.tac.trigger_interrupt(session, message)
         else:
             self.logger.warning(
@@ -844,6 +905,17 @@ class ConversationRelayProvider(VoiceProvider):
             # Cancel any running task (user hung up, no point continuing)
             await session_state.cancel_stream_task()
             self.session_manager.remove_session(conv_id)
+
+        # Before the relay-only end below, so Websocket Disconnected always
+        # precedes the Conversation Ended it can trigger.
+        track_event(
+            "Websocket Disconnected",
+            self.channel.tac.config.account_sid,
+            channel="voice",
+            conversation_id=conv_id,
+            provider=self.provider_id,
+            orchestrator_enabled=self.channel.tac.is_orchestrator_enabled(),
+        )
 
         if (
             not self.channel.tac.is_orchestrator_enabled()
