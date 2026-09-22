@@ -862,23 +862,19 @@ class ConversationRelayProvider(VoiceProvider):
         if conv_id in self.channel._conversations:
             session = self.channel._conversations[conv_id]
 
-            # Omitted rather than sent as null when ConversationRelay didn't
-            # report it.
-            duration: dict[str, int] = {}
-            if message.duration_until_interrupt_ms is not None:
-                duration["duration_until_interrupt_ms"] = int(message.duration_until_interrupt_ms)
-
             # Before the callback, not after: `trigger_interrupt` does not
             # guard a synchronous callback, so a raising one would otherwise
             # erase the record of an interrupt that really happened.
+            # ConversationRelay doesn't always report the duration; None is
+            # dropped rather than sent as a null.
             track_event(
                 "Voice Interrupt",
                 self.channel.tac.config.account_sid,
                 channel="voice",
                 conversation_id=conv_id,
+                duration_until_interrupt_ms=message.duration_until_interrupt_ms,
                 provider=self.provider_id,
                 orchestrator_enabled=self.channel.tac.is_orchestrator_enabled(),
-                **duration,
             )
 
             self.channel.tac.trigger_interrupt(session, message)

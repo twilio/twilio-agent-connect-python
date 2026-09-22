@@ -16,12 +16,12 @@ from segment.analytics import Client
 
 from tac.core.logging import ContextLogger, get_logger
 
-# The distribution name is shared with no other Agent Connect SDK, but Segment
-# stamps only its own library name on an event, so events need an explicit
-# marker saying which SDK produced them.
+# Segment stamps only its own library name on an event, so events need an
+# explicit marker naming the package that produced them.
 _SDK_PACKAGE = "twilio-agent-connect-python"
 
-# Matches the TypeScript SDK's flushAt/flushInterval.
+# Batch aggressively enough that a short-lived process still reports, without
+# a request per event.
 _UPLOAD_SIZE = 20
 _UPLOAD_INTERVAL_SECONDS = 10.0
 
@@ -81,11 +81,16 @@ def _get_client() -> Client | None:
 def track_event(event: str, account_sid: str, **properties: Any) -> None:
     """Record a telemetry event. Never raises.
 
+    A property whose value is ``None`` is dropped rather than sent. Every
+    declared property is optional, so omitting one is always accepted, whereas
+    a null against a typed property is a violation that discards the whole
+    event. Pass an unknown value as ``None`` and it will simply be left out.
+
     Args:
         event: Event name.
         account_sid: Twilio account SID, also used as the anonymous id.
-        **properties: Event properties. Omit a keyword rather than passing
-            ``None`` for a value that isn't known.
+        **properties: Event properties. ``None`` values are omitted; ``False``
+            and ``0`` are sent, being meaningful values in their own right.
     """
     try:
         client = _get_client()
@@ -99,7 +104,7 @@ def track_event(event: str, account_sid: str, **properties: Any) -> None:
             # parameter, so it can never arrive in `properties` at all.
             properties={
                 "account_sid": account_sid,
-                **properties,
+                **{k: v for k, v in properties.items() if v is not None},
                 "sdk_version": version("twilio-agent-connect"),
                 "sdk_package": _SDK_PACKAGE,
             },

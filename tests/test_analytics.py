@@ -113,6 +113,37 @@ class TestTrackEvent:
             "sdk_package",
         }
 
+    def test_none_valued_properties_are_dropped(self, mock_client: MagicMock) -> None:
+        """Omitting a property is always accepted; a null against a typed
+        property is a violation that discards the whole event."""
+        track_event(
+            "Voice Interrupt",
+            "AC123",
+            channel="voice",
+            conversation_id="conv-1",
+            duration_until_interrupt_ms=None,
+        )
+
+        properties = only(mock_client, "Voice Interrupt")["properties"]
+        assert "duration_until_interrupt_ms" not in properties
+
+    @pytest.mark.parametrize(
+        ("event", "key", "value"),
+        [
+            ("Conversation Started", "has_profile_id", False),
+            ("Conversation Ended", "duration_ms", 0),
+            ("Websocket Connected", "orchestrator_enabled", False),
+        ],
+    )
+    def test_falsy_values_are_kept(
+        self, mock_client: MagicMock, event: str, key: str, value: Any
+    ) -> None:
+        """Dropping must key off None, not falsiness — these are real values."""
+        track_event(event, "AC123", channel="sms", **{key: value})
+
+        assert only(mock_client, event)["properties"][key] == value
+        assert_contract(mock_client)
+
     def test_account_sid_is_anonymous_id(self, mock_client: MagicMock) -> None:
         track_event("Conversation Started", "AC456", channel="sms", conversation_id="c")
 
@@ -556,6 +587,74 @@ class TestOpenAIRealtimeBargeIn:
         from tac.channels.voice.media_streams.gpt_live import provider as gpt_live
 
         assert "Voice Interrupt" not in inspect.getsource(gpt_live)
+
+
+class TestConversationInitializedIsEmittedOnce:
+    """The two initialization paths are mutually exclusive.
+
+    ``_track_conversation_initialized`` is called from both
+    ``_initialize_conversation`` (orchestrated) and the relay-only branch of
+    ``handle_websocket``, because Python has no single point where the two
+    converge. Which one runs is decided by whether an init task was created at
+    ``setup``, so exactly one may fire per connection.
+    """
+
+    @staticmethod
+    def relay_only_tac() -> TAC:
+        config = get_test_config()
+        config.conversation_configuration_id = None
+        return TAC(config)
+
+    @staticmethod
+    def socket(*messages: dict[str, Any]) -> AsyncMock:
+        websocket = AsyncMock()
+        websocket.receive_json.side_effect = [*messages, Exception("stop-iteration")]
+        return websocket
+
+    @pytest.mark.asyncio
+    async def test_relay_only_emits_exactly_once(self, mock_client: MagicMock) -> None:
+        channel = VoiceChannel(self.relay_only_tac())
+        initialize = AsyncMock()
+        channel._provider._initialize_conversation = initialize  # type: ignore[method-assign]
+
+        await channel.handle_websocket(
+            self.socket(
+                {"type": "setup", "callSid": "CA_relay", "from": "+15551230000"},
+                {"type": "prompt", "voicePrompt": "hello", "final": True},
+                {"type": "prompt", "voicePrompt": "again", "final": True},
+            )
+        )
+
+        initialized = [c for c in tracked(mock_client) if c["event"] == "Conversation Initialized"]
+        assert len(initialized) == 1
+        assert initialized[0]["properties"]["conversation_id"] == "CA_relay"
+        assert initialized[0]["properties"]["orchestrator_enabled"] is False
+        # The orchestrated coroutine is the other emitter; it must not run.
+        initialize.assert_not_called()
+        assert_contract(mock_client)
+
+    @pytest.mark.asyncio
+    async def test_orchestrated_does_not_take_the_relay_only_branch(
+        self, mock_client: MagicMock
+    ) -> None:
+        """With the orchestrated coroutine stubbed out, nothing should emit.
+
+        Any `Conversation Initialized` here would mean the relay-only branch
+        ran in orchestrated mode — i.e. a second, duplicate emitter.
+        """
+        channel = VoiceChannel(TAC(get_test_config()))
+        channel._provider._initialize_conversation = AsyncMock(  # type: ignore[method-assign]
+            return_value=("conv_orchestrated", None)
+        )
+
+        await channel.handle_websocket(
+            self.socket(
+                {"type": "setup", "callSid": "CA_orch", "from": "+15551230000"},
+                {"type": "prompt", "voicePrompt": "hello", "final": True},
+            )
+        )
+
+        assert not [c for c in tracked(mock_client) if c["event"] == "Conversation Initialized"]
 
 
 class TestVoiceResponseDelivery:
