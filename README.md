@@ -175,7 +175,7 @@ For detailed architecture and advanced usage, see [CLAUDE.md](https://github.com
 
 ## Telemetry
 
-The SDK reports usage events to help improve the product — conversation started and ended, messages received, responses sent, and voice connection and interrupt events. Each event includes your Twilio account SID, the channel, a conversation ID, the SDK name and version, and timing such as conversation duration.
+The SDK reports usage events to help improve the product — conversation started and ended, messages received, responses sent, and voice connection and interrupt events. Each event includes your Twilio account SID, the channel, and the SDK name and version, plus a conversation ID once one has been established and timing such as conversation duration.
 
 Message content, transcripts, phone numbers, and other end-user identifiers are never collected.
 

@@ -689,6 +689,11 @@ class ConversationRelayProvider(VoiceProvider):
             return
 
         full_response = ""
+        # Set only once a terminal send has been acknowledged, so the four
+        # ways a send can fall short — a socket that dies mid-stream, a final
+        # marker that never lands, an empty stream, an empty string — are not
+        # reported as a delivered response.
+        delivered = False
 
         try:
             # Check if response is an async generator (streaming)
@@ -728,6 +733,7 @@ class ConversationRelayProvider(VoiceProvider):
                             await websocket.send_text(
                                 json.dumps({"type": "text", "token": "", "last": True})
                             )
+                            delivered = bool(full_response)
                         except (WebSocketDisconnectError, RuntimeError):
                             self.logger.info(
                                 "WebSocket closed before sending final marker",
@@ -740,6 +746,7 @@ class ConversationRelayProvider(VoiceProvider):
                 await websocket.send_text(
                     json.dumps({"type": "text", "token": response, "last": True})
                 )
+                delivered = bool(response)
 
             # If a handoff is pending, send the WS "end" message now that the
             # LLM's final response has been delivered to the caller.
@@ -760,18 +767,17 @@ class ConversationRelayProvider(VoiceProvider):
 
             # Tracked here rather than in `VoiceChannel.send_response` because
             # a reply produced by the message-ready callback is auto-sent
-            # straight through this method, never through the channel. Inside
-            # the try, so an interrupt (CancelledError) or a closed socket
-            # reports nothing — the caller heard no complete response.
-            track_event(
-                "Response Sent",
-                self.channel.tac.config.account_sid,
-                channel="voice",
-                conversation_id=conversation_id,
-                response_type="full" if isinstance(response, str) else "streaming",
-                provider=self.provider_id,
-                orchestrator_enabled=self.channel.tac.is_orchestrator_enabled(),
-            )
+            # straight through this method, never through the channel.
+            if delivered:
+                track_event(
+                    "Response Sent",
+                    self.channel.tac.config.account_sid,
+                    channel="voice",
+                    conversation_id=conversation_id,
+                    response_type="full" if isinstance(response, str) else "streaming",
+                    provider=self.provider_id,
+                    orchestrator_enabled=self.channel.tac.is_orchestrator_enabled(),
+                )
 
         except asyncio.CancelledError:
             # Re-raise to propagate cancellation up the call stack.
@@ -855,7 +861,6 @@ class ConversationRelayProvider(VoiceProvider):
         # Trigger interrupt callback if conversation exists
         if conv_id in self.channel._conversations:
             session = self.channel._conversations[conv_id]
-            self.channel.tac.trigger_interrupt(session, message)
 
             # Omitted rather than sent as null when ConversationRelay didn't
             # report it.
@@ -863,6 +868,9 @@ class ConversationRelayProvider(VoiceProvider):
             if message.duration_until_interrupt_ms is not None:
                 duration["duration_until_interrupt_ms"] = int(message.duration_until_interrupt_ms)
 
+            # Before the callback, not after: `trigger_interrupt` does not
+            # guard a synchronous callback, so a raising one would otherwise
+            # erase the record of an interrupt that really happened.
             track_event(
                 "Voice Interrupt",
                 self.channel.tac.config.account_sid,
@@ -872,6 +880,8 @@ class ConversationRelayProvider(VoiceProvider):
                 orchestrator_enabled=self.channel.tac.is_orchestrator_enabled(),
                 **duration,
             )
+
+            self.channel.tac.trigger_interrupt(session, message)
         else:
             self.logger.warning(
                 f"Received interrupt for unknown conversation {conv_id}, skipping callback"

@@ -19,9 +19,11 @@ from tac.channels.chat import ChatChannel
 from tac.channels.rcs import RCSChannel
 from tac.channels.sms import SMSChannel
 from tac.channels.voice import VoiceChannel
+from tac.channels.websocket_protocol import WebSocketDisconnectError
 from tac.channels.whatsapp import WhatsAppChannel
 from tac.core import analytics
 from tac.core.analytics import _reset_analytics, shutdown_analytics, track_event
+from tac.models.handoff import PendingHandoffData
 
 # Every property each event is allowed to carry. A key emitted outside its
 # event's set is silently dropped along with the whole event, so these sets are
@@ -429,6 +431,116 @@ class TestVoiceCallSites:
         assert VoiceProvider(MagicMock()).provider_id == "custom"
 
 
+class TestVoiceResponseDelivery:
+    """`Response Sent` must mean a complete response reached the caller.
+
+    ``ConversationRelayProvider.send_response`` swallows websocket failures
+    locally rather than letting them reach its outer handler, so every way a
+    send can fall short needs its own case — the outer ``try`` is not the
+    boundary it looks like.
+    """
+
+    @pytest.fixture
+    def tac(self) -> TAC:
+        return TAC(get_test_config())
+
+    def prepare(self, tac: TAC, websocket: Any) -> VoiceChannel:
+        channel = VoiceChannel(tac)
+        channel._start_conversation("conv-1")
+        channel._provider._websocket_manager.add_websocket("conv-1", websocket)
+        return channel
+
+    def sent(self, client: MagicMock) -> list[dict[str, Any]]:
+        return [c for c in tracked(client) if c["event"] == "Response Sent"]
+
+    @pytest.mark.asyncio
+    async def test_reports_a_fully_streamed_response(
+        self, mock_client: MagicMock, tac: TAC
+    ) -> None:
+        async def stream() -> Any:
+            yield "hel"
+            yield "lo"
+
+        channel = self.prepare(tac, AsyncMock())
+
+        await channel.send_response("conv-1", stream())
+
+        assert len(self.sent(mock_client)) == 1
+        assert_contract(mock_client)
+
+    @pytest.mark.asyncio
+    async def test_suppressed_when_socket_dies_mid_stream(
+        self, mock_client: MagicMock, tac: TAC
+    ) -> None:
+        """The token send fails, is swallowed locally, and the marker is skipped."""
+
+        async def stream() -> Any:
+            yield "first"
+            yield "second"
+
+        websocket = AsyncMock()
+        websocket.send_text.side_effect = [None, WebSocketDisconnectError()]
+        channel = self.prepare(tac, websocket)
+
+        await channel.send_response("conv-1", stream())
+
+        assert not self.sent(mock_client)
+
+    @pytest.mark.asyncio
+    async def test_suppressed_when_final_marker_fails(
+        self, mock_client: MagicMock, tac: TAC
+    ) -> None:
+        """Without the `last` marker the turn never completes for the caller."""
+
+        async def stream() -> Any:
+            yield "hello"
+
+        websocket = AsyncMock()
+        websocket.send_text.side_effect = [None, WebSocketDisconnectError()]
+        channel = self.prepare(tac, websocket)
+
+        await channel.send_response("conv-1", stream())
+
+        assert not self.sent(mock_client)
+
+    @pytest.mark.asyncio
+    async def test_suppressed_for_an_empty_stream(self, mock_client: MagicMock, tac: TAC) -> None:
+        """Nothing reached the caller, so there is no response to report."""
+
+        async def stream() -> Any:
+            return
+            yield  # pragma: no cover - makes this an async generator
+
+        channel = self.prepare(tac, AsyncMock())
+
+        await channel.send_response("conv-1", stream())
+
+        assert not self.sent(mock_client)
+
+    @pytest.mark.asyncio
+    async def test_suppressed_for_an_empty_string(self, mock_client: MagicMock, tac: TAC) -> None:
+        channel = self.prepare(tac, AsyncMock())
+
+        await channel.send_response("conv-1", "")
+
+        assert not self.sent(mock_client)
+
+    @pytest.mark.asyncio
+    async def test_reported_when_only_the_handoff_send_fails(
+        self, mock_client: MagicMock, tac: TAC
+    ) -> None:
+        """The response itself was delivered; only the transfer was lost."""
+        websocket = AsyncMock()
+        websocket.send_text.side_effect = [None, WebSocketDisconnectError()]
+        channel = self.prepare(tac, websocket)
+        channel._conversations["conv-1"].pending_handoff_data = PendingHandoffData(handoffData="{}")
+
+        await channel.send_response("conv-1", "hello")
+
+        assert len(self.sent(mock_client)) == 1
+        assert_contract(mock_client)
+
+
 class TestVoiceInterrupt:
     @pytest.fixture
     def channel(self) -> VoiceChannel:
@@ -475,3 +587,28 @@ class TestVoiceInterrupt:
         channel._provider._handle_interrupt("conv-unknown", InterruptMessage(type="interrupt"))
 
         assert not [c for c in tracked(mock_client) if c["event"] == "Voice Interrupt"]
+
+    def test_reported_even_when_the_callback_raises(
+        self, mock_client: MagicMock, channel: VoiceChannel
+    ) -> None:
+        """`trigger_interrupt` does not guard a synchronous callback.
+
+        The interrupt happened regardless of what the application does with
+        it, so a raising callback must not erase the record.
+        """
+        from tac.models.voice import InterruptMessage
+
+        def explode(session: Any, interrupt_data: Any) -> None:
+            raise RuntimeError("application callback failed")
+
+        channel._start_conversation("conv-1")
+        channel.tac.on_interrupt(explode)
+
+        with pytest.raises(RuntimeError, match="application callback failed"):
+            channel._provider._handle_interrupt(
+                "conv-1", InterruptMessage(type="interrupt", durationUntilInterruptMs=900)
+            )
+
+        properties = only(mock_client, "Voice Interrupt")["properties"]
+        assert properties["duration_until_interrupt_ms"] == 900
+        assert_contract(mock_client)
