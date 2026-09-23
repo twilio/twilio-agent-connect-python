@@ -8,6 +8,7 @@ import pytest
 from tac import TAC
 from tac.channels.sms import SMSChannel
 from tac.models.memory import MemoryRetrievalMeta, MemoryRetrievalResponse
+from tac.models.outbound import InitiateMessagingConversationOptions
 from tac.models.session import AuthorInfo, ConversationSession
 from tac.models.tac import TACMemoryResponse
 
@@ -130,6 +131,44 @@ def test_resolve_outbound_from_validates_membership() -> None:
         channel._resolve_outbound_from(
             "+19998887777", allowlist=tac.config.phone_numbers, default=tac.config.phone_number
         )
+
+
+def test_is_default_agent_address_matches_any_configured_number() -> None:
+    cfg = get_test_config()
+    cfg["phone_numbers"] = ["+15551234567", "+14440000000"]
+    tac = TAC(cfg)
+    channel = SMSChannel(tac)
+    assert channel.is_default_agent_address("+15551234567") is True
+    assert channel.is_default_agent_address("+14440000000") is True
+    assert channel.is_default_agent_address("+19999999999") is False
+
+
+@pytest.mark.asyncio
+async def test_outbound_from_selects_configured_number() -> None:
+    cfg = get_test_config()
+    cfg["phone_numbers"] = ["+15551234567", "+14440000000"]
+    tac = TAC(cfg)
+    channel = SMSChannel(tac)
+
+    with patch.object(channel, "_initiate_messaging_conversation", new=AsyncMock()) as mock_init:
+        await channel.initiate_outbound_conversation(
+            InitiateMessagingConversationOptions(
+                to="+19998887777", message="hi", from_="+14440000000"
+            )
+        )
+    assert mock_init.await_args.kwargs["from_address"] == "+14440000000"
+
+
+@pytest.mark.asyncio
+async def test_outbound_from_defaults_to_phone_number() -> None:
+    tac = TAC(get_test_config())
+    channel = SMSChannel(tac)
+
+    with patch.object(channel, "_initiate_messaging_conversation", new=AsyncMock()) as mock_init:
+        await channel.initiate_outbound_conversation(
+            InitiateMessagingConversationOptions(to="+19998887777", message="hi")
+        )
+    assert mock_init.await_args.kwargs["from_address"] == "+15551234567"
 
 
 class TestSMSChannel:
