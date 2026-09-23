@@ -16,11 +16,11 @@ class InitiateMessagingConversationOptions(BaseModel):
     including SMS, RCS, WhatsApp, and Chat. Each channel may extend this with
     channel-specific requirements (e.g., Chat requires channel_id).
 
-    The sender is always TAC's configured address (``config.phone_number``
-    for SMS, ``config.rcs_sender_id`` for RCS, ``config.whatsapp_number``
-    for WhatsApp, ``ChatChannelConfig.agent_address`` for Chat).
-    Multi-sender deployments should use one TAC instance per sender so
-    inbound webhook routing, memory scoping, and configuration stay in sync.
+    The sender defaults to the channel's configured default (``config.phone_number``
+    for SMS, ``config.rcs_sender_id`` for RCS, ``config.whatsapp_number`` for
+    WhatsApp, ``ChatChannelConfig.agent_address`` for Chat). Set ``from_`` to send
+    from any other configured sender for that channel (``config.phone_numbers`` /
+    ``rcs_sender_ids`` / ``whatsapp_numbers``).
     """
 
     to: str = Field(..., min_length=1)
