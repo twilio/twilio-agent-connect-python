@@ -121,6 +121,7 @@ See `examples/.env.example` for all available configuration options. Key variabl
 - `TWILIO_API_KEY`: Twilio API key SID (starts with SK)
 - `TWILIO_API_SECRET`: Twilio API key secret
 - `TWILIO_PHONE_NUMBER`: Your Twilio phone number
+- `TWILIO_PHONE_NUMBERS`: Optional comma-separated allowlist of additional Twilio phone numbers to send/receive from (e.g. `+15551234567,+14440000000`). `TWILIO_PHONE_NUMBER` remains the default sender
 
 ### Required for Orchestrator Mode (omit for ConversationRelay-only)
 - `TWILIO_CONVERSATION_CONFIGURATION_ID`: Conversation Configuration ID
@@ -134,7 +135,9 @@ See `examples/.env.example` for all available configuration options. Key variabl
 ### Optional (Channel-Specific)
 - `TWILIO_STUDIO_HANDOFF_FLOW_SID`: Studio Flow SID used by `create_studio_handoff_tool` (required for `features/handoff.py`)
 - `TWILIO_RCS_SENDER_ID`: RCS Sender ID (required for `features/rcs.py`)
+- `TWILIO_RCS_SENDER_IDS`: Optional comma-separated allowlist of additional RCS Sender IDs. `TWILIO_RCS_SENDER_ID` remains the default sender
 - `TWILIO_WHATSAPP_NUMBER`: WhatsApp-enabled phone number in format `whatsapp:+1234567890` (required for `features/whatsapp.py`)
+- `TWILIO_WHATSAPP_NUMBERS`: Optional comma-separated allowlist of additional WhatsApp-enabled numbers (same `whatsapp:+1234567890` format). `TWILIO_WHATSAPP_NUMBER` remains the default sender
 - `TWILIO_CONVERSATIONS_SERVICE_SID`: Conversations Service SID (required for Chat channel examples)
 
 ## Next Steps
