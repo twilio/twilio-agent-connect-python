@@ -226,6 +226,114 @@ class TestVoiceChannel:
         assert session.ai_agent_info is None
 
     @pytest.mark.asyncio
+    async def test_initialize_conversation_resolves_agent_from_dialed_number(self) -> None:
+        """An inbound call dialed to a NON-default number in `phone_numbers`
+        resolves the agent participant addressed at that dialed number, not
+        the default `phone_number`."""
+        from tac.models.conversation import (
+            ConversationResponse,
+            ParticipantAddress,
+            ParticipantResponse,
+        )
+
+        config = get_test_config()
+        config["phone_numbers"] = ["+15551234567", "+15559990000"]
+        tac = TAC(config)
+        channel = VoiceChannel(tac)
+
+        conversation = ConversationResponse(id="conv_multi", accountId="ACtest123", status="ACTIVE")
+        customer = ParticipantResponse(
+            id="part_customer",
+            conversationId="conv_multi",
+            accountId="ACtest123",
+            name="Customer",
+            type="CUSTOMER",
+            addresses=[ParticipantAddress(channel="VOICE", address="+15559998888")],
+        )
+        agent = ParticipantResponse(
+            id="part_agent",
+            conversationId="conv_multi",
+            accountId="ACtest123",
+            name="Agent",
+            type="AGENT",
+            addresses=[ParticipantAddress(channel="VOICE", address="+15559990000")],
+        )
+
+        co_client = MagicMock()
+        co_client.list_conversations = AsyncMock(return_value=[conversation])
+        co_client.list_participants = AsyncMock(return_value=[customer, agent])
+        tac.conversation_orchestrator_client = co_client
+
+        setup_msg = SetupMessage(
+            type="setup",
+            callSid="CALL_MULTI",
+            **{"from": "+15559998888", "to": "+15559990000", "direction": "inbound"},
+        )
+
+        conv_id, _ = await channel._provider._initialize_conversation(
+            "CALL_MULTI", setup_msg, MagicMock()
+        )
+
+        session = channel._conversations[conv_id]
+        assert session.ai_agent_info is not None
+        assert session.ai_agent_info.participant_id == "part_agent"
+        assert session.ai_agent_info.address == "+15559990000"
+
+    @pytest.mark.asyncio
+    async def test_initialize_conversation_unconfigured_dialed_number_falls_back(self) -> None:
+        """An inbound call dialed to a number NOT in `phone_numbers` logs a
+        warning and falls back to the default `phone_number` for agent
+        resolution (provider.py's not-in-allowlist branch)."""
+        from tac.models.conversation import (
+            ConversationResponse,
+            ParticipantAddress,
+            ParticipantResponse,
+        )
+
+        tac = TAC(get_test_config())  # phone_number="+15551234567", no extra phone_numbers
+        channel = VoiceChannel(tac)
+
+        conversation = ConversationResponse(
+            id="conv_fallback", accountId="ACtest123", status="ACTIVE"
+        )
+        customer = ParticipantResponse(
+            id="part_customer",
+            conversationId="conv_fallback",
+            accountId="ACtest123",
+            name="Customer",
+            type="CUSTOMER",
+            addresses=[ParticipantAddress(channel="VOICE", address="+15559998888")],
+        )
+        agent = ParticipantResponse(
+            id="part_agent",
+            conversationId="conv_fallback",
+            accountId="ACtest123",
+            name="Agent",
+            type="AGENT",
+            addresses=[ParticipantAddress(channel="VOICE", address="+15551234567")],
+        )
+
+        co_client = MagicMock()
+        co_client.list_conversations = AsyncMock(return_value=[conversation])
+        co_client.list_participants = AsyncMock(return_value=[customer, agent])
+        tac.conversation_orchestrator_client = co_client
+
+        setup_msg = SetupMessage(
+            type="setup",
+            callSid="CALL_FALLBACK",
+            **{"from": "+15559998888", "to": "+19998887777", "direction": "inbound"},
+        )
+
+        conv_id, _ = await channel._provider._initialize_conversation(
+            "CALL_FALLBACK", setup_msg, MagicMock()
+        )
+
+        session = channel._conversations[conv_id]
+        assert session.ai_agent_info is not None
+        assert session.ai_agent_info.participant_id == "part_agent"
+        assert session.ai_agent_info.address == "+15551234567"
+
+    @pytest.mark.asyncio
     async def test_handle_interrupt_message(self) -> None:
         """Test handling interrupt message."""
         tac = TAC(get_test_config())
