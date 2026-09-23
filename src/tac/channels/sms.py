@@ -76,9 +76,14 @@ class SMSChannel(MessagingChannel):
         If an active conversation with the same addresses already exists
         (group-by dedup), CO returns 409 and the existing conversation is reused.
         """
+        # phone_number is guaranteed non-None post-validation (TACConfig requires
+        # at least one of phone_number/phone_numbers and back-fills the default);
+        # the __init__ guard above also enforces this for the SMS channel.
+        phone_number = self.tac.config.phone_number
+        assert phone_number is not None
         return await self._initiate_messaging_conversation(
             options=options,
-            from_address=self.tac.config.phone_number,
+            from_address=phone_number,
             customer_address_kwargs={},
             agent_address_kwargs={},
         )

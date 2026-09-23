@@ -285,8 +285,12 @@ class ConversationRelayProvider(VoiceProvider):
         # that owns TAC's address (the configured phone number) on the VOICE
         # channel and has an agent type. A HUMAN_AGENT added by a
         # redirected/escalated call is NOT TAC and is not adopted here.
+        # phone_number is guaranteed non-None post-validation (TACConfig requires
+        # at least one of phone_number/phone_numbers and back-fills the default).
+        configured_phone_number = self.channel.tac.config.phone_number
+        assert configured_phone_number is not None
         agent_participant = self.channel._find_agent_participant(
-            participants, "VOICE", self.channel.tac.config.phone_number
+            participants, "VOICE", configured_phone_number
         )
         agent_address = (
             next(
@@ -316,7 +320,7 @@ class ConversationRelayProvider(VoiceProvider):
             # participant owns it by definition, so it's a meaningful address
             # even in the unlikely case it carries no explicit VOICE address.
             session.ai_agent_info = AuthorInfo(
-                address=agent_address or self.channel.tac.config.phone_number,
+                address=agent_address or configured_phone_number,
                 participant_id=agent_participant.id,
             )
 
