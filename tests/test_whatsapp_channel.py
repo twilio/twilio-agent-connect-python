@@ -8,6 +8,7 @@ import pytest
 from tac import TAC
 from tac.channels.whatsapp import WhatsAppChannel, WhatsAppChannelConfig
 from tac.models.memory import MemoryRetrievalMeta, MemoryRetrievalResponse
+from tac.models.outbound import InitiateMessagingConversationOptions
 from tac.models.session import ConversationSession
 from tac.models.tac import TACMemoryResponse
 
@@ -136,7 +137,7 @@ async def test_whatsapp_channel_requires_sender_id() -> None:
     config_without_sender.pop("whatsapp_number")
     tac = TAC(config_without_sender)
 
-    with pytest.raises(ValueError, match="whatsapp_number is required for WhatsApp channel"):
+    with pytest.raises(ValueError, match="whatsapp_number\\(s\\) is required for WhatsApp channel"):
         WhatsAppChannel(tac)
 
 
@@ -591,3 +592,29 @@ async def test_memory_mode_enabled(mock_tac: TAC) -> None:
         assert mock_retrieve.called
         assert callback_called
         assert callback_memory is not None
+
+
+def test_whatsapp_is_default_agent_address_matches_any_configured_number() -> None:
+    cfg = get_test_config()
+    cfg["whatsapp_numbers"] = ["whatsapp:+1555", "whatsapp:+1444"]
+    tac = TAC(cfg)
+    channel = WhatsAppChannel(tac)
+    assert channel.is_default_agent_address("whatsapp:+1555") is True
+    assert channel.is_default_agent_address("whatsapp:+1444") is True
+    assert channel.is_default_agent_address("whatsapp:+1999") is False
+
+
+@pytest.mark.asyncio
+async def test_whatsapp_outbound_from_selects_configured_number() -> None:
+    cfg = get_test_config()
+    cfg["whatsapp_numbers"] = ["whatsapp:+1555", "whatsapp:+1444"]
+    tac = TAC(cfg)
+    channel = WhatsAppChannel(tac)
+
+    with patch.object(channel, "_initiate_messaging_conversation", new=AsyncMock()) as mock_init:
+        await channel.initiate_outbound_conversation(
+            InitiateMessagingConversationOptions(
+                to="whatsapp:+1999", message="hi", from_="whatsapp:+1444"
+            )
+        )
+    assert mock_init.await_args.kwargs["from_address"] == "whatsapp:+1444"
