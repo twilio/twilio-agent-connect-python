@@ -412,8 +412,10 @@ class TACConfig(BaseModel):
 
         if default is None:
             default = cleaned[0]
-        if default not in cleaned:
-            cleaned.insert(0, default)
+        # Guarantee the default is present AND first.
+        if default in cleaned:
+            cleaned.remove(default)
+        cleaned.insert(0, default)
 
         return default, cleaned
 

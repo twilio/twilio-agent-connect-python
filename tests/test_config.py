@@ -273,6 +273,12 @@ def test_phone_default_added_to_plural_when_missing_and_deduped():
     assert cfg.phone_numbers == ["+1999", "+1555", "+1444"]
 
 
+def test_phone_default_moved_to_front_when_present_but_not_first():
+    cfg = TACConfig(**BASE, phone_number="+1555", phone_numbers=["+1444", "+1555"])
+    assert cfg.phone_number == "+1555"
+    assert cfg.phone_numbers == ["+1555", "+1444"]
+
+
 def test_phone_entries_stripped():
     cfg = TACConfig(**BASE, phone_numbers=[" +1555 ", "+1444"])
     assert cfg.phone_numbers == ["+1555", "+1444"]
