@@ -178,8 +178,8 @@ class CallOptions(BaseModel):
 class InitiateVoiceConversationOptions(BaseModel):
     """Options for initiating an outbound voice conversation.
 
-    The caller identity is always TAC's configured ``config.phone_number``.
-    Multi-number deployments should use one TAC instance per line.
+    The caller identity is TAC's configured ``config.phone_number`` by
+    default, or ``from_`` when set to one of ``config.phone_numbers``.
 
     TwiML for the outbound call is built by merging per-field, highest
     precedence first:
