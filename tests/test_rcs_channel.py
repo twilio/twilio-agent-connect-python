@@ -7,10 +7,35 @@ import pytest
 
 from tac import TAC
 from tac.channels.rcs import RCSChannel, RCSChannelConfig
+from tac.models.conversation import ParticipantAddress, ParticipantResponse
 from tac.models.memory import MemoryRetrievalMeta, MemoryRetrievalResponse
 from tac.models.outbound import InitiateMessagingConversationOptions
 from tac.models.session import ConversationSession
 from tac.models.tac import TACMemoryResponse
+
+
+def _agent_participant(
+    address: str = "rcs:twilio_signal_test_agent", participant_id: str = "comms_participant_agent"
+) -> ParticipantResponse:
+    return ParticipantResponse(
+        id=participant_id,
+        conversationId="conv_x",
+        accountId="ACtest123",
+        name="Agent",
+        type="AI_AGENT",
+        addresses=[ParticipantAddress(channel="RCS", address=address)],
+    )
+
+
+def _customer_participant() -> ParticipantResponse:
+    return ParticipantResponse(
+        id="comms_participant_cust",
+        conversationId="conv_x",
+        accountId="ACtest123",
+        name="Customer",
+        type="CUSTOMER",
+        addresses=[ParticipantAddress(channel="RCS", address="rcs:+12345678901")],
+    )
 
 
 def create_conversation_created_webhook(conversation_id: str, timestamp: str) -> dict[str, Any]:
@@ -608,3 +633,73 @@ async def test_memory_mode_enabled(mock_tac: TAC) -> None:
         assert mock_retrieve.called
         assert callback_called
         assert callback_memory is not None
+
+
+@pytest.mark.asyncio
+async def test_inbound_agent_address_derived_from_recipient() -> None:
+    """Reconcile is called with the webhook's recipient sender ID as the agent address."""
+    cfg = get_test_config()
+    cfg["rcs_sender_ids"] = ["rcs:twilio_signal_test_agent", "rcs:alt_agent"]
+    tac = TAC(cfg)
+    channel = RCSChannel(tac)
+
+    agent_p = _agent_participant(address="rcs:alt_agent", participant_id="comms_participant_agent2")
+    customer_p = _customer_participant()
+    with patch.object(
+        channel, "_reconcile_participants", new=AsyncMock(return_value=(agent_p, customer_p))
+    ) as mock_reconcile:
+        webhook = create_communication_created_webhook(
+            "conv1", "cust_pid", "hello", "2025-01-01T00:00:01.000Z"
+        )
+        webhook["data"]["recipients"][0]["address"] = "rcs:alt_agent"
+        await channel.process_webhook(webhook)
+
+    passed = mock_reconcile.await_args
+    agent_address = (
+        passed.kwargs.get("agent_address") if "agent_address" in passed.kwargs else passed.args[1]
+    )
+    assert agent_address.address == "rcs:alt_agent"
+    assert agent_address.channel == "RCS"
+
+
+@pytest.mark.asyncio
+async def test_inbound_to_unconfigured_number_is_dropped() -> None:
+    """A message whose recipient is not in the allowlist is dropped + reported."""
+    tac = TAC(get_test_config())  # only rcs:twilio_signal_test_agent
+    channel = RCSChannel(tac)
+
+    on_error = AsyncMock()
+    tac.on_error(on_error)
+
+    with patch.object(channel, "_reconcile_participants", new=AsyncMock()) as mock_reconcile:
+        webhook = create_communication_created_webhook(
+            "conv2", "cust_pid", "hi", "2025-01-01T00:00:02.000Z"
+        )
+        webhook["data"]["recipients"][0]["address"] = "rcs:unconfigured_agent"
+        await channel.process_webhook(webhook)
+
+    mock_reconcile.assert_not_awaited()
+    on_error.assert_awaited()
+    assert "conv2" not in channel._conversations
+
+
+@pytest.mark.asyncio
+async def test_inbound_without_channel_recipients_falls_back() -> None:
+    """No RCS recipient in the webhook → reconcile called with agent_address=None (fallback)."""
+    tac = TAC(get_test_config())
+    channel = RCSChannel(tac)
+
+    agent_p = _agent_participant()
+    customer_p = _customer_participant()
+    with patch.object(
+        channel, "_reconcile_participants", new=AsyncMock(return_value=(agent_p, customer_p))
+    ) as mock_reconcile:
+        webhook = create_communication_created_webhook(
+            "conv3", "cust_pid", "hi", "2025-01-01T00:00:03.000Z"
+        )
+        webhook["data"]["recipients"] = []
+        await channel.process_webhook(webhook)
+
+    passed = mock_reconcile.await_args
+    agent_address = passed.kwargs.get("agent_address") if "agent_address" in passed.kwargs else None
+    assert agent_address is None

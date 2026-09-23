@@ -8,7 +8,7 @@ import pytest
 from tac import TAC
 from tac.channels.voice import VoiceChannel, generate_twiml
 from tac.channels.voice.conversation_relay.provider import ConversationRelayProvider
-from tac.models.conversation import ConversationResponse
+from tac.models.conversation import ConversationResponse, ParticipantAddress, ParticipantResponse
 from tac.models.handoff import PendingHandoffData
 from tac.models.memory import MemoryRetrievalResponse
 from tac.models.session import ConversationSession
@@ -230,12 +230,6 @@ class TestVoiceChannel:
         """An inbound call dialed to a NON-default number in `phone_numbers`
         resolves the agent participant addressed at that dialed number, not
         the default `phone_number`."""
-        from tac.models.conversation import (
-            ConversationResponse,
-            ParticipantAddress,
-            ParticipantResponse,
-        )
-
         config = get_test_config()
         config["phone_numbers"] = ["+15551234567", "+15559990000"]
         tac = TAC(config)
@@ -284,12 +278,6 @@ class TestVoiceChannel:
         """An inbound call dialed to a number NOT in `phone_numbers` logs a
         warning and falls back to the default `phone_number` for agent
         resolution (provider.py's not-in-allowlist branch)."""
-        from tac.models.conversation import (
-            ConversationResponse,
-            ParticipantAddress,
-            ParticipantResponse,
-        )
-
         tac = TAC(get_test_config())  # phone_number="+15551234567", no extra phone_numbers
         channel = VoiceChannel(tac)
 
