@@ -77,6 +77,12 @@ class MessagingChannel(BaseChannel):
       channel-matching UNKNOWN participant (not owning the agent address) to
       CUSTOMER. Set False for channels where the customer is identified
       author-driven (e.g. chat).
+    - derive_inbound_agent_from_recipients: If True, the inbound agent address
+      is derived from the webhook's recipient (which of TAC's configured
+      numbers was messaged), validated against the channel's allowlist. True
+      for phone-like channels (SMS, RCS, WhatsApp). Set False for channels
+      where the agent is a single identity rather than a number set (e.g.
+      chat), which keeps the default-address path instead.
     """
 
     reconcile_customer_type: bool = True
@@ -348,11 +354,13 @@ class MessagingChannel(BaseChannel):
                     None,
                 )
                 if matched is None:
+                    masked_recipients = [mask_address(r.address) for r in channel_recipients]
                     self.logger.error(
                         "Inbound message addressed to a number not in this channel's "
                         "configured set; dropping",
                         conversation_id=conv_id,
                         channel=channel_name,
+                        recipients=masked_recipients,
                     )
                     await self.tac.trigger_error(
                         RuntimeError("Inbound message to an unconfigured agent address; dropped"),
@@ -360,6 +368,7 @@ class MessagingChannel(BaseChannel):
                             "conversation_id": conv_id,
                             "channel": channel_name,
                             "dropped_inbound": True,
+                            "recipients": masked_recipients,
                         },
                     )
                     return

@@ -92,14 +92,16 @@ def create_conversation_updated_webhook(
     }
 
 
-def _agent_participant() -> ParticipantResponse:
+def _agent_participant(
+    address: str = "+15551234567", participant_id: str = "comms_participant_agent"
+) -> ParticipantResponse:
     return ParticipantResponse(
-        id="comms_participant_agent",
+        id=participant_id,
         conversationId="conv_x",
         accountId="ACtest123",
         name="Agent",
         type="AI_AGENT",
-        addresses=[ParticipantAddress(channel="SMS", address="+15551234567")],
+        addresses=[ParticipantAddress(channel="SMS", address=address)],
     )
 
 
@@ -238,6 +240,40 @@ async def test_inbound_to_unconfigured_number_is_dropped() -> None:
 
     mock_reconcile.assert_not_awaited()
     on_error.assert_awaited()
+    assert "conv2" not in channel._conversations
+
+
+@pytest.mark.asyncio
+async def test_inbound_second_number_sets_agent_info_address() -> None:
+    """Inbound to the SECOND configured number derives that number as the agent
+    address end-to-end, and the resolved agent participant's own channel
+    address (not the webhook recipient) wins on session.ai_agent_info."""
+    cfg = get_test_config()
+    cfg["phone_numbers"] = ["+15551234567", "+14440000000"]
+    tac = TAC(cfg)
+    channel = SMSChannel(tac)
+
+    agent_p = _agent_participant(address="+14440000000", participant_id="comms_participant_agent2")
+    customer_p = _customer_participant()
+    with patch.object(
+        channel, "_reconcile_participants", new=AsyncMock(return_value=(agent_p, customer_p))
+    ) as mock_reconcile:
+        webhook = create_communication_created_webhook(
+            "conv_second_number", "cust_pid", "hello", "2025-01-01T00:00:04.000Z"
+        )
+        webhook["data"]["recipients"][0]["address"] = "+14440000000"
+        await channel.process_webhook(webhook)
+
+    passed = mock_reconcile.await_args
+    agent_address = (
+        passed.kwargs.get("agent_address") if "agent_address" in passed.kwargs else passed.args[1]
+    )
+    assert agent_address.address == "+14440000000"
+
+    session = channel._conversations["conv_second_number"]
+    assert session.ai_agent_info is not None
+    assert session.ai_agent_info.address == "+14440000000"
+    assert session.ai_agent_info.participant_id == "comms_participant_agent2"
 
 
 @pytest.mark.asyncio
