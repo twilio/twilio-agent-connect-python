@@ -7,6 +7,7 @@ import pytest
 
 from tac import TAC
 from tac.channels.voice import VoiceChannel, generate_twiml
+from tac.channels.voice.conversation_relay.provider import ConversationRelayProvider
 from tac.models.conversation import ConversationResponse
 from tac.models.handoff import PendingHandoffData
 from tac.models.memory import MemoryRetrievalResponse
@@ -2930,3 +2931,13 @@ def test_voice_resolve_from_number() -> None:
     assert provider._resolve_from_number(None) == "+15551234567"  # default = phone_number
     with pytest.raises(ValueError):
         provider._resolve_from_number("+19998887777")
+
+
+def test_voice_agent_address_from_dialed_number():
+    inbound = SetupMessage(**{"to": "+14440000000", "from": "+12345678901", "direction": "inbound"})
+    outbound = SetupMessage(
+        **{"to": "+12345678901", "from": "+14440000000", "direction": "outbound"}
+    )
+
+    assert ConversationRelayProvider._agent_address(inbound) == "+14440000000"
+    assert ConversationRelayProvider._agent_address(outbound) == "+14440000000"
