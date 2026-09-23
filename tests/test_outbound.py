@@ -143,6 +143,21 @@ class TestCreateOrReuseConversation:
 
 
 # =============================================================================
+# InitiateMessagingConversationOptions.from_
+# =============================================================================
+
+
+def test_messaging_options_accepts_from() -> None:
+    opts = InitiateMessagingConversationOptions(to="+1999", message="hi", from_="+1444")
+    assert opts.from_ == "+1444"
+
+
+def test_messaging_options_from_defaults_none() -> None:
+    opts = InitiateMessagingConversationOptions(to="+1999", message="hi")
+    assert opts.from_ is None
+
+
+# =============================================================================
 # SMS outbound
 # =============================================================================
 

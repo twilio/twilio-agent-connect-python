@@ -107,6 +107,31 @@ def get_test_config(with_memory: bool = True) -> dict[str, Any]:
     return config
 
 
+def test_resolve_outbound_from_validates_membership() -> None:
+    tac = TAC(get_test_config())  # phone_number "+15551234567"
+    channel = SMSChannel(tac)
+
+    # explicit, in-set → returned
+    assert (
+        channel._resolve_outbound_from(
+            "+15551234567", allowlist=tac.config.phone_numbers, default=tac.config.phone_number
+        )
+        == "+15551234567"
+    )
+    # omitted → default
+    assert (
+        channel._resolve_outbound_from(
+            None, allowlist=tac.config.phone_numbers, default=tac.config.phone_number
+        )
+        == "+15551234567"
+    )
+    # explicit, not in set → ValueError
+    with pytest.raises(ValueError):
+        channel._resolve_outbound_from(
+            "+19998887777", allowlist=tac.config.phone_numbers, default=tac.config.phone_number
+        )
+
+
 class TestSMSChannel:
     """Test SMS Channel functionality."""
 

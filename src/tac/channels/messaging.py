@@ -438,6 +438,30 @@ class MessagingChannel(BaseChannel):
                         conversation_id=conv_id,
                     )
 
+    def _resolve_outbound_from(
+        self,
+        requested: str | None,
+        *,
+        allowlist: list[str],
+        default: str | None,
+    ) -> str:
+        """Resolve the outbound sender address for this channel.
+
+        `requested` (the caller's `options.from_`) wins when it is one of the
+        channel's configured senders; otherwise raises. When omitted, the
+        channel default is used.
+        """
+        if requested is not None:
+            if requested not in allowlist:
+                raise ValueError(
+                    f"from_ '{requested}' is not a configured {self.get_channel_name()} "
+                    f"sender; configured senders: {allowlist}"
+                )
+            return requested
+        if default is None:
+            raise RuntimeError(f"No default sender configured for {self.get_channel_name()}.")
+        return default
+
     async def _initiate_messaging_conversation(
         self,
         options: InitiateMessagingConversationOptions,
