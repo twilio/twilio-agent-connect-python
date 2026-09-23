@@ -39,6 +39,7 @@ class ChatChannel(MessagingChannel):
     # `author.participant_id`; promoting some other channel-matching UNKNOWN
     # CHAT participant could pick the wrong recipient.
     reconcile_customer_type = False
+    derive_inbound_agent_from_recipients = False
 
     def __init__(
         self,

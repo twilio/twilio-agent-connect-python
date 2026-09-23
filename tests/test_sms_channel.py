@@ -7,6 +7,7 @@ import pytest
 
 from tac import TAC
 from tac.channels.sms import SMSChannel
+from tac.models.conversation import ParticipantAddress, ParticipantResponse
 from tac.models.memory import MemoryRetrievalMeta, MemoryRetrievalResponse
 from tac.models.outbound import InitiateMessagingConversationOptions
 from tac.models.session import AuthorInfo, ConversationSession
@@ -91,6 +92,28 @@ def create_conversation_updated_webhook(
     }
 
 
+def _agent_participant() -> ParticipantResponse:
+    return ParticipantResponse(
+        id="comms_participant_agent",
+        conversationId="conv_x",
+        accountId="ACtest123",
+        name="Agent",
+        type="AI_AGENT",
+        addresses=[ParticipantAddress(channel="SMS", address="+15551234567")],
+    )
+
+
+def _customer_participant() -> ParticipantResponse:
+    return ParticipantResponse(
+        id="comms_participant_cust",
+        conversationId="conv_x",
+        accountId="ACtest123",
+        name="Customer",
+        type="CUSTOMER",
+        addresses=[ParticipantAddress(channel="SMS", address="+12345678901")],
+    )
+
+
 def get_test_config(with_memory: bool = True) -> dict[str, Any]:
     """Get a valid test configuration."""
     config: dict[str, Any] = {
@@ -169,6 +192,74 @@ async def test_outbound_from_defaults_to_phone_number() -> None:
             InitiateMessagingConversationOptions(to="+19998887777", message="hi")
         )
     assert mock_init.await_args.kwargs["from_address"] == "+15551234567"
+
+
+@pytest.mark.asyncio
+async def test_inbound_agent_address_derived_from_recipient() -> None:
+    """Reconcile is called with the webhook's recipient number as the agent address."""
+    cfg = get_test_config()
+    cfg["phone_numbers"] = ["+15551234567", "+14440000000"]
+    tac = TAC(cfg)
+    channel = SMSChannel(tac)
+
+    agent_p = _agent_participant()
+    customer_p = _customer_participant()
+    with patch.object(
+        channel, "_reconcile_participants", new=AsyncMock(return_value=(agent_p, customer_p))
+    ) as mock_reconcile:
+        webhook = create_communication_created_webhook(
+            "conv1", "cust_pid", "hello", "2025-01-01T00:00:01.000Z"
+        )
+        await channel.process_webhook(webhook)
+
+    passed = mock_reconcile.await_args
+    agent_address = (
+        passed.kwargs.get("agent_address") if "agent_address" in passed.kwargs else passed.args[1]
+    )
+    assert agent_address.address == "+15551234567"
+    assert agent_address.channel == "SMS"
+
+
+@pytest.mark.asyncio
+async def test_inbound_to_unconfigured_number_is_dropped() -> None:
+    """A message whose recipient is not in the allowlist is dropped + reported."""
+    tac = TAC(get_test_config())  # only +15551234567
+    channel = SMSChannel(tac)
+
+    on_error = AsyncMock()
+    tac.on_error(on_error)
+
+    with patch.object(channel, "_reconcile_participants", new=AsyncMock()) as mock_reconcile:
+        webhook = create_communication_created_webhook(
+            "conv2", "cust_pid", "hi", "2025-01-01T00:00:02.000Z"
+        )
+        webhook["data"]["recipients"][0]["address"] = "+19998887777"  # not configured
+        await channel.process_webhook(webhook)
+
+    mock_reconcile.assert_not_awaited()
+    on_error.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_inbound_without_channel_recipients_falls_back() -> None:
+    """No SMS recipient in the webhook → reconcile called with agent_address=None (fallback)."""
+    tac = TAC(get_test_config())
+    channel = SMSChannel(tac)
+
+    agent_p = _agent_participant()
+    customer_p = _customer_participant()
+    with patch.object(
+        channel, "_reconcile_participants", new=AsyncMock(return_value=(agent_p, customer_p))
+    ) as mock_reconcile:
+        webhook = create_communication_created_webhook(
+            "conv3", "cust_pid", "hi", "2025-01-01T00:00:03.000Z"
+        )
+        webhook["data"]["recipients"] = []
+        await channel.process_webhook(webhook)
+
+    passed = mock_reconcile.await_args
+    agent_address = passed.kwargs.get("agent_address") if "agent_address" in passed.kwargs else None
+    assert agent_address is None
 
 
 class TestSMSChannel:
