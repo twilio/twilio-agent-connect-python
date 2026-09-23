@@ -51,25 +51,23 @@ class RCSChannel(MessagingChannel):
             memory_mode=config.memory_mode,
         )
 
-        if not tac.config.rcs_sender_id:
+        if not tac.config.rcs_sender_ids:
             raise ValueError(
-                "rcs_sender_id is required for RCS channel. "
-                "Please set TWILIO_RCS_SENDER_ID environment variable or "
-                "provide rcs_sender_id in TACConfig."
+                "rcs_sender_id(s) is required for RCS channel. "
+                "Set TWILIO_RCS_SENDER_ID / TWILIO_RCS_SENDER_IDS or "
+                "provide rcs_sender_id / rcs_sender_ids in TACConfig."
             )
 
     def get_channel_name(self) -> str:
         return "RCS"
 
     def is_default_agent_address(self, author_address: str) -> bool:
-        """Check if the author address matches the configured RCS sender ID."""
-        if not self.tac.config.rcs_sender_id:
-            raise RuntimeError("rcs_sender_id is required for RCS channel.")
-        return author_address == self.tac.config.rcs_sender_id
+        """Check if the author address is one of the configured RCS senders."""
+        return author_address in self.tac.config.rcs_sender_ids
 
     def get_agent_address(self, conversation_id: str) -> ParticipantAddress:
-        """Get the agent's participant address for this conversation."""
-        if not self.tac.config.rcs_sender_id:
+        """Get the agent's default participant address for this conversation."""
+        if self.tac.config.rcs_sender_id is None:
             raise RuntimeError("rcs_sender_id is required for RCS channel.")
         return ParticipantAddress(channel="RCS", address=self.tac.config.rcs_sender_id)
 
@@ -81,9 +79,11 @@ class RCSChannel(MessagingChannel):
 
         Creates a conversation via Conversation Orchestrator with inline
         participants, then sends the initial message via the Actions API.
-        Uses the RCS sender ID from TACConfig as the from address.
-        If an active conversation with the same addresses already exists
-        (group-by dedup), CO returns 409 and the existing conversation is reused.
+        Uses `options.from_` when provided (must be one of the configured RCS
+        senders), otherwise falls back to the default `rcs_sender_id` from
+        TACConfig. If an active conversation with the same addresses already
+        exists (group-by dedup), CO returns 409 and the existing conversation
+        is reused.
 
         Args:
             options: Conversation initiation options (to address and message)
@@ -92,14 +92,16 @@ class RCSChannel(MessagingChannel):
             InitiateConversationResult with conversation_id and session
 
         Raises:
-            RuntimeError: If rcs_sender_id is not configured
+            ValueError: If `options.from_` is set but is not one of the configured
+                RCS senders.
         """
-        if not self.tac.config.rcs_sender_id:
-            raise RuntimeError("rcs_sender_id is required for RCS channel.")
-
         return await self._initiate_messaging_conversation(
             options=options,
-            from_address=self.tac.config.rcs_sender_id,
+            from_address=self._resolve_outbound_from(
+                options.from_,
+                allowlist=self.tac.config.rcs_sender_ids,
+                default=self.tac.config.rcs_sender_id,
+            ),
             customer_address_kwargs={},
             agent_address_kwargs={},
         )

@@ -8,6 +8,7 @@ import pytest
 from tac import TAC
 from tac.channels.rcs import RCSChannel, RCSChannelConfig
 from tac.models.memory import MemoryRetrievalMeta, MemoryRetrievalResponse
+from tac.models.outbound import InitiateMessagingConversationOptions
 from tac.models.session import ConversationSession
 from tac.models.tac import TACMemoryResponse
 
@@ -136,7 +137,7 @@ async def test_rcs_channel_requires_sender_id() -> None:
     config_without_sender.pop("rcs_sender_id")
     tac = TAC(config_without_sender)
 
-    with pytest.raises(ValueError, match="rcs_sender_id is required for RCS channel"):
+    with pytest.raises(ValueError, match="rcs_sender_id\\(s\\) is required for RCS channel"):
         RCSChannel(tac)
 
 
@@ -499,6 +500,30 @@ async def test_initiate_outbound_conversation(mock_tac: TAC) -> None:
         assert result.session.conversation_id == "conv_123"
         mock_create.assert_called_once()
         mock_action.assert_called_once()
+
+
+def test_rcs_is_default_agent_address_matches_any_configured_sender() -> None:
+    cfg = get_test_config()
+    cfg["rcs_sender_ids"] = ["rcs:main", "rcs:alt"]
+    tac = TAC(cfg)
+    channel = RCSChannel(tac)
+    assert channel.is_default_agent_address("rcs:main") is True
+    assert channel.is_default_agent_address("rcs:alt") is True
+    assert channel.is_default_agent_address("rcs:other") is False
+
+
+@pytest.mark.asyncio
+async def test_rcs_outbound_from_selects_configured_sender() -> None:
+    cfg = get_test_config()
+    cfg["rcs_sender_ids"] = ["rcs:main", "rcs:alt"]
+    tac = TAC(cfg)
+    channel = RCSChannel(tac)
+
+    with patch.object(channel, "_initiate_messaging_conversation", new=AsyncMock()) as mock_init:
+        await channel.initiate_outbound_conversation(
+            InitiateMessagingConversationOptions(to="+19998887777", message="hi", from_="rcs:alt")
+        )
+    assert mock_init.await_args.kwargs["from_address"] == "rcs:alt"
 
 
 @pytest.mark.asyncio
