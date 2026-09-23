@@ -2918,3 +2918,15 @@ class TestVoiceChannelConfigDeprecatedAlias:
         assert len(caught) >= 1
         assert caught[0].filename == __file__
         assert caught[0].lineno == expected_lineno
+
+
+def test_voice_resolve_from_number() -> None:
+    cfg = get_test_config()
+    cfg["phone_numbers"] = ["+15551234567", "+14440000000"]
+    tac = TAC(cfg)
+    provider = VoiceChannel(tac)._provider
+
+    assert provider._resolve_from_number("+14440000000") == "+14440000000"
+    assert provider._resolve_from_number(None) == "+15551234567"  # default = phone_number
+    with pytest.raises(ValueError):
+        provider._resolve_from_number("+19998887777")

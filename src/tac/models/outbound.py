@@ -200,6 +200,12 @@ class InitiateVoiceConversationOptions(BaseModel):
     """
 
     to: str = Field(..., min_length=1)
+    from_: str | None = Field(
+        default=None,
+        description="Phone number to place the call from. Must be one of "
+        "`config.phone_numbers`. When omitted, `config.phone_number` (the "
+        "default sender) is used.",
+    )
     websocket_url: str | None = Field(
         default=None,
         description="Public WebSocket URL for ConversationRelay (e.g. "

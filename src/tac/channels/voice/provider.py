@@ -120,6 +120,25 @@ class VoiceProvider:
                 call_kwargs.setdefault(param, url)
         return call_kwargs
 
+    def _resolve_from_number(self, requested: str | None) -> str:
+        """Resolve the outbound caller ID for a voice call.
+
+        `requested` (the caller's `options.from_`) wins when it is one of
+        `config.phone_numbers`; otherwise raises. When omitted, the default
+        `config.phone_number` is used.
+        """
+        cfg = self.channel.tac.config
+        if requested is not None:
+            if requested not in cfg.phone_numbers:
+                raise ValueError(
+                    f"from_ '{requested}' is not a configured phone number; "
+                    f"configured: {cfg.phone_numbers}"
+                )
+            return requested
+        if cfg.phone_number is None:
+            raise RuntimeError("No phone_number configured for outbound voice calls.")
+        return cfg.phone_number
+
 
 class VoiceProviderConfig(BaseModel):
     """Base configuration for a ``VoiceChannel``'s real-time media provider."""
