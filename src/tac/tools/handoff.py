@@ -199,7 +199,11 @@ async def _handoff_impl(
                 payload,
                 session,
                 handoff_url=studio_executions_url(config.studio_handoff_flow_sid),
-                from_address=config.phone_number,
+                from_address=(
+                    session.ai_agent_info.address
+                    if session.ai_agent_info is not None
+                    else config.phone_number
+                ),
                 api_key=config.api_key,
                 api_secret=config.api_secret,
             )
