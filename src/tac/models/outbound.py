@@ -31,7 +31,9 @@ class InitiateMessagingConversationOptions(BaseModel):
         description="Sender address to send from. Must be one of the channel's "
         "configured senders (`config.phone_numbers` / `rcs_sender_ids` / "
         "`whatsapp_numbers`). When omitted, the channel default is used "
-        "(`config.phone_number` / `rcs_sender_id` / `whatsapp_number`).",
+        "(`config.phone_number` / `rcs_sender_id` / `whatsapp_number`). Chat is a "
+        "single-identity channel, so its only valid `from_` is "
+        "`ChatChannelConfig.agent_address`.",
     )
 
     model_config = {"populate_by_name": True}
