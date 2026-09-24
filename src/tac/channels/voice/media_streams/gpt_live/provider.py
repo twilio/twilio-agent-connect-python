@@ -153,7 +153,7 @@ class GPTLiveProvider(MediaStreamsOpenAIProvider[_CallState]):
                 }
             )
 
-        from_number = self.channel.tac.config.phone_number
+        from_number = self._resolve_from_number(options.from_)
 
         self.logger.info(
             "Initiating outbound voice conversation",

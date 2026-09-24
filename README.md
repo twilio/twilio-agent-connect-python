@@ -40,6 +40,7 @@ Seamlessly integrate with Twilio Conversation Memory and Conversation Orchestrat
 ## Key Features
 
 - **Multi-Channel Support**: Built-in handling for Voice (Twilio ConversationRelay, OpenAI GPT-Live, OpenAI Realtime API), SMS, RCS, WhatsApp, and Chat
+- **Multi-Sender Support**: Configure multiple phone numbers, RCS Sender IDs, or WhatsApp numbers per channel via comma-separated allowlists (`TWILIO_PHONE_NUMBERS`, `TWILIO_RCS_SENDER_IDS`, `TWILIO_WHATSAPP_NUMBERS`), alongside the singular env vars that remain each channel's default sender
 - **Outbound Conversations**: Agent-initiated conversations across all supported channels
 - **ConversationRelay-Only Mode**: Get started quickly with TAC's voice plumbing (TwiML, WebSocket, callbacks) before adding Conversation Orchestrator or Conversation Memory
 - **Memory Management**: Automatic integration with Twilio Conversation Memory for persistent user context

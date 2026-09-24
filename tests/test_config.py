@@ -123,7 +123,11 @@ class TestTACConfig:
         assert "api_key" in required_fields
         assert "api_secret" in required_fields
         assert "conversation_configuration_id" not in required_fields
-        assert "phone_number" in required_fields
+        # phone_number is optional at the schema/field level — it's back-filled
+        # from phone_numbers (or vice versa) and the "at least one of the two"
+        # requirement is enforced by a model validator, not schema-level
+        # required-ness. See test_at_least_one_phone_required.
+        assert "phone_number" not in required_fields
         assert "auth_token" in required_fields
         assert "account_sid" in required_fields
 
@@ -157,7 +161,9 @@ class TestTACConfig:
         assert "account_sid" in str(error)
         assert "api_key" in str(error)
         assert "api_secret" in str(error)
-        assert "phone_number" in str(error)
+        # phone_number is no longer a plain required field (it's back-filled
+        # from phone_numbers); the "at least one of the two" requirement is
+        # covered separately by test_at_least_one_phone_required.
 
     def test_minimal_relay_only_config(self):
         """Test that relay-only mode only requires conversation_configuration_id to be omitted."""
@@ -238,3 +244,66 @@ class TestTACConfig:
                     phone_number="+15551234567",
                     region=region,
                 )
+
+
+BASE = {
+    "account_sid": "ACtest",
+    "auth_token": "tok",
+    "api_key": "SK123",
+    "api_secret": "sec",
+}
+
+
+def test_phone_singular_backfills_plural():
+    cfg = TACConfig(**BASE, phone_number="+1555")
+    assert cfg.phone_number == "+1555"
+    assert cfg.phone_numbers == ["+1555"]
+
+
+def test_phone_plural_backfills_default_from_first():
+    cfg = TACConfig(**BASE, phone_numbers=["+1555", "+1444"])
+    assert cfg.phone_number == "+1555"
+    assert cfg.phone_numbers == ["+1555", "+1444"]
+
+
+def test_phone_default_added_to_plural_when_missing_and_deduped():
+    cfg = TACConfig(**BASE, phone_number="+1999", phone_numbers=["+1555", "+1555", "+1444"])
+    # default kept first, list de-duplicated, order otherwise preserved
+    assert cfg.phone_number == "+1999"
+    assert cfg.phone_numbers == ["+1999", "+1555", "+1444"]
+
+
+def test_phone_default_moved_to_front_when_present_but_not_first():
+    cfg = TACConfig(**BASE, phone_number="+1555", phone_numbers=["+1444", "+1555"])
+    assert cfg.phone_number == "+1555"
+    assert cfg.phone_numbers == ["+1555", "+1444"]
+
+
+def test_phone_entries_stripped():
+    cfg = TACConfig(**BASE, phone_numbers=[" +1555 ", "+1444"])
+    assert cfg.phone_numbers == ["+1555", "+1444"]
+
+
+def test_at_least_one_phone_required():
+    with pytest.raises(ValidationError):
+        TACConfig(**BASE)
+
+
+def test_rcs_and_whatsapp_optional_and_symmetric():
+    cfg = TACConfig(
+        **BASE, phone_number="+1555", rcs_sender_ids=["rcs:a"], whatsapp_number="whatsapp:+1555"
+    )
+    assert cfg.rcs_sender_id == "rcs:a"
+    assert cfg.rcs_sender_ids == ["rcs:a"]
+    assert cfg.whatsapp_number == "whatsapp:+1555"
+    assert cfg.whatsapp_numbers == ["whatsapp:+1555"]
+    # unset optional senders stay empty, no error
+    assert cfg.rcs_sender_id is None or isinstance(cfg.rcs_sender_id, str)
+
+
+def test_rcs_and_whatsapp_empty_when_unset():
+    cfg = TACConfig(**BASE, phone_number="+1555")
+    assert cfg.rcs_sender_id is None
+    assert cfg.rcs_sender_ids == []
+    assert cfg.whatsapp_number is None
+    assert cfg.whatsapp_numbers == []

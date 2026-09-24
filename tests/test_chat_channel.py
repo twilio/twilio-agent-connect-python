@@ -8,6 +8,7 @@ import pytest
 from tac import TAC
 from tac.channels.chat import ChatChannel, ChatChannelConfig
 from tac.models.memory import MemoryRetrievalMeta, MemoryRetrievalResponse
+from tac.models.outbound import InitiateChatConversationOptions
 from tac.models.session import AuthorInfo, ConversationSession
 from tac.models.tac import TACMemoryResponse
 
@@ -105,6 +106,44 @@ class TestChatChannel:
         channel = ChatChannel(tac)
         assert channel.is_default_agent_address("ai-assistant") is True
         assert channel.is_default_agent_address("user@example.com") is False
+
+    @pytest.mark.asyncio
+    async def test_outbound_from_defaults_to_agent_address(self) -> None:
+        """Chat has a single identity: omitting from_ sends from agent_address,
+        and an explicit from_ equal to agent_address is accepted."""
+        tac = TAC(get_test_config())
+        channel = ChatChannel(tac, config=ChatChannelConfig(agent_address="my-bot"))
+
+        with patch.object(
+            channel, "_initiate_messaging_conversation", new=AsyncMock()
+        ) as mock_init:
+            await channel.initiate_outbound_conversation(
+                InitiateChatConversationOptions(
+                    to="user@example.com", message="hi", channel_id="CH1"
+                )
+            )
+            assert mock_init.await_args.kwargs["from_address"] == "my-bot"
+
+            await channel.initiate_outbound_conversation(
+                InitiateChatConversationOptions(
+                    to="user@example.com", message="hi", channel_id="CH1", from_="my-bot"
+                )
+            )
+            assert mock_init.await_args.kwargs["from_address"] == "my-bot"
+
+    @pytest.mark.asyncio
+    async def test_outbound_from_other_than_agent_address_rejected(self) -> None:
+        """A from_ that isn't the Chat agent_address is rejected, not silently ignored."""
+        tac = TAC(get_test_config())
+        channel = ChatChannel(tac, config=ChatChannelConfig(agent_address="my-bot"))
+
+        with patch.object(channel, "_initiate_messaging_conversation", new=AsyncMock()):
+            with pytest.raises(ValueError, match="not a configured CHAT sender"):
+                await channel.initiate_outbound_conversation(
+                    InitiateChatConversationOptions(
+                        to="user@example.com", message="hi", channel_id="CH1", from_="other-bot"
+                    )
+                )
 
     @pytest.mark.asyncio
     async def test_process_message(self) -> None:

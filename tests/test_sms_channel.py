@@ -7,7 +7,9 @@ import pytest
 
 from tac import TAC
 from tac.channels.sms import SMSChannel
+from tac.models.conversation import ParticipantAddress, ParticipantResponse
 from tac.models.memory import MemoryRetrievalMeta, MemoryRetrievalResponse
+from tac.models.outbound import InitiateMessagingConversationOptions
 from tac.models.session import AuthorInfo, ConversationSession
 from tac.models.tac import TACMemoryResponse
 
@@ -90,6 +92,30 @@ def create_conversation_updated_webhook(
     }
 
 
+def _agent_participant(
+    address: str = "+15551234567", participant_id: str = "comms_participant_agent"
+) -> ParticipantResponse:
+    return ParticipantResponse(
+        id=participant_id,
+        conversationId="conv_x",
+        accountId="ACtest123",
+        name="Agent",
+        type="AI_AGENT",
+        addresses=[ParticipantAddress(channel="SMS", address=address)],
+    )
+
+
+def _customer_participant() -> ParticipantResponse:
+    return ParticipantResponse(
+        id="comms_participant_cust",
+        conversationId="conv_x",
+        accountId="ACtest123",
+        name="Customer",
+        type="CUSTOMER",
+        addresses=[ParticipantAddress(channel="SMS", address="+12345678901")],
+    )
+
+
 def get_test_config(with_memory: bool = True) -> dict[str, Any]:
     """Get a valid test configuration."""
     config: dict[str, Any] = {
@@ -105,6 +131,211 @@ def get_test_config(with_memory: bool = True) -> dict[str, Any]:
 
         config["memory_config"] = TwilioMemoryConfig(trait_groups=["Contact"])
     return config
+
+
+def test_resolve_outbound_from_validates_membership() -> None:
+    tac = TAC(get_test_config())  # phone_number "+15551234567"
+    channel = SMSChannel(tac)
+
+    # explicit, in-set → returned
+    assert (
+        channel._resolve_outbound_from(
+            "+15551234567", allowlist=tac.config.phone_numbers, default=tac.config.phone_number
+        )
+        == "+15551234567"
+    )
+    # omitted → default
+    assert (
+        channel._resolve_outbound_from(
+            None, allowlist=tac.config.phone_numbers, default=tac.config.phone_number
+        )
+        == "+15551234567"
+    )
+    # explicit, not in set → ValueError
+    with pytest.raises(ValueError):
+        channel._resolve_outbound_from(
+            "+19998887777", allowlist=tac.config.phone_numbers, default=tac.config.phone_number
+        )
+
+
+def test_is_default_agent_address_matches_any_configured_number() -> None:
+    cfg = get_test_config()
+    cfg["phone_numbers"] = ["+15551234567", "+14440000000"]
+    tac = TAC(cfg)
+    channel = SMSChannel(tac)
+    assert channel.is_default_agent_address("+15551234567") is True
+    assert channel.is_default_agent_address("+14440000000") is True
+    assert channel.is_default_agent_address("+19999999999") is False
+
+
+@pytest.mark.asyncio
+async def test_outbound_from_selects_configured_number() -> None:
+    cfg = get_test_config()
+    cfg["phone_numbers"] = ["+15551234567", "+14440000000"]
+    tac = TAC(cfg)
+    channel = SMSChannel(tac)
+
+    with patch.object(channel, "_initiate_messaging_conversation", new=AsyncMock()) as mock_init:
+        await channel.initiate_outbound_conversation(
+            InitiateMessagingConversationOptions(
+                to="+19998887777", message="hi", from_="+14440000000"
+            )
+        )
+    assert mock_init.await_args.kwargs["from_address"] == "+14440000000"
+
+
+@pytest.mark.asyncio
+async def test_outbound_from_defaults_to_phone_number() -> None:
+    tac = TAC(get_test_config())
+    channel = SMSChannel(tac)
+
+    with patch.object(channel, "_initiate_messaging_conversation", new=AsyncMock()) as mock_init:
+        await channel.initiate_outbound_conversation(
+            InitiateMessagingConversationOptions(to="+19998887777", message="hi")
+        )
+    assert mock_init.await_args.kwargs["from_address"] == "+15551234567"
+
+
+@pytest.mark.asyncio
+async def test_inbound_agent_address_derived_from_recipient() -> None:
+    """Reconcile is called with the webhook's recipient number as the agent address."""
+    cfg = get_test_config()
+    cfg["phone_numbers"] = ["+15551234567", "+14440000000"]
+    tac = TAC(cfg)
+    channel = SMSChannel(tac)
+
+    agent_p = _agent_participant()
+    customer_p = _customer_participant()
+    with patch.object(
+        channel, "_reconcile_participants", new=AsyncMock(return_value=(agent_p, customer_p))
+    ) as mock_reconcile:
+        webhook = create_communication_created_webhook(
+            "conv1", "cust_pid", "hello", "2025-01-01T00:00:01.000Z"
+        )
+        await channel.process_webhook(webhook)
+
+    passed = mock_reconcile.await_args
+    agent_address = (
+        passed.kwargs.get("agent_address") if "agent_address" in passed.kwargs else passed.args[1]
+    )
+    assert agent_address.address == "+15551234567"
+    assert agent_address.channel == "SMS"
+
+
+@pytest.mark.asyncio
+async def test_inbound_to_unconfigured_number_is_dropped() -> None:
+    """A message whose recipient is not in the allowlist is dropped + reported."""
+    tac = TAC(get_test_config())  # only +15551234567
+    channel = SMSChannel(tac)
+
+    on_error = AsyncMock()
+    tac.on_error(on_error)
+
+    with patch.object(channel, "_reconcile_participants", new=AsyncMock()) as mock_reconcile:
+        webhook = create_communication_created_webhook(
+            "conv2", "cust_pid", "hi", "2025-01-01T00:00:02.000Z"
+        )
+        webhook["data"]["recipients"][0]["address"] = "+19998887777"  # not configured
+        await channel.process_webhook(webhook)
+
+    mock_reconcile.assert_not_awaited()
+    on_error.assert_awaited()
+    assert "conv2" not in channel._conversations
+
+
+@pytest.mark.asyncio
+async def test_inbound_second_number_sets_agent_info_address() -> None:
+    """Inbound to the SECOND configured number derives that number as the agent
+    address end-to-end and sets it on session.ai_agent_info."""
+    cfg = get_test_config()
+    cfg["phone_numbers"] = ["+15551234567", "+14440000000"]
+    tac = TAC(cfg)
+    channel = SMSChannel(tac)
+
+    agent_p = _agent_participant(address="+14440000000", participant_id="comms_participant_agent2")
+    customer_p = _customer_participant()
+    with patch.object(
+        channel, "_reconcile_participants", new=AsyncMock(return_value=(agent_p, customer_p))
+    ) as mock_reconcile:
+        webhook = create_communication_created_webhook(
+            "conv_second_number", "cust_pid", "hello", "2025-01-01T00:00:04.000Z"
+        )
+        webhook["data"]["recipients"][0]["address"] = "+14440000000"
+        await channel.process_webhook(webhook)
+
+    passed = mock_reconcile.await_args
+    agent_address = (
+        passed.kwargs.get("agent_address") if "agent_address" in passed.kwargs else passed.args[1]
+    )
+    assert agent_address.address == "+14440000000"
+
+    session = channel._conversations["conv_second_number"]
+    assert session.ai_agent_info is not None
+    assert session.ai_agent_info.address == "+14440000000"
+    assert session.ai_agent_info.participant_id == "comms_participant_agent2"
+
+
+@pytest.mark.asyncio
+async def test_inbound_recipient_wins_over_participant_first_address() -> None:
+    """When the reconciled agent participant lists several same-channel
+    addresses, the webhook's matched recipient stays authoritative on
+    session.ai_agent_info — not the participant's first-listed address —
+    so digital handoff and outbound replies use the number the customer reached.
+    """
+    cfg = get_test_config()
+    cfg["phone_numbers"] = ["+15551234567", "+14440000000"]
+    tac = TAC(cfg)
+    channel = SMSChannel(tac)
+
+    # Agent participant carries BOTH numbers, the default listed first.
+    agent_p = ParticipantResponse(
+        id="comms_participant_agent_multi",
+        conversationId="conv_x",
+        accountId="ACtest123",
+        name="Agent",
+        type="AI_AGENT",
+        addresses=[
+            ParticipantAddress(channel="SMS", address="+15551234567"),
+            ParticipantAddress(channel="SMS", address="+14440000000"),
+        ],
+    )
+    customer_p = _customer_participant()
+    with patch.object(
+        channel, "_reconcile_participants", new=AsyncMock(return_value=(agent_p, customer_p))
+    ):
+        webhook = create_communication_created_webhook(
+            "conv_multi_addr", "cust_pid", "hello", "2025-01-01T00:00:05.000Z"
+        )
+        webhook["data"]["recipients"][0]["address"] = "+14440000000"  # the second number
+        await channel.process_webhook(webhook)
+
+    session = channel._conversations["conv_multi_addr"]
+    assert session.ai_agent_info is not None
+    # The number the customer contacted, not the participant's first-listed address.
+    assert session.ai_agent_info.address == "+14440000000"
+    assert session.ai_agent_info.participant_id == "comms_participant_agent_multi"
+
+
+@pytest.mark.asyncio
+async def test_inbound_without_channel_recipients_falls_back() -> None:
+    """No SMS recipient in the webhook → reconcile called with agent_address=None (fallback)."""
+    tac = TAC(get_test_config())
+    channel = SMSChannel(tac)
+
+    agent_p = _agent_participant()
+    customer_p = _customer_participant()
+    with patch.object(
+        channel, "_reconcile_participants", new=AsyncMock(return_value=(agent_p, customer_p))
+    ) as mock_reconcile:
+        webhook = create_communication_created_webhook(
+            "conv3", "cust_pid", "hi", "2025-01-01T00:00:03.000Z"
+        )
+        webhook["data"]["recipients"] = []
+        await channel.process_webhook(webhook)
+
+    passed = mock_reconcile.await_args
+    agent_address = passed.kwargs.get("agent_address") if "agent_address" in passed.kwargs else None
+    assert agent_address is None
 
 
 class TestSMSChannel:

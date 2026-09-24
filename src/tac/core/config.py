@@ -4,13 +4,19 @@ import os
 import re
 from typing import Literal, get_args
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 CallEventKind = Literal["status", "amd", "recording"]
 """The three Twilio call callbacks TAC serves, one route per kind."""
 
 CALL_EVENT_KINDS: tuple[CallEventKind, ...] = get_args(CallEventKind)
 """Iterable form of :data:`CallEventKind`, for registering every route."""
+
+
+def _split_csv_env(name: str) -> list[str]:
+    """Parse a comma-separated env var into a stripped, non-empty list."""
+    raw = os.environ.get(name, "")
+    return [part.strip() for part in raw.split(",") if part.strip()]
 
 
 class ConversationIntelligenceConfig(BaseModel):
@@ -249,18 +255,43 @@ class TACConfig(BaseModel):
             )
         return v
 
-    phone_number: str = Field(
-        description="Twilio Phone Number for Voice (inbound) and SMS (send/receive).",
+    phone_number: str | None = Field(
+        default=None,
+        description="Default Twilio phone number for Voice (inbound) and SMS "
+        "(send/receive) — the sender used for outbound when a call does not "
+        "specify `from_`. Optional if `phone_numbers` is set; at least one of "
+        "the two is required. After validation this is always populated and is "
+        "guaranteed to be a member of `phone_numbers`.",
+    )
+
+    phone_numbers: list[str] = Field(
+        default_factory=list,
+        description="Full set of Twilio phone numbers this instance serves for "
+        "Voice and SMS (the inbound allowlist). Defaults to `[phone_number]` "
+        "when omitted; `phone_number` is always included as the default sender.",
     )
 
     rcs_sender_id: str | None = Field(
         default=None,
-        description="Optional Twilio RCS Sender ID",
+        description="Default Twilio RCS Sender ID. Optional; symmetric with `rcs_sender_ids`.",
+    )
+
+    rcs_sender_ids: list[str] = Field(
+        default_factory=list,
+        description="Full set of Twilio RCS Sender IDs this instance serves. "
+        "Defaults to `[rcs_sender_id]` when a default is set.",
     )
 
     whatsapp_number: str | None = Field(
         default=None,
-        description="Optional Twilio WhatsApp-enabled phone number (format: whatsapp:+1234567890)",
+        description="Default Twilio WhatsApp-enabled number (format: "
+        "whatsapp:+1234567890). Optional; symmetric with `whatsapp_numbers`.",
+    )
+
+    whatsapp_numbers: list[str] = Field(
+        default_factory=list,
+        description="Full set of Twilio WhatsApp numbers this instance serves. "
+        "Defaults to `[whatsapp_number]` when a default is set.",
     )
 
     knowledge_base_id: str | None = Field(
@@ -350,6 +381,57 @@ class TACConfig(BaseModel):
                 break
         return v.rstrip("/") or None
 
+    @staticmethod
+    def _normalize_sender_pair(
+        default: str | None,
+        plural: list[str],
+        *,
+        required: bool,
+        field: str,
+    ) -> tuple[str | None, list[str]]:
+        """Reconcile a (default, allowlist) sender pair.
+
+        Strips entries, back-fills whichever side is missing, guarantees the
+        default is a member of the allowlist, and de-duplicates while keeping
+        the default first. When `required` and both sides are empty, raises.
+        """
+        default = default.strip() if isinstance(default, str) else None
+        if not default:
+            default = None
+
+        cleaned: list[str] = []
+        for entry in plural:
+            trimmed = entry.strip()
+            if trimmed and trimmed not in cleaned:
+                cleaned.append(trimmed)
+
+        if default is None and not cleaned:
+            if required:
+                raise ValueError(f"At least one of `{field}` / `{field}s` must be set.")
+            return None, []
+
+        if default is None:
+            default = cleaned[0]
+        # Guarantee the default is present AND first.
+        if default in cleaned:
+            cleaned.remove(default)
+        cleaned.insert(0, default)
+
+        return default, cleaned
+
+    @model_validator(mode="after")
+    def _normalize_sender_sets(self) -> "TACConfig":
+        self.phone_number, self.phone_numbers = self._normalize_sender_pair(
+            self.phone_number, self.phone_numbers, required=True, field="phone_number"
+        )
+        self.rcs_sender_id, self.rcs_sender_ids = self._normalize_sender_pair(
+            self.rcs_sender_id, self.rcs_sender_ids, required=False, field="rcs_sender_id"
+        )
+        self.whatsapp_number, self.whatsapp_numbers = self._normalize_sender_pair(
+            self.whatsapp_number, self.whatsapp_numbers, required=False, field="whatsapp_number"
+        )
+        return self
+
     conversation_intelligence_config: ConversationIntelligenceConfig | None = Field(
         default=None,
         description="Optional Conversation Intelligence configuration for filtering webhook "
@@ -388,7 +470,9 @@ class TACConfig(BaseModel):
         - `TWILIO_AUTH_TOKEN`: Twilio Auth Token for API authentication
         - `TWILIO_API_KEY`: Twilio API Key SID (starts with SK)
         - `TWILIO_API_SECRET`: Twilio API Secret for API Key authentication
-        - `TWILIO_PHONE_NUMBER`: Phone number for voice and SMS channels
+        - `TWILIO_PHONE_NUMBER` and/or `TWILIO_PHONE_NUMBERS`: at least one is
+          required. Phone number(s) for voice and SMS channels — see
+          **Multi-Value Senders** below.
 
         **Required for Conversation Orchestrator / Memory / Knowledge:**
 
@@ -397,9 +481,10 @@ class TACConfig(BaseModel):
 
         **Optional:**
 
-        - `TWILIO_RCS_SENDER_ID`: RCS Sender ID for RCS channel
-        - `TWILIO_WHATSAPP_NUMBER`: WhatsApp-enabled phone number
-          (format: `whatsapp:+1234567890`)
+        - `TWILIO_RCS_SENDER_ID` and/or `TWILIO_RCS_SENDER_IDS`: RCS Sender ID(s)
+          for RCS channel
+        - `TWILIO_WHATSAPP_NUMBER` and/or `TWILIO_WHATSAPP_NUMBERS`:
+          WhatsApp-enabled phone number(s) (format: `whatsapp:+1234567890`)
         - `TWILIO_KNOWLEDGE_BASE_ID`: Knowledge Base ID for RAG search functionality
         - `TWILIO_LOG_LEVEL`: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL).
           Default: INFO
@@ -409,6 +494,18 @@ class TACConfig(BaseModel):
         - `TWILIO_VOICE_WEBSOCKET_PATH`: Path for voice WebSocket (default: /ws)
         - `TWILIO_VOICE_ACTION_PATH`: Path for ConversationRelay action callback
           (default: /conversation-relay-callback)
+
+        **Multi-Value Senders:**
+
+        Each singular env var (`TWILIO_PHONE_NUMBER`, `TWILIO_RCS_SENDER_ID`,
+        `TWILIO_WHATSAPP_NUMBER`) pairs with a plural, comma-separated one
+        (`TWILIO_PHONE_NUMBERS`, `TWILIO_RCS_SENDER_IDS`,
+        `TWILIO_WHATSAPP_NUMBERS`), e.g. `TWILIO_PHONE_NUMBERS=+1555,+1444`.
+        Whichever side is set backfills the other: the singular becomes the
+        default sender and the plural becomes the full allowlist. Entries are
+        whitespace-trimmed and de-duplicated, with the default always kept
+        first. `phone_number`/`phone_numbers` requires at least one of the two;
+        the RCS and WhatsApp pairs stay optional.
 
         **Memory Configuration:**
 
@@ -440,9 +537,12 @@ class TACConfig(BaseModel):
             auth_token=os.environ["TWILIO_AUTH_TOKEN"],
             api_key=os.environ["TWILIO_API_KEY"],
             api_secret=os.environ["TWILIO_API_SECRET"],
-            phone_number=os.environ["TWILIO_PHONE_NUMBER"],
+            phone_number=os.environ.get("TWILIO_PHONE_NUMBER"),
+            phone_numbers=_split_csv_env("TWILIO_PHONE_NUMBERS"),
             rcs_sender_id=os.environ.get("TWILIO_RCS_SENDER_ID"),
+            rcs_sender_ids=_split_csv_env("TWILIO_RCS_SENDER_IDS"),
             whatsapp_number=os.environ.get("TWILIO_WHATSAPP_NUMBER"),
+            whatsapp_numbers=_split_csv_env("TWILIO_WHATSAPP_NUMBERS"),
             knowledge_base_id=os.environ.get("TWILIO_KNOWLEDGE_BASE_ID"),
             log_level=os.environ.get("TWILIO_LOG_LEVEL", "INFO"),
             region=os.environ.get("TWILIO_REGION"),

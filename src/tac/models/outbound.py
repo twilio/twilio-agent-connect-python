@@ -16,16 +16,25 @@ class InitiateMessagingConversationOptions(BaseModel):
     including SMS, RCS, WhatsApp, and Chat. Each channel may extend this with
     channel-specific requirements (e.g., Chat requires channel_id).
 
-    The sender is always TAC's configured address (``config.phone_number``
-    for SMS, ``config.rcs_sender_id`` for RCS, ``config.whatsapp_number``
-    for WhatsApp, ``ChatChannelConfig.agent_address`` for Chat).
-    Multi-sender deployments should use one TAC instance per sender so
-    inbound webhook routing, memory scoping, and configuration stay in sync.
+    The sender defaults to the channel's configured default (``config.phone_number``
+    for SMS, ``config.rcs_sender_id`` for RCS, ``config.whatsapp_number`` for
+    WhatsApp, ``ChatChannelConfig.agent_address`` for Chat). Set ``from_`` to send
+    from any other configured sender for that channel (``config.phone_numbers`` /
+    ``rcs_sender_ids`` / ``whatsapp_numbers``).
     """
 
     to: str = Field(..., min_length=1)
     message: str = Field(..., min_length=1)
     metadata: dict[str, Any] | None = Field(default=None)
+    from_: str | None = Field(
+        default=None,
+        description="Sender address to send from. Must be one of the channel's "
+        "configured senders (`config.phone_numbers` / `rcs_sender_ids` / "
+        "`whatsapp_numbers`). When omitted, the channel default is used "
+        "(`config.phone_number` / `rcs_sender_id` / `whatsapp_number`). Chat is a "
+        "single-identity channel, so its only valid `from_` is "
+        "`ChatChannelConfig.agent_address`.",
+    )
 
     model_config = {"populate_by_name": True}
 
@@ -171,8 +180,8 @@ class CallOptions(BaseModel):
 class InitiateVoiceConversationOptions(BaseModel):
     """Options for initiating an outbound voice conversation.
 
-    The caller identity is always TAC's configured ``config.phone_number``.
-    Multi-number deployments should use one TAC instance per line.
+    The caller identity is TAC's configured ``config.phone_number`` by
+    default, or ``from_`` when set to one of ``config.phone_numbers``.
 
     TwiML for the outbound call is built by merging per-field, highest
     precedence first:
@@ -193,6 +202,12 @@ class InitiateVoiceConversationOptions(BaseModel):
     """
 
     to: str = Field(..., min_length=1)
+    from_: str | None = Field(
+        default=None,
+        description="Phone number to place the call from. Must be one of "
+        "`config.phone_numbers`. When omitted, `config.phone_number` (the "
+        "default sender) is used.",
+    )
     websocket_url: str | None = Field(
         default=None,
         description="Public WebSocket URL for ConversationRelay (e.g. "

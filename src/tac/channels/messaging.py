@@ -77,9 +77,20 @@ class MessagingChannel(BaseChannel):
       channel-matching UNKNOWN participant (not owning the agent address) to
       CUSTOMER. Set False for channels where the customer is identified
       author-driven (e.g. chat).
+    - derive_inbound_agent_from_recipients: If True, the inbound agent address
+      is derived from the webhook's recipient (which of TAC's configured
+      numbers was messaged), validated against the channel's allowlist. True
+      for phone-like channels (SMS, RCS, WhatsApp). Set False for channels
+      where the agent is a single identity rather than a number set (e.g.
+      chat), which keeps the default-address path instead.
     """
 
     reconcile_customer_type: bool = True
+
+    # Phone-like channels derive the agent address from the inbound webhook's
+    # recipient (which of TAC's numbers was messaged). Chat uses a single
+    # identity and opts out, keeping the default-address path.
+    derive_inbound_agent_from_recipients: bool = True
 
     def __init__(
         self,
@@ -327,6 +338,42 @@ class MessagingChannel(BaseChannel):
         ):
             return
 
+        channel_name = self.get_channel_name()
+        inbound_agent_address: ParticipantAddress | None = None
+        if self.derive_inbound_agent_from_recipients:
+            channel_recipients = [
+                r for r in communication_data.recipients if r.channel == channel_name
+            ]
+            if channel_recipients:
+                matched = next(
+                    (
+                        r.address
+                        for r in channel_recipients
+                        if self.is_default_agent_address(r.address)
+                    ),
+                    None,
+                )
+                if matched is None:
+                    masked_recipients = [mask_address(r.address) for r in channel_recipients]
+                    self.logger.error(
+                        "Inbound message addressed to a number not in this channel's "
+                        "configured set; dropping",
+                        conversation_id=conv_id,
+                        channel=channel_name,
+                        recipients=masked_recipients,
+                    )
+                    await self.tac.trigger_error(
+                        RuntimeError("Inbound message to an unconfigured agent address; dropped"),
+                        {
+                            "conversation_id": conv_id,
+                            "channel": channel_name,
+                            "dropped_inbound": True,
+                            "recipients": masked_recipients,
+                        },
+                    )
+                    return
+                inbound_agent_address = ParticipantAddress(channel=channel_name, address=matched)
+
         if conv_id not in self._conversations:
             self._start_conversation(conv_id, profile_id=None)
 
@@ -351,27 +398,41 @@ class MessagingChannel(BaseChannel):
         # Skip reconcile entirely when both sides are already stashed from a
         # prior turn — Conversation Orchestrator's state was written by us and doesn't drift.
         if session.ai_agent_info is None or session.author_info is None:
-            resolved = await self._reconcile_participants(conv_id)
+            resolved = await self._reconcile_participants(
+                conv_id, agent_address=inbound_agent_address
+            )
             if resolved is None:
-                channel = self.get_channel_name()
                 self.logger.error(
                     "Reconciliation failed; dropping inbound message",
                     conversation_id=conv_id,
-                    channel=channel,
+                    channel=channel_name,
                 )
                 await self.tac.trigger_error(
                     RuntimeError("Participant reconciliation failed; inbound message dropped"),
                     {
                         "conversation_id": conv_id,
-                        "channel": channel,
+                        "channel": channel_name,
                         "dropped_inbound": True,
                     },
                 )
                 return
 
             agent_participant, customer_participant = resolved
+            # When the webhook told us which of our numbers the customer
+            # contacted, that address is authoritative — keep it as the
+            # session's active agent address so digital handoff and outbound
+            # replies send From the number the customer reached, even if the
+            # reconciled participant lists several same-channel addresses.
+            agent_addr_value = (
+                inbound_agent_address.address
+                if inbound_agent_address is not None
+                else next(
+                    (a.address for a in agent_participant.addresses if a.channel == channel_name),
+                    None,
+                )
+            )
             session.ai_agent_info = AuthorInfo(
-                address=self.get_agent_address(conv_id).address,
+                address=agent_addr_value or self.get_agent_address(conv_id).address,
                 participant_id=agent_participant.id,
             )
             # When reconcile resolved a customer (SMS path — chat disables
@@ -437,6 +498,30 @@ class MessagingChannel(BaseChannel):
                         "Invalidated cached memory on INACTIVE status",
                         conversation_id=conv_id,
                     )
+
+    def _resolve_outbound_from(
+        self,
+        requested: str | None,
+        *,
+        allowlist: list[str],
+        default: str | None,
+    ) -> str:
+        """Resolve the outbound sender address for this channel.
+
+        `requested` (the caller's `options.from_`) wins when it is one of the
+        channel's configured senders; otherwise raises. When omitted, the
+        channel default is used.
+        """
+        if requested is not None:
+            if requested not in allowlist:
+                raise ValueError(
+                    f"from_ '{requested}' is not a configured {self.get_channel_name()} "
+                    f"sender; configured senders: {allowlist}"
+                )
+            return requested
+        if default is None:
+            raise RuntimeError(f"No default sender configured for {self.get_channel_name()}.")
+        return default
 
     async def _initiate_messaging_conversation(
         self,
@@ -555,6 +640,7 @@ class MessagingChannel(BaseChannel):
     async def _reconcile_participants(
         self,
         conversation_id: str,
+        agent_address: ParticipantAddress | None = None,
     ) -> tuple[ParticipantResponse, ParticipantResponse | None] | None:
         """Reconcile Conversation Orchestrator's participants to the types TAC needs for sending.
 
@@ -591,8 +677,6 @@ class MessagingChannel(BaseChannel):
             and skips the message-ready callback, since any eventual reply
             would fail too.
         """
-        agent_address = self.get_agent_address(conversation_id)
-
         try:
             participants = await self.conversation_orchestrator_client.list_participants(
                 conversation_id
@@ -605,7 +689,12 @@ class MessagingChannel(BaseChannel):
             )
             return None
 
-        channel = agent_address.channel
+        channel = self.get_channel_name()
+        if agent_address is None:
+            if self.derive_inbound_agent_from_recipients:
+                agent_address = self._fallback_agent_address(conversation_id, participants, channel)
+            else:
+                agent_address = self.get_agent_address(conversation_id)
 
         def _owns_agent_address(p: ParticipantResponse) -> bool:
             return self._owns_address(p, channel, agent_address.address)
@@ -682,6 +771,44 @@ class MessagingChannel(BaseChannel):
             channel=channel,
         )
         return None
+
+    def _fallback_agent_address(
+        self,
+        conversation_id: str,
+        participants: list[ParticipantResponse],
+        channel: str,
+    ) -> ParticipantAddress:
+        """Resolve the agent address when the inbound webhook carried no recipient.
+
+        Scans the conversation's participants for any of TAC's configured
+        addresses on this channel; falls back to the channel default when none
+        is present. Defensive path — the primary source is the webhook.
+        """
+        owned = next(
+            (
+                a.address
+                for p in participants
+                for a in p.addresses
+                if a.channel == channel and self.is_default_agent_address(a.address)
+            ),
+            None,
+        )
+        if owned is not None:
+            self.logger.warning(
+                "Inbound webhook had no channel recipient; using owned participant "
+                "address from participant scan",
+                conversation_id=conversation_id,
+                channel=channel,
+            )
+            return ParticipantAddress(channel=channel, address=owned)
+
+        self.logger.warning(
+            "Inbound webhook had no channel recipient and no owned participant; "
+            "using default agent address",
+            conversation_id=conversation_id,
+            channel=channel,
+        )
+        return self.get_agent_address(conversation_id)
 
     async def _resolve_customer_profile(
         self,

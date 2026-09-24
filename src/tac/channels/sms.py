@@ -49,20 +49,22 @@ class SMSChannel(MessagingChannel):
             memory_mode=config.memory_mode,
         )
 
-        if not tac.config.phone_number:
+        if not tac.config.phone_numbers:
             raise ValueError(
-                "phone_number is required for SMS channel. "
-                "Please set TWILIO_PHONE_NUMBER environment variable or "
-                "provide phone_number in TACConfig."
+                "phone_number(s) is required for SMS channel. "
+                "Set TWILIO_PHONE_NUMBER / TWILIO_PHONE_NUMBERS or "
+                "provide phone_number / phone_numbers in TACConfig."
             )
 
     def get_channel_name(self) -> str:
         return "SMS"
 
     def is_default_agent_address(self, author_address: str) -> bool:
-        return author_address == self.tac.config.phone_number
+        return author_address in self.tac.config.phone_numbers
 
     def get_agent_address(self, conversation_id: str) -> ParticipantAddress:
+        if self.tac.config.phone_number is None:
+            raise RuntimeError("phone_number is required for SMS channel.")
         return ParticipantAddress(channel="SMS", address=self.tac.config.phone_number)
 
     async def initiate_outbound_conversation(
@@ -78,7 +80,11 @@ class SMSChannel(MessagingChannel):
         """
         return await self._initiate_messaging_conversation(
             options=options,
-            from_address=self.tac.config.phone_number,
+            from_address=self._resolve_outbound_from(
+                options.from_,
+                allowlist=self.tac.config.phone_numbers,
+                default=self.tac.config.phone_number,
+            ),
             customer_address_kwargs={},
             agent_address_kwargs={},
         )

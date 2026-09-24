@@ -273,12 +273,29 @@ class TestTACConfigFromEnv:
             TACConfig.from_env()
 
     def test_from_env_missing_phone_number(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Test from_env() raises KeyError when TWILIO_PHONE_NUMBER is missing."""
+        """Test from_env() raises ValidationError when neither TWILIO_PHONE_NUMBER nor
+        TWILIO_PHONE_NUMBERS is set (phone_number is now optional if phone_numbers is set,
+        but at least one of the two is required)."""
         self._set_all_env_vars(monkeypatch)
         monkeypatch.delenv("TWILIO_PHONE_NUMBER", raising=False)
+        monkeypatch.delenv("TWILIO_PHONE_NUMBERS", raising=False)
 
-        with pytest.raises(KeyError, match="TWILIO_PHONE_NUMBER"):
+        with pytest.raises(ValidationError):
             TACConfig.from_env()
+
+    def test_from_env_missing_phone_number_backfilled_from_phone_numbers(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test from_env() succeeds when TWILIO_PHONE_NUMBER is unset but
+        TWILIO_PHONE_NUMBERS is set (default backfilled from the first entry)."""
+        self._set_all_env_vars(monkeypatch)
+        monkeypatch.delenv("TWILIO_PHONE_NUMBER", raising=False)
+        monkeypatch.setenv("TWILIO_PHONE_NUMBERS", "+1555,+1444")
+
+        config = TACConfig.from_env()
+
+        assert config.phone_number == "+1555"
+        assert config.phone_numbers == ["+1555", "+1444"]
 
     def test_from_env_missing_api_key(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test from_env() raises KeyError when TWILIO_API_KEY is missing."""
@@ -338,3 +355,36 @@ class TestTACConfigFromEnv:
         config = TACConfig.from_env()
 
         assert config.studio_handoff_flow_sid is None
+
+    def test_from_env_parses_comma_separated_phone_numbers(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        for k, v in {
+            "TWILIO_ACCOUNT_SID": "ACtest",
+            "TWILIO_AUTH_TOKEN": "tok",
+            "TWILIO_API_KEY": "SK123",
+            "TWILIO_API_SECRET": "sec",
+            "TWILIO_PHONE_NUMBER": "+1555",
+            "TWILIO_PHONE_NUMBERS": "+1555, +1444 ,+1333",
+        }.items():
+            monkeypatch.setenv(k, v)
+
+        cfg = TACConfig.from_env()
+        assert cfg.phone_number == "+1555"
+        assert cfg.phone_numbers == ["+1555", "+1444", "+1333"]
+
+    def test_from_env_phone_numbers_only(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        for k in ["TWILIO_PHONE_NUMBER"]:
+            monkeypatch.delenv(k, raising=False)
+        for k, v in {
+            "TWILIO_ACCOUNT_SID": "ACtest",
+            "TWILIO_AUTH_TOKEN": "tok",
+            "TWILIO_API_KEY": "SK123",
+            "TWILIO_API_SECRET": "sec",
+            "TWILIO_PHONE_NUMBERS": "+1555,+1444",
+        }.items():
+            monkeypatch.setenv(k, v)
+
+        cfg = TACConfig.from_env()
+        assert cfg.phone_number == "+1555"
+        assert cfg.phone_numbers == ["+1555", "+1444"]
