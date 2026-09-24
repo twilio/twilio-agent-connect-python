@@ -246,8 +246,7 @@ async def test_inbound_to_unconfigured_number_is_dropped() -> None:
 @pytest.mark.asyncio
 async def test_inbound_second_number_sets_agent_info_address() -> None:
     """Inbound to the SECOND configured number derives that number as the agent
-    address end-to-end, and the resolved agent participant's own channel
-    address (not the webhook recipient) wins on session.ai_agent_info."""
+    address end-to-end and sets it on session.ai_agent_info."""
     cfg = get_test_config()
     cfg["phone_numbers"] = ["+15551234567", "+14440000000"]
     tac = TAC(cfg)
@@ -274,6 +273,47 @@ async def test_inbound_second_number_sets_agent_info_address() -> None:
     assert session.ai_agent_info is not None
     assert session.ai_agent_info.address == "+14440000000"
     assert session.ai_agent_info.participant_id == "comms_participant_agent2"
+
+
+@pytest.mark.asyncio
+async def test_inbound_recipient_wins_over_participant_first_address() -> None:
+    """When the reconciled agent participant lists several same-channel
+    addresses, the webhook's matched recipient stays authoritative on
+    session.ai_agent_info — not the participant's first-listed address —
+    so digital handoff and outbound replies use the number the customer reached.
+    """
+    cfg = get_test_config()
+    cfg["phone_numbers"] = ["+15551234567", "+14440000000"]
+    tac = TAC(cfg)
+    channel = SMSChannel(tac)
+
+    # Agent participant carries BOTH numbers, the default listed first.
+    agent_p = ParticipantResponse(
+        id="comms_participant_agent_multi",
+        conversationId="conv_x",
+        accountId="ACtest123",
+        name="Agent",
+        type="AI_AGENT",
+        addresses=[
+            ParticipantAddress(channel="SMS", address="+15551234567"),
+            ParticipantAddress(channel="SMS", address="+14440000000"),
+        ],
+    )
+    customer_p = _customer_participant()
+    with patch.object(
+        channel, "_reconcile_participants", new=AsyncMock(return_value=(agent_p, customer_p))
+    ):
+        webhook = create_communication_created_webhook(
+            "conv_multi_addr", "cust_pid", "hello", "2025-01-01T00:00:05.000Z"
+        )
+        webhook["data"]["recipients"][0]["address"] = "+14440000000"  # the second number
+        await channel.process_webhook(webhook)
+
+    session = channel._conversations["conv_multi_addr"]
+    assert session.ai_agent_info is not None
+    # The number the customer contacted, not the participant's first-listed address.
+    assert session.ai_agent_info.address == "+14440000000"
+    assert session.ai_agent_info.participant_id == "comms_participant_agent_multi"
 
 
 @pytest.mark.asyncio

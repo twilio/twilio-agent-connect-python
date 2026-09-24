@@ -418,17 +418,21 @@ class MessagingChannel(BaseChannel):
                 return
 
             agent_participant, customer_participant = resolved
-            agent_addr_value = next(
-                (a.address for a in agent_participant.addresses if a.channel == channel_name),
-                None,
-            )
-            fallback_addr = (
+            # When the webhook told us which of our numbers the customer
+            # contacted, that address is authoritative — keep it as the
+            # session's active agent address so digital handoff and outbound
+            # replies send From the number the customer reached, even if the
+            # reconciled participant lists several same-channel addresses.
+            agent_addr_value = (
                 inbound_agent_address.address
                 if inbound_agent_address is not None
-                else self.get_agent_address(conv_id).address
+                else next(
+                    (a.address for a in agent_participant.addresses if a.channel == channel_name),
+                    None,
+                )
             )
             session.ai_agent_info = AuthorInfo(
-                address=agent_addr_value or fallback_addr,
+                address=agent_addr_value or self.get_agent_address(conv_id).address,
                 participant_id=agent_participant.id,
             )
             # When reconcile resolved a customer (SMS path — chat disables
