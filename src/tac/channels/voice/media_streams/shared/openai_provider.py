@@ -155,6 +155,7 @@ class MediaStreamsOpenAIProvider(VoiceProvider, Generic[TCallState]):
                     session = self.channel._conversations.get(conv_id)
                     if session is None:
                         continue
+                    await self.channel.tac.trigger_model_event(conv_id, event)
                     await self._dispatch_model_event(conv_id, session, event)
                 except asyncio.CancelledError:
                     raise
