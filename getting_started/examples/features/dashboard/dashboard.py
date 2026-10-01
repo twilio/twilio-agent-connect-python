@@ -11,7 +11,6 @@ Mount onto any FastAPI app with ``create_dashboard_router()``.
 from __future__ import annotations
 
 import logging
-import os
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -35,6 +34,7 @@ def create_dashboard_router(
     memory_client: MemoryClient | None = None,
     conversation_client: ConversationClient | None = None,
     ci_events_store: dict[str, list[dict[str, Any]]] | None = None,
+    agent_phone_numbers: list[str] | None = None,
 ) -> APIRouter:
     """Create a dashboard router to mount on a FastAPI app.
 
@@ -47,8 +47,11 @@ def create_dashboard_router(
         conversation_client: Optional — enables the Conversation History page.
         ci_events_store: Optional shared dict ``{conv_id: [event_dict, ...]}``.
             Populated by CI webhook middleware; read by the events API.
+        agent_phone_numbers: Optional — the agent's Twilio phone numbers, used to label
+            communications authored from any of them as agent messages.
     """
     router = APIRouter()
+    agent_numbers = set(agent_phone_numbers or [])
 
     def _all_sessions() -> dict[str, ConversationSession]:
         """Merge sessions from all channel callbacks."""
@@ -207,7 +210,6 @@ def create_dashboard_router(
         # Fetch communications from Conversation Orchestrator
         if conversation_client:
             try:
-                twilio_phone = os.environ.get("TWILIO_PHONE_NUMBER", "")
                 communications = await conversation_client.list_communications(
                     conversation_id=conv_id, page_size=100
                 )
@@ -215,7 +217,7 @@ def create_dashboard_router(
                     author_address = comm.author.address if comm.author else None
                     author_channel = comm.author.channel if comm.author else None
                     is_agent = author_channel in ("SYSTEM", "API") or (
-                        twilio_phone and author_address == twilio_phone
+                        author_address in agent_numbers
                     )
                     result["communications"].append(
                         {
@@ -288,15 +290,12 @@ def create_dashboard_router(
             communications = await conversation_client.list_communications(
                 conversation_id=conv_id, page_size=100
             )
-            twilio_phone = os.environ.get("TWILIO_PHONE_NUMBER", "")
 
             messages: list[dict[str, Any]] = []
             for comm in communications:
                 author_address = comm.author.address if comm.author else None
                 author_channel = comm.author.channel if comm.author else None
-                is_agent = author_channel in ("SYSTEM", "API") or (
-                    twilio_phone and author_address == twilio_phone
-                )
+                is_agent = author_channel in ("SYSTEM", "API") or (author_address in agent_numbers)
                 messages.append(
                     {
                         "id": comm.id,
@@ -364,6 +363,7 @@ def mount_dashboard(
         memory_client=tac.conversation_memory_client,
         conversation_client=tac.conversation_orchestrator_client,
         ci_events_store=ci_events,
+        agent_phone_numbers=tac.config.phone_numbers,
     )
     app.include_router(router)
 

@@ -4,7 +4,8 @@ Example: RCS Channel with OpenAI Agents SDK
 Demonstrates RCS (Rich Communication Services) channel with TAC memory injection.
 RCS supports rich media like images and location sharing.
 
-Requires ``OPENAI_API_KEY`` and ``TWILIO_RCS_SENDER_ID`` in addition to standard TAC env vars.
+Requires ``OPENAI_API_KEY`` and ``TWILIO_RCS_SENDER_ID`` (or ``TWILIO_RCS_SENDER_IDS``) in addition
+to standard TAC env vars.
 
 Usage:
     python rcs.py
@@ -31,7 +32,7 @@ logger = get_logger(__name__)
 
 tac = TAC(config=TACConfig.from_env())
 
-# RCS Sender ID is configured via TWILIO_RCS_SENDER_ID env var
+# RCS Sender ID(s) are configured via the TWILIO_RCS_SENDER_ID or TWILIO_RCS_SENDER_IDS env var
 rcs_channel = RCSChannel(
     tac,
     config=RCSChannelConfig(

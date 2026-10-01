@@ -12,10 +12,15 @@ Usage:
     python outbound.py --to +16505551234 --channel voice
     python outbound.py --to +16505551234 --channel voice --welcome-greeting "Hi there!"
 
+    # Send from a non-default sender (must be in TWILIO_PHONE_NUMBERS /
+    # TWILIO_RCS_SENDER_IDS / TWILIO_WHATSAPP_NUMBERS)
+    python outbound.py --to +16505551234 --channel sms --message "Hello!" --from +14440000000
+    python outbound.py --to +16505551234 --channel voice --from +14440000000
+
 Requires ``OPENAI_API_KEY`` in addition to the usual TAC env vars.
 For voice calls, ``TWILIO_VOICE_PUBLIC_DOMAIN`` must also be set (e.g. via ngrok).
-For RCS, ``TWILIO_RCS_SENDER_ID`` must be set in environment variables.
-For WhatsApp, ``TWILIO_WHATSAPP_NUMBER`` must be set in environment variables.
+For RCS, ``TWILIO_RCS_SENDER_ID`` or ``TWILIO_RCS_SENDER_IDS`` must be set.
+For WhatsApp, ``TWILIO_WHATSAPP_NUMBER`` or ``TWILIO_WHATSAPP_NUMBERS`` must be set.
 """
 
 import argparse
@@ -63,6 +68,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--message", help="Initial message (required for SMS, RCS, and WhatsApp)")
     parser.add_argument("--welcome-greeting", help="Optional voice welcome greeting")
+    parser.add_argument(
+        "--from",
+        dest="from_",
+        help="Optional sender to send from; must be one of the channel's configured senders. "
+        "Defaults to the channel's default sender (the first configured one).",
+    )
     return parser.parse_args()
 
 
@@ -135,7 +146,9 @@ async def initiate_outbound(args: argparse.Namespace) -> None:
     try:
         if args.channel == "sms":
             sms_result = await sms_channel.initiate_outbound_conversation(
-                InitiateMessagingConversationOptions(to=args.to, message=args.message)
+                InitiateMessagingConversationOptions(
+                    to=args.to, message=args.message, from_=args.from_
+                )
             )
             print(f"SMS sent to {args.to} (conversation: {sms_result.conversation_id})")
             print(f"[{sms_result.conversation_id}] Agent: {args.message}")
@@ -143,11 +156,15 @@ async def initiate_outbound(args: argparse.Namespace) -> None:
 
         elif args.channel == "rcs":
             if not rcs_channel:
-                print("Error: RCS requires TWILIO_RCS_SENDER_ID environment variable to be set.")
+                print(
+                    "Error: RCS requires TWILIO_RCS_SENDER_ID or TWILIO_RCS_SENDER_IDS to be set."
+                )
                 sys.exit(1)
 
             rcs_result = await rcs_channel.initiate_outbound_conversation(
-                InitiateMessagingConversationOptions(to=args.to, message=args.message)
+                InitiateMessagingConversationOptions(
+                    to=args.to, message=args.message, from_=args.from_
+                )
             )
             print(f"RCS message sent to {args.to} (conversation: {rcs_result.conversation_id})")
             print(f"[{rcs_result.conversation_id}] Agent: {args.message}")
@@ -156,13 +173,15 @@ async def initiate_outbound(args: argparse.Namespace) -> None:
         elif args.channel == "whatsapp":
             if not whatsapp_channel:
                 print(
-                    "Error: WhatsApp requires TWILIO_WHATSAPP_NUMBER "
-                    "environment variable to be set."
+                    "Error: WhatsApp requires TWILIO_WHATSAPP_NUMBER or "
+                    "TWILIO_WHATSAPP_NUMBERS to be set."
                 )
                 sys.exit(1)
 
             whatsapp_result = await whatsapp_channel.initiate_outbound_conversation(
-                InitiateMessagingConversationOptions(to=args.to, message=args.message)
+                InitiateMessagingConversationOptions(
+                    to=args.to, message=args.message, from_=args.from_
+                )
             )
             print(
                 f"WhatsApp message sent to {args.to} "
@@ -175,6 +194,8 @@ async def initiate_outbound(args: argparse.Namespace) -> None:
             voice_result = await voice_channel.initiate_outbound_conversation(
                 InitiateVoiceConversationOptions(
                     to=args.to,
+                    # None → the channel's default sender
+                    from_=args.from_,
                     # Per-call TwiML overrides for this outbound call. Overrides channel defaults
                     twiml_options=VoiceTwiMLOptionsConversationRelay(
                         welcome_greeting=args.welcome_greeting
