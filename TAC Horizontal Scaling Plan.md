@@ -490,3 +490,76 @@ No store phase. §5 removed it.
 - Handler idempotency contract — document that `on_message_ready` may be called twice for the same message in a multi-instance deployment (§5).
 - Changelog — `get_agent_address` signature, messaging `memory_mode="once"` removal, new `on_call_ended`.
 - `mkdocs.yml` `filters` — update for any newly public or newly internal methods.
+
+---
+
+## 11. Gaps found in review (2026-09-30)
+
+Found reviewing this plan and its implementation (`3a2c450`). **Documented only. None of these are fixed yet.** Line references are to this branch.
+
+Two of these, **G3 and G6**, don't exist on this branch yet. They appear when it's rebased onto current `main` (`5677eeb`, v2.5.0), which conflicts in five files because `main` has since gained the shared Media Streams base (#122), GPT-Live (#125) and product analytics (#127). A trial rebase that resolves those conflicts passes the full suite (1099 tests). G3 and G6 record the decisions that rebase has to make.
+
+The mode split from §3.1 matters here. G1, G4 and G7 apply **only to ConversationRelay in orchestrated mode**: that's the one combination where a CO `CLOSED` webhook ends the conversation, and it can land on another instance. In relay-only mode and in every Media Streams provider, teardown is the only end event.
+
+### Correctness bugs
+
+**G1. CLOSED during a live call removes the live session.**
+`_handle_conversation_closed` (`voice/channel.py:449`) pops the session whether or not a WebSocket is still attached. Say CO closes the conversation mid-call (a `statusTimeouts` expiry, or the app calling `update_conversation(..., "CLOSED")`), and the CLOSED webhook lands on the instance holding the call:
+
+- `on_conversation_ended` fires with the live session;
+- teardown later finds no session, so `_release_session` (`voice/channel.py:415`) returns early and **`on_call_ended` never fires**, which breaks its "always fires" contract;
+- the call's remaining prompts hit "unknown conversation" and are dropped.
+
+*Fix direction:* when a socket is still attached, CLOSED fires `on_conversation_ended` from a copy and leaves the session in place. Teardown stays the only thing that frees it.
+
+**G2. Media Streams per-call `session_config` survives only with instance affinity.**
+§4.3 says the config travels on the TwiML. The code sends only a **token** in `<Stream>` custom parameters; the config itself stays in an instance-local `ExpiringDict` (`media_streams/openai_realtime/provider.py:94`). Sending a token is the right choice, because each `<Parameter>` name+value must be under 500 chars. But without `instance_public_domain`, an inbound call whose WebSocket lands on another replica finds no entry and silently falls back to `default_session_config`. The same goes for an outbound call placed on one replica and streamed to another.
+
+*Fix direction:* document the dependency on affinity, and/or rebuild the config when the stream connects (re-run `on_inbound_call_session_config` from the `start` message's CallSid + custom parameters) when the token misses locally. On current `main` this logic lives in the shared Media Streams base, so the fix covers GPT-Live too.
+
+### Coverage gaps
+
+**G3. Lifecycle telemetry from #127 has no home in this design.** *(Applies once rebased onto `main`.)*
+`main`'s product analytics emit "Conversation Started" and "Conversation Ended" (with `duration_ms`) from `BaseChannel._start_conversation` / `_end_conversation`. This branch removes those methods for messaging and moves them down to `VoiceChannel`. The rebase has to decide where the events go:
+
+- **Voice:** "Conversation Started" moves to `VoiceChannel._start_conversation`, and "Conversation Ended" to `_release_session`, the only point that holds the live session and so a real start time. In orchestrated ConversationRelay mode, *Ended* then measures **call** duration at teardown, not time-to-CLOSED. That's a meaning change for the metric, though with multiple instances it rarely fired at all before.
+- **Messaging would emit neither event.** There's no session lifecycle to hang them on. *Ended* could be emitted on CLOSED, with duration from the webhook's `createdAt`/`updatedAt`. That needs care: the stateless CLOSED path fast-exits when no `on_conversation_ended` is registered, and the channel filter costs a `list_participants`. *Started* has no stateless equivalent for inbound conversations.
+- `main`'s `TestMessagingCallSites` lifecycle tests in `tests/test_analytics.py` call `SMSChannel._start_conversation` / `_end_conversation`, so they have to move to voice.
+
+**G4. No call-event fallback without per-pod addressability.**
+Without `instance_public_domain`, status/AMD/recording events land on any replica, and `get_conversation_session_by_call_sid` (`voice/channel.py:551`) returns `None`. In orchestrated mode, `list_conversations(channel_id=call_sid)` plus the existing `_rebuild_session` could give an identity-only session on any replica.
+
+**G5. The app sending to a live call held by another instance.**
+Affinity routes Twilio's callbacks, not the app's own calls (from a background job or another handler). No Twilio API writes into a ConversationRelay socket, so TAC can't fix this.
+
+*Action:* document it as a limitation in `docs/deployment.md`: send from inside the call's own callbacks, or route by `conversation_id` at the balancer.
+
+**G6. GPT-Live isn't covered.** *(Applies once rebased onto `main`.)*
+GPT-Live (#125) postdates this branch. On `main` it stashes inbound session config keyed by CallSid, in a plain dict, so it has both §4.3 problems: it's lost across replicas, and entries for calls that never connect are never purged. Moving this branch's token handoff and `ExpiringDict` into `main`'s shared Media Streams base (#122) covers OpenAI Realtime and GPT-Live in one place. GPT-Live's teardown also needs the same stale-entry `pop` that Realtime's has here. Once that's done, GPT-Live's own `_pending_token_expiries` asyncio timers duplicate the `ExpiringDict` TTL. That's harmless but redundant; remove them in a follow-up.
+
+### Behavior changes not called out as breaking
+
+**G7. Orchestrated voice `on_conversation_ended` now receives a rebuilt, identity-only session.**
+`_rebuild_session` (`voice/channel.py:466`) restores only the ids, profile and participants. Apps that read `metadata`, the transcript or `pending_handoff_data` there must move to `on_call_ended`. The commit calls this non-breaking; it needs a changelog and migration note.
+
+**G8. Messaging `session.metadata` no longer carries across turns, even on one instance.**
+Anything an app writes in turn N is gone in turn N+1. The outbound `direction: outbound` metadata (`messaging.py:626`) lives only on the session that `initiate_outbound_conversation` returns. CO conversations have no attributes field to keep it in.
+
+**G9. Messaging `memory_mode="once"` raises at construction.**
+`messaging.py:108`. **Decided:** don't raise. Log a `DeprecationWarning` and run as `"always"`, which gives *better* relevance at +1 `/Recall` per message, so nothing silently gets worse. Remove it in the next major version. Voice `"once"` is unchanged. Update `CLAUDE.md`'s memory-modes bullet, `docs/deployment.md` and §2.7 to match.
+
+### Unverified assumptions (block the messaging half)
+
+**V1. Address-mode Actions send** (§2.2, §9): `from` = `{address, channel}` with no participant id. Untested on a live account, for both SMS and CHAT. Does delivery succeed, and does the conversation end up with a correctly typed `AI_AGENT` participant?
+
+**V2. v2-native participant typing** (§2.3, §9): does CO capture assign `UNKNOWN` to TAC's own address on a v2-native account? That decides whether reconciliation is really v1-bridge-only.
+
+### Proposed sequencing
+
+| Step | Scope | Breaking? |
+|---|---|---|
+| 0 | Rebase onto `main`, resolving G3 (voice placement) and G6 (shared base) | No |
+| 1 | G1, G6 cleanup, G2 (docs + rebuild-on-connect), G4 | No |
+| 2 | G3 (voice semantics note + decide messaging lifecycle telemetry), G5 + G7 docs, changelog | No |
+| 3 | Run V1/V2 on live accounts | — |
+| 4 | Messaging half: G9 (deprecate instead of raise), G8 changelog/migration note | Yes (`get_agent_address`, `send_response` first param) |
