@@ -714,7 +714,11 @@ class VoiceChannel(BaseChannel):
         be used with :meth:`send_response`: the call's WebSocket is on
         another instance. If CO holds several conversations for the call
         (it starts a new one when a conversation closes mid-call), the
-        active one wins, else the newest.
+        active one wins, else the newest — this rule applies only to the
+        rebuild path. On the instance holding the call, the live session is
+        returned as-is, so after a mid-call close it still carries the
+        closed conversation's id while other instances return the new one;
+        correlate by ``call_sid`` if you need a stable key.
 
         To tell live from rebuilt, check
         ``voice_channel.get_websocket(session.conversation_id) is not None``

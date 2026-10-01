@@ -446,7 +446,7 @@ class TestStatelessConversationClosed:
 class TestClosedDuringLiveCall:
     """CO can close a conversation while its call is still live (a closed
     timeout during a long hold, or the app closing it). The call keeps
-    running, so the session must survive until teardown (G1)."""
+    running, so the session must survive until teardown."""
 
     @pytest.mark.asyncio
     async def test_fires_conversation_ended_now_and_keeps_the_session(self) -> None:
@@ -833,7 +833,7 @@ class TestInstanceAffinity:
 
 
 class TestResolveSessionByCallSid:
-    """A CallSid-only event can find its session's identity on any instance (G4)."""
+    """A CallSid-only event can find its session's identity on any instance."""
 
     @pytest.mark.asyncio
     async def test_returns_the_live_session_when_held_locally(self) -> None:
@@ -845,6 +845,28 @@ class TestResolveSessionByCallSid:
 
         assert await channel.resolve_conversation_session_by_call_sid("CA_local") is live
         tac.conversation_orchestrator_client.list_conversations.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_returns_the_live_session_as_is_after_a_mid_call_close(self) -> None:
+        """On the instance holding the call, a mid-call CLOSED still leaves
+        the live session reachable under the old conversation id; CO's new
+        ACTIVE conversation for the call isn't consulted."""
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+        live = channel._start_conversation("conv_old", None)
+        live.call_sid = "CA_hold"
+        await channel.process_webhook(closed_webhook("conv_old"))
+
+        client = tac.conversation_orchestrator_client
+        client.list_conversations = AsyncMock(
+            return_value=[conversation("conv_new", "ACTIVE", "2026-09-30T10:20:00Z")]
+        )
+
+        session = await channel.resolve_conversation_session_by_call_sid("CA_hold")
+
+        assert session is live
+        assert session.conversation_id == "conv_old"
+        client.list_conversations.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_rebuilds_from_co_when_held_elsewhere(self) -> None:
@@ -934,7 +956,7 @@ class TestResolveSessionByCallSid:
 
     @pytest.mark.asyncio
     async def test_picks_the_later_conversation_by_parsed_datetime_not_string(self) -> None:
-        """ "...10:00:00Z" sorts after "...10:00:00.500Z" as a string, but
+        """As strings, "...10:00:00Z" sorts after "...10:00:00.500Z", but
         before it as a datetime; the fix must compare parsed datetimes."""
         tac = TAC(get_test_config())
         channel = VoiceChannel(tac)

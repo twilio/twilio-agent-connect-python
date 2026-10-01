@@ -99,6 +99,17 @@ They are not interchangeable:
 a rebuild from Conversation Orchestrator restores identity — conversation id,
 `call_sid`, profile, both participants — but not a transcript.
 
+If Conversation Orchestrator closes a conversation while its call is still
+live — a closed timeout during a long hold, or your code closing it —
+`on_conversation_ended` fires at that moment with a snapshot of the live
+session, and the call keeps running. `on_call_ended` still fires when the
+call hangs up. CO starts a new conversation for the call's later traffic,
+but the live session keeps the closed conversation's id; the new
+conversation's own `on_conversation_ended` fires from a rebuilt session
+when it closes. Until the call ends, `resolve_conversation_session_by_call_sid`
+returns the old id on the replica holding the call and the new one
+elsewhere, so key cross-replica correlation on `call_sid`.
+
 ### Instance affinity for voice
 
 A call's out-of-band webhooks — status, AMD, recording, and the
@@ -120,7 +131,12 @@ this process, so a call's webhooks come back to the replica holding it.
 
 This needs per-pod addressability — on Kubernetes, a headless Service plus
 `POD_IP`/`POD_NAME`. Without it, leave the setting unset (the load balancer
-domain remains the default) and route by `CallSid` at the balancer.
+domain remains the default) and either route by `CallSid` at the balancer or
+look the call up with `VoiceChannel.resolve_conversation_session_by_call_sid`.
+For a ConversationRelay call in orchestrated mode it falls back to
+Conversation Orchestrator and returns an identity-only session — enough to
+correlate an event with its conversation and customer, though not to reply on
+the call, whose WebSocket is on another replica.
 
 ### Draining on shutdown
 

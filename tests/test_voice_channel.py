@@ -430,7 +430,7 @@ class TestVoiceChannel:
     @pytest.mark.asyncio
     async def test_process_webhook_conversation_closed(self) -> None:
         """CLOSED while the call is still live keeps the session for the call's
-        own teardown to release (G1); see TestClosedDuringLiveCall for the
+        own teardown to release; see TestClosedDuringLiveCall for the
         on_conversation_ended behavior this triggers."""
         tac = TAC(get_test_config())
         channel = VoiceChannel(tac)
@@ -1131,7 +1131,7 @@ class TestVoiceChannel:
         """Webhook with CLOSED status triggers on_conversation_ended callback.
 
         The call is still live here, so the session itself stays until the
-        call's own teardown releases it (G1); see TestClosedDuringLiveCall.
+        call's own teardown releases it; see TestClosedDuringLiveCall.
         """
         tac = TAC(get_test_config())
         channel = VoiceChannel(tac)
