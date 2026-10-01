@@ -490,3 +490,72 @@ No store phase. §5 removed it.
 - Handler idempotency contract — document that `on_message_ready` may be called twice for the same message in a multi-instance deployment (§5).
 - Changelog — `get_agent_address` signature, messaging `memory_mode="once"` removal, new `on_call_ended`.
 - `mkdocs.yml` `filters` — update for any newly public or newly internal methods.
+
+---
+
+## 11. Gaps found in review (2026-09-30)
+
+Found reviewing this plan and its implementation against current `main`, after rebasing onto `5677eeb` (v2.5.0). **Documented only. None of these are fixed yet.** Line references are to the rebased branch.
+
+The mode split from §3.1 matters here. Gaps 1, 4 and 7 apply **only to ConversationRelay in orchestrated mode**, the one combination where a CO `CLOSED` webhook ends the conversation and can land on another instance. In relay-only mode and in every Media Streams provider, teardown is the only end event.
+
+### Correctness bugs
+
+**G1. CLOSED during a live call removes the live session.**
+`_handle_conversation_closed` (`voice/channel.py:475`) pops the session whether or not a WebSocket is still attached. If CO closes the conversation mid-call (a `statusTimeouts` expiry, or the app calling `update_conversation(..., "CLOSED")`), and the CLOSED webhook lands on the instance holding the call:
+
+- `on_conversation_ended` fires with the live session;
+- teardown later finds no session, so `_release_session` (`voice/channel.py:425`) returns early and **`on_call_ended` never fires**, which breaks its "always fires" contract;
+- the call's remaining prompts hit "unknown conversation" and are dropped.
+
+*Fix direction:* when a socket is still attached, CLOSED fires `on_conversation_ended` from a copy and leaves the session in place. Teardown stays the only thing that frees it.
+
+**G2. Media Streams per-call `session_config` survives only with instance affinity.**
+§4.3 says the config travels on the TwiML. The code sends only a **token** in `<Stream>` custom parameters; the config stays in an instance-local `ExpiringDict` (`media_streams/shared/openai_provider.py:74`). Sending a token is right, because each `<Parameter>` name+value must be under 500 chars. But without `instance_public_domain`, an inbound call whose WebSocket lands on another replica finds no entry and silently falls back to `default_session_config`. The same applies to outbound calls placed on one replica and streamed to another.
+
+*Fix direction:* document the dependency on affinity, and/or rebuild the config when the stream connects (re-run `on_inbound_call_session_config` from the `start` message's CallSid + custom parameters) when the token misses locally.
+
+### Coverage gaps
+
+**G3. Telemetry from #127 is only partly carried over to the new lifecycle.** *(Introduced by the rebase, not in the original branch.)*
+
+- **Voice:** "Conversation Started" moved to `VoiceChannel._start_conversation`, and "Conversation Ended" to `_release_session`. In orchestrated ConversationRelay mode, *Ended* now measures **call** duration at teardown, not time-to-CLOSED. That's a meaning change for the metric; previously it rarely fired at all with multiple instances.
+- **Messaging emits neither "Conversation Started" nor "Conversation Ended" any more.** There's no session lifecycle to hang them on. *Ended* could be emitted on CLOSED, with duration from the webhook's `createdAt`/`updatedAt`. That needs care: the stateless CLOSED path fast-exits when no `on_conversation_ended` is registered, and the channel filter costs a `list_participants`. *Started* has no stateless equivalent for inbound conversations.
+- The `TestMessagingCallSites` lifecycle tests moved to `TestVoiceSessionLifecycle` in `tests/test_analytics.py`.
+
+**G4. No call-event fallback without per-pod addressability.**
+Without `instance_public_domain`, status/AMD/recording events land on any replica, and `get_conversation_session_by_call_sid` (`voice/channel.py:577`) returns `None`. In orchestrated mode, `list_conversations(channel_id=call_sid)` plus the existing `_rebuild_session` could give an identity-only session on any replica.
+
+**G5. App-initiated `send_response` to a live call on another instance.**
+Affinity routes Twilio's callbacks, not the app's own calls (a background job, another handler). No Twilio API writes into a ConversationRelay socket, so this can't be fixed inside TAC.
+
+*Action:* document it as a limitation in `docs/deployment.md`: send from inside the call's own callbacks, or route by `conversation_id` at the balancer.
+
+**G6. GPT-Live keeps a now-redundant expiry mechanism.** *(Introduced by the rebase.)*
+GPT-Live (#125) postdates this plan. The rebase moved the token handoff and `ExpiringDict` into the shared Media Streams base, so GPT-Live gets both. Its own `_pending_token_expiries` asyncio timers (`gpt_live/provider.py:87`) now duplicate the `ExpiringDict` TTL. That's harmless but redundant; remove it in a follow-up.
+
+### Behavior changes not called out as breaking
+
+**G7. Orchestrated voice `on_conversation_ended` now receives a rebuilt, identity-only session.**
+`_rebuild_session` (`voice/channel.py:492`) restores only the ids, profile and participants. Apps that read `metadata`, the transcript or `pending_handoff_data` there must move to `on_call_ended`. The commit calls this non-breaking; it needs a changelog and migration note.
+
+**G8. Messaging `session.metadata` no longer carries across turns, even on one instance.**
+Anything an app writes in turn N is gone in turn N+1. The outbound `direction: outbound` metadata (`messaging.py:648`) lives only on the session that `initiate_outbound_conversation` returns. CO conversations have no attributes field to keep it in.
+
+**G9. Messaging `memory_mode="once"` raises at construction.**
+`messaging.py:109`. **Decided:** don't raise. Log a `DeprecationWarning` and run as `"always"`, which gives *better* relevance at +1 `/Recall` per message, so nothing silently gets worse. Remove it in the next major version. Voice `"once"` is unchanged. Update `CLAUDE.md`'s memory-modes bullet and §2.7 to match.
+
+### Unverified assumptions (block the messaging half)
+
+**V1. Address-mode Actions send** (§2.2, §9): `from` = `{address, channel}` with no participant id. Untested on a live account, for both SMS and CHAT. Does delivery succeed, and does the conversation end up with a correctly typed `AI_AGENT` participant?
+
+**V2. v2-native participant typing** (§2.3, §9): does CO capture assign `UNKNOWN` to TAC's own address on a v2-native account? That decides whether reconciliation is really v1-bridge-only.
+
+### Proposed sequencing
+
+| Step | Scope | Breaking? |
+|---|---|---|
+| 1 | G1, G6, G2 (docs + rebuild-on-connect), G4 | No |
+| 2 | G3 (voice semantics note + decide messaging lifecycle telemetry), G5 + G7 docs, changelog | No |
+| 3 | Run V1/V2 on live accounts | — |
+| 4 | Messaging half: G9 (deprecate instead of raise), G8 changelog/migration note | Yes (`get_agent_address`, `send_response` first param) |
