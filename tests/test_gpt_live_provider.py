@@ -326,6 +326,32 @@ class TestOutboundCallSessionConfig:
 
         assert len(provider._call_session_configs) == 0
 
+    @pytest.mark.asyncio
+    async def test_outbound_call_schedules_no_expiry_task(self) -> None:
+        """The shared ExpiringDict bounds unclaimed entries; GPT-Live no longer
+        runs its own per-token timer."""
+        channel = make_channel()
+        provider = channel._provider
+
+        mock_client = MagicMock()
+        mock_client.calls.create.return_value = MagicMock(sid="CA_OUT_NO_TIMER")
+
+        tasks_before = asyncio.all_tasks()
+        with patch.object(channel, "_get_twilio_client", return_value=mock_client):
+            await provider.initiate_outbound_conversation(
+                InitiateVoiceConversationOptionsGPTLive(
+                    to="+15551234567",
+                    session_config={
+                        "model": "gpt-live-1",
+                        "audio": {"format": TWILIO_AUDIO_FORMAT_FOR_GPT_LIVE},
+                    },
+                )
+            )
+
+        assert asyncio.all_tasks() - tasks_before == set()
+        assert not hasattr(provider, "_pending_token_expiries")
+        assert len(provider._call_session_configs) == 1
+
 
 class TestHandleWebSocketLifecycle:
     @pytest.mark.asyncio
