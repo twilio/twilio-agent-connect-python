@@ -510,7 +510,9 @@ The mode split from §3.1 matters here. G1, G4 and G7 apply **only to Conversati
 - teardown later finds no session, so `_release_session` (`voice/channel.py:415`) returns early and **`on_call_ended` never fires**, which breaks its "always fires" contract;
 - the call's remaining prompts hit "unknown conversation" and are dropped.
 
-*Fix direction:* when a socket is still attached, CLOSED fires `on_conversation_ended` from a copy and leaves the session in place. Teardown stays the only thing that frees it.
+**Decided: fire now, keep the session.** When a socket is still attached, CLOSED fires `on_conversation_ended` immediately with a copy of the live session and leaves the session in place. Teardown stays the only thing that frees it, and fires only `on_call_ended`. This way `on_conversation_ended` always fires at CLOSED time, exactly once, on whichever instance received the webhook.
+
+*Rejected alternative: defer to hangup.* Mark the session closed and fire both hooks at teardown with the full live session. That gives a richer session, but the timing would depend on routing: CLOSED landing on another instance (N−1 of N times) can't see the socket and fires immediately from a rebuilt session, while only the owning instance would defer. See also V3.
 
 **G2. Media Streams per-call `session_config` survives only with instance affinity.**
 §4.3 says the config travels on the TwiML. The code sends only a **token** in `<Stream>` custom parameters; the config itself stays in an instance-local `ExpiringDict` (`media_streams/openai_realtime/provider.py:94`). Sending a token is the right choice, because each `<Parameter>` name+value must be under 500 chars. But without `instance_public_domain`, an inbound call whose WebSocket lands on another replica finds no entry and silently falls back to `default_session_config`. The same goes for an outbound call placed on one replica and streamed to another.
@@ -553,6 +555,8 @@ Anything an app writes in turn N is gone in turn N+1. The outbound `direction: o
 **V1. Address-mode Actions send** (§2.2, §9): `from` = `{address, channel}` with no participant id. Untested on a live account, for both SMS and CHAT. Does delivery succeed, and does the conversation end up with a correctly typed `AI_AGENT` participant?
 
 **V2. v2-native participant typing** (§2.3, §9): does CO capture assign `UNKNOWN` to TAC's own address on a v2-native account? That decides whether reconciliation is really v1-bridge-only.
+
+**V3. CO after a mid-call CLOSED** (G1): once CO closes a conversation while the call is still live, do the call's later utterances start a **new** CO conversation for the same CallSid? If so, the live session's `conversation_id` goes stale, and that new conversation's own CLOSED arrives later with no session tracking it.
 
 ### Proposed sequencing
 
