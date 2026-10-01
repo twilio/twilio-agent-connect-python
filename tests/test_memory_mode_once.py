@@ -1,12 +1,14 @@
-"""Tests for `memory_mode="once"` — a Voice-only mode.
+"""Tests for `memory_mode="once"`.
 
-`"once"` primes a recall with no query and caches it on the session for the
-rest of the call. It needs a session that outlives a single request, which
-only voice has: a call is pinned to the instance holding its WebSocket. The
-messaging channels hold nothing between webhooks, so they reject the mode at
-construction rather than silently degrading to a cacheless, query-less recall.
+On voice, `"once"` primes a recall with no query and caches it on the session
+for the rest of the call. It needs a session that outlives a single request,
+which only voice has: a call is pinned to the instance holding its WebSocket.
+The messaging channels hold nothing between webhooks, so on messaging the
+mode is deprecated: it warns and runs as `"always"` rather than degrading to a
+cacheless, query-less recall.
 """
 
+import warnings
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -16,7 +18,7 @@ from tac import TAC
 from tac.channels.chat import ChatChannel
 from tac.channels.messaging import MessagingChannel
 from tac.channels.rcs import RCSChannel
-from tac.channels.sms import SMSChannel
+from tac.channels.sms import SMSChannel, SMSChannelConfig
 from tac.channels.voice import VoiceChannel
 from tac.channels.voice.conversation_relay import ConversationRelayProviderConfig
 from tac.channels.whatsapp import WhatsAppChannel
@@ -64,20 +66,23 @@ def make_voice_channel() -> tuple[TAC, VoiceChannel, AsyncMock]:
     return tac, channel, recall
 
 
-class TestMessagingRejectsOnce:
-    """Fail loudly at construction — a silent downgrade shows up in production
-    as "the bot forgot things"."""
+class TestMessagingDeprecatesOnce:
+    """`"once"` was accepted on messaging channels before, so rejecting it
+    would break existing apps at startup. It's deprecated instead: it warns
+    and runs as `"always"`, which keeps memory on with better relevance."""
 
     @pytest.mark.parametrize("channel_cls", [SMSChannel, RCSChannel, WhatsAppChannel, ChatChannel])
-    def test_config_rejects_once(self, channel_cls: type) -> None:
+    def test_config_once_warns_and_runs_as_always(self, channel_cls: type) -> None:
         tac = TAC(get_test_config())
-        with pytest.raises(Exception) as exc_info:
-            channel_cls(tac, config={"memory_mode": "once"})
-        assert "once" in str(exc_info.value)
+        with pytest.warns(DeprecationWarning, match='memory_mode="once" is deprecated'):
+            channel = channel_cls(tac, config={"memory_mode": "once"})
+        assert channel.memory_mode == "always"
 
-    def test_custom_subclass_passing_once_directly_is_rejected(self) -> None:
-        """The config field's Literal can't see a subclass that bypasses it."""
+    def test_config_object_still_accepts_once(self) -> None:
+        """Building the config itself must not raise for existing apps."""
+        assert SMSChannelConfig(memory_mode="once").memory_mode == "once"
 
+    def test_custom_subclass_passing_once_directly_is_deprecated(self) -> None:
         class CustomChannel(MessagingChannel):
             def get_channel_name(self) -> str:
                 return "SMS"
@@ -88,8 +93,30 @@ class TestMessagingRejectsOnce:
             def get_agent_address(self, session: ConversationSession) -> ParticipantAddress:
                 return ParticipantAddress(channel="SMS", address="+15551234567")
 
-        with pytest.raises(ValueError, match='does not support memory_mode="once"'):
-            CustomChannel(TAC(get_test_config()), memory_mode="once")
+        with pytest.warns(DeprecationWarning, match='memory_mode="once" is deprecated'):
+            channel = CustomChannel(TAC(get_test_config()), memory_mode="once")
+        assert channel.memory_mode == "always"
+
+    @pytest.mark.asyncio
+    async def test_deprecated_once_retrieves_with_the_query_on_every_message(self) -> None:
+        tac = TAC(get_test_config())
+        with pytest.warns(DeprecationWarning):
+            channel = SMSChannel(tac, config={"memory_mode": "once"})
+        retrieve = AsyncMock(return_value=TACMemoryResponse([]))
+        tac.retrieve_memory = retrieve  # type: ignore[method-assign]
+        session = ConversationSession(conversation_id="CH_once", channel="SMS")
+
+        await channel._retrieve_memory_if_enabled(session, "first", "CH_once")
+        await channel._retrieve_memory_if_enabled(session, "second", "CH_once")
+
+        assert [c.kwargs["query"] for c in retrieve.await_args_list] == ["first", "second"]
+
+    @pytest.mark.parametrize("mode", ["never", "always"])
+    def test_supported_modes_do_not_warn(self, mode: str) -> None:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", DeprecationWarning)
+            channel = SMSChannel(TAC(get_test_config()), config={"memory_mode": mode})
+        assert channel.memory_mode == mode
 
 
 class TestVoiceOnceMode:

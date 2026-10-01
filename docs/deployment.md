@@ -173,6 +173,8 @@ the process is killed mid-drain.
   there is almost nothing left worth caching.
 - **No live session migration.** A call belongs to one process until it ends.
 - **`memory_mode="once"` on messaging.** It caches a recall on a long-lived
-  session, which messaging doesn't have. Statelessly it would cost the same as
-  `"always"` with worse relevance, so messaging channels raise at construction
-  rather than degrade silently. Use `"always"`.
+  session, which messaging doesn't have. It's deprecated on messaging channels
+  and removed in 3.0: until then it logs a deprecation warning and runs as
+  `"always"`, which recalls with each message's text, so memory stays on with
+  better relevance at one recall per message. Set `"always"` to silence the
+  warning. `"once"` is unchanged on Voice.

@@ -54,7 +54,7 @@ Tests are in `tests/` — one test file per module (e.g., `test_tac.py`, `test_s
 - **Memory modes**:
   - `"never"` (default): No automatic memory retrieval
   - `"always"`: Fetch memory on every message with the user's query string for semantic search
-  - `"once"` (**Voice only**): Fetch once with empty query, cache it on the session. Invalidated on INACTIVE; uses `cache_lock` for concurrent async access. Needs a session outliving one request, which only voice has — messaging channels raise at construction.
+  - `"once"` (**Voice only**): Fetch once with empty query, cache it on the session. Invalidated on INACTIVE; uses `cache_lock` for concurrent async access. Needs a session outliving one request, which only voice has — on messaging channels it is deprecated (removed in 3.0): `MessagingChannel.__init__` warns and runs it as `"always"`.
   - `memory_config.fetch_profile_traits=False` drops the `get_profile` call when prompts don't use `build_profile_prompt()`.
 - **Memory fallback**: `TAC.retrieve_memory()` tries Conversation Memory first, gracefully falls back to Conversation Orchestrator's `list_communications()` on any failure
 - **Profile resolution**: Automatic profile lookup by phone/email if `profile_id` not present in webhook

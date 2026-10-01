@@ -1,8 +1,9 @@
 """MessagingChannel base class for messaging channels (SMS, RCS, WhatsApp, Chat)."""
 
+import warnings
 from abc import abstractmethod
 from collections.abc import AsyncGenerator
-from typing import Any, Literal
+from typing import Any
 
 import httpx
 from pydantic import BaseModel, Field
@@ -11,6 +12,7 @@ from tac import TAC
 from tac.channels.base import AGENT_TYPES, BaseChannel
 from tac.context.conversation import ConversationClient
 from tac.core.analytics import track_event
+from tac.core.logging import get_logger
 from tac.models.conversation import (
     ActionChannelSettings,
     ActionParticipantRef,
@@ -28,12 +30,7 @@ from tac.models.outbound import InitiateConversationResult, InitiateMessagingCon
 from tac.models.session import AuthorInfo, ConversationSession
 from tac.utils.redaction import mask_address
 
-MessagingMemoryMode = Literal["never", "always"]
-"""Memory modes a messaging channel supports.
-
-Narrower than :data:`~tac.models.memory.MemoryMode`: ``"once"`` caches a recall
-on a long-lived session, which only voice has.
-"""
+logger = get_logger(__name__)
 
 
 class MessagingChannelConfig(BaseModel):
@@ -47,9 +44,10 @@ class MessagingChannelConfig(BaseModel):
 
             - `"always"`: Retrieve memory for every message with the query string
             - `"never"`: Skip memory retrieval
-
-            `"once"` is **not** available on messaging channels — see
-            `MessagingMemoryMode`.
+            - `"once"`: **Deprecated** on messaging channels and removed in 3.0.
+              It caches a recall on a session that outlives one request, which
+              messaging channels don't keep, so it logs a warning and runs as
+              `"always"`. It's still supported on the Voice channel.
     """
 
     dedup_capacity: int = Field(
@@ -57,7 +55,7 @@ class MessagingChannelConfig(BaseModel):
         gt=0,
         description="Maximum number of idempotency tokens to track for deduplication",
     )
-    memory_mode: MessagingMemoryMode = Field(
+    memory_mode: MemoryMode = Field(
         default="never",
         description="Memory retrieval mode for this channel",
     )
@@ -118,11 +116,18 @@ class MessagingChannel(BaseChannel):
                 "Set `conversation_configuration_id` on TACConfig to enable messaging channels."
             )
         if memory_mode == "once":
-            raise ValueError(
-                f'{type(self).__name__} does not support memory_mode="once" — it caches a '
-                "recall on a long-lived session, and messaging channels hold none between "
-                'webhooks. Use "always". ("once" is still available on the Voice channel.)'
+            # Accepted before messaging went stateless, so rejecting it would break
+            # existing apps at startup. "always" keeps memory on, with the turn's
+            # query, at one recall per message.
+            message = (
+                f'memory_mode="once" is deprecated on {type(self).__name__} and will be '
+                'removed in 3.0; running as "always". It caches a recall on a session that '
+                "outlives one request, which messaging channels don't keep. "
+                '("once" is still supported on the Voice channel.)'
             )
+            warnings.warn(message, DeprecationWarning, stacklevel=3)
+            logger.warning(message)
+            memory_mode = "always"
         self.conversation_orchestrator_client: ConversationClient = (
             tac.conversation_orchestrator_client
         )
