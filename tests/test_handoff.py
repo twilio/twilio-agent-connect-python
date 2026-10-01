@@ -270,10 +270,19 @@ class TestHandoffExecution:
         assert result == {"status": "handoff_initiated", "channel": "SMS"}
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("channel", "agent_address"),
+        [
+            ("SMS", "+14440000000"),
+            ("RCS", "rcs:other_sender_id"),
+            ("WHATSAPP", "whatsapp:+14440000000"),
+        ],
+    )
     async def test_handoff_digital_uses_session_agent_address(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, monkeypatch: pytest.MonkeyPatch, channel: str, agent_address: str
     ) -> None:
-        """Digital handoff sends From the number the customer is talking to, not the default."""
+        """Digital handoff sends From the sender the customer is talking to, not the default,
+        keeping the channel prefix (`rcs:` / `whatsapp:`) that Studio needs to match `To`."""
         flow_sid = "FW" + "a" * 32
         tac = TAC(
             get_test_config(
@@ -289,22 +298,22 @@ class TestHandoffExecution:
         post_mock = AsyncMock()
         monkeypatch.setattr(handoff_module, "post_studio_handoff", post_mock)
 
-        session = ConversationSession(conversation_id="conv_123", channel="SMS")
-        session.ai_agent_info = AuthorInfo(address="+14440000000", participant_id="p_agent")
+        session = ConversationSession(conversation_id="conv_123", channel=channel)
+        session.ai_agent_info = AuthorInfo(address=agent_address, participant_id="p_agent")
 
         tool = create_studio_handoff_tool(tac, session)
         await tool(reason="Customer wants human")
 
         _, call_kwargs = post_mock.call_args
-        assert call_kwargs["from_address"] == "+14440000000"
+        assert call_kwargs["from_address"] == agent_address
 
     @pytest.mark.asyncio
     async def test_handoff_chat_uses_configured_phone_number_not_identity(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Chat's agent address is an identity (e.g. "ai-assistant"), not a Twilio
-        number. Studio's From must be a phone number, so Chat keeps the configured
-        default sender instead of the session's Chat identity."""
+        sender, so Chat keeps the configured default sender instead of the session's
+        Chat identity."""
         flow_sid = "FW" + "a" * 32
         tac = TAC(
             get_test_config(
