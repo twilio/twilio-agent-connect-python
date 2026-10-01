@@ -20,8 +20,16 @@ import pytest
 from tac import TAC
 from tac.channels.voice import VoiceChannel
 from tac.channels.voice.conversation_relay import ConversationRelayProviderConfig
+from tac.channels.voice.media_streams.openai_realtime import OpenAIRealtimeProviderConfig
+from tac.channels.voice.media_streams.openai_realtime.provider import (
+    TWILIO_AUDIO_FORMAT_FOR_REALTIME,
+)
 from tac.channels.websocket_protocol import WebSocketDisconnectError
-from tac.models.conversation import ParticipantAddress, ParticipantResponse
+from tac.models.conversation import (
+    ConversationResponse,
+    ParticipantAddress,
+    ParticipantResponse,
+)
 from tac.models.session import ConversationSession
 from tac.session import ThreadSafeSessionManager
 from tests.voice_invariants import assert_no_residual_state
@@ -90,6 +98,16 @@ def voice_participants(conv_id: str, call_sid: str | None = None) -> list[Partic
             ],
         ),
     ]
+
+
+def conversation(conv_id: str, status: str, created_at: str) -> ConversationResponse:
+    return ConversationResponse(
+        id=conv_id,
+        account_id="ACtest123",
+        status=status,
+        configuration_id=CONFIGURATION_ID,
+        created_at=created_at,
+    )
 
 
 class TestHookSplit:
@@ -812,3 +830,172 @@ class TestInstanceAffinity:
         channel = self._channel(instance_public_domain="https://pod-7.example.com/")
 
         assert channel.tac.config.instance_public_domain == "pod-7.example.com"
+
+
+class TestResolveSessionByCallSid:
+    """A CallSid-only event can find its session's identity on any instance (G4)."""
+
+    @pytest.mark.asyncio
+    async def test_returns_the_live_session_when_held_locally(self) -> None:
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+        tac.conversation_orchestrator_client.list_conversations = AsyncMock()
+        live = channel._start_conversation("conv_local", None)
+        live.call_sid = "CA_local"
+
+        assert await channel.resolve_conversation_session_by_call_sid("CA_local") is live
+        tac.conversation_orchestrator_client.list_conversations.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_rebuilds_from_co_when_held_elsewhere(self) -> None:
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+        client = tac.conversation_orchestrator_client
+        client.list_conversations = AsyncMock(
+            return_value=[conversation("conv_remote", "ACTIVE", "2026-09-30T10:00:00Z")]
+        )
+        client.list_participants = AsyncMock(return_value=voice_participants("conv_remote"))
+
+        session = await channel.resolve_conversation_session_by_call_sid("CA_remote")
+
+        assert session is not None
+        assert session.conversation_id == "conv_remote"
+        assert session.call_sid == "CA_remote"
+        assert session.profile_id == "profile_caller"
+        client.list_conversations.assert_awaited_once_with(channel_id="CA_remote")
+        # Identity only: nothing is tracked locally.
+        assert "conv_remote" not in channel._conversations
+
+    @pytest.mark.asyncio
+    async def test_prefers_the_active_conversation_over_a_closed_one(self) -> None:
+        """After a mid-call CLOSED, CO starts a new conversation for the same call."""
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+        client = tac.conversation_orchestrator_client
+        client.list_conversations = AsyncMock(
+            return_value=[
+                conversation("conv_old", "CLOSED", "2026-09-30T10:00:00Z"),
+                conversation("conv_new", "ACTIVE", "2026-09-30T10:20:00Z"),
+            ]
+        )
+        client.list_participants = AsyncMock(
+            side_effect=lambda conv_id: voice_participants(conv_id)
+        )
+
+        session = await channel.resolve_conversation_session_by_call_sid("CA_x")
+
+        assert session is not None
+        assert session.conversation_id == "conv_new"
+
+    @pytest.mark.asyncio
+    async def test_falls_back_to_the_newest_when_none_is_active(self) -> None:
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+        client = tac.conversation_orchestrator_client
+        client.list_conversations = AsyncMock(
+            return_value=[
+                conversation("conv_old", "CLOSED", "2026-09-30T10:00:00Z"),
+                conversation("conv_newer", "CLOSED", "2026-09-30T10:20:00Z"),
+            ]
+        )
+        client.list_participants = AsyncMock(
+            side_effect=lambda conv_id: voice_participants(conv_id)
+        )
+
+        session = await channel.resolve_conversation_session_by_call_sid("CA_y")
+
+        assert session is not None
+        assert session.conversation_id == "conv_newer"
+
+    @pytest.mark.asyncio
+    async def test_none_when_co_knows_no_conversation(self) -> None:
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+        tac.conversation_orchestrator_client.list_conversations = AsyncMock(return_value=[])
+
+        assert await channel.resolve_conversation_session_by_call_sid("CA_none") is None
+
+    @pytest.mark.asyncio
+    async def test_none_when_the_lookup_fails(self) -> None:
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+        tac.conversation_orchestrator_client.list_conversations = AsyncMock(
+            side_effect=RuntimeError("CO down")
+        )
+
+        assert await channel.resolve_conversation_session_by_call_sid("CA_err") is None
+
+    @pytest.mark.asyncio
+    async def test_relay_only_mode_has_no_fallback(self) -> None:
+        tac = TAC(get_test_config(conversation_configuration_id=None))
+        channel = VoiceChannel(tac)
+
+        assert await channel.resolve_conversation_session_by_call_sid("CA_relay") is None
+
+    @pytest.mark.asyncio
+    async def test_picks_the_later_conversation_by_parsed_datetime_not_string(self) -> None:
+        """ "...10:00:00Z" sorts after "...10:00:00.500Z" as a string, but
+        before it as a datetime; the fix must compare parsed datetimes."""
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+        client = tac.conversation_orchestrator_client
+        client.list_conversations = AsyncMock(
+            return_value=[
+                conversation("conv_a", "CLOSED", "2026-09-30T10:00:00Z"),
+                conversation("conv_b", "CLOSED", "2026-09-30T10:00:00.500Z"),
+            ]
+        )
+        client.list_participants = AsyncMock(
+            side_effect=lambda conv_id: voice_participants(conv_id)
+        )
+
+        session = await channel.resolve_conversation_session_by_call_sid("CA_z")
+
+        assert session is not None
+        assert session.conversation_id == "conv_b"
+
+    @pytest.mark.asyncio
+    async def test_media_streams_provider_has_no_fallback(self) -> None:
+        """Media Streams providers have no CO conversation behind the call,
+        even in orchestrated mode: don't bother asking CO."""
+        tac = TAC(get_test_config())
+        config = OpenAIRealtimeProviderConfig(
+            openai_api_key="sk-test",
+            default_session_config={
+                "model": "gpt-realtime-test",
+                "audio": {
+                    "input": {"format": TWILIO_AUDIO_FORMAT_FOR_REALTIME},
+                    "output": {"format": TWILIO_AUDIO_FORMAT_FOR_REALTIME},
+                },
+            },
+        )
+        channel = VoiceChannel(tac, config=config)
+        client = tac.conversation_orchestrator_client
+        client.list_conversations = AsyncMock()
+
+        assert await channel.resolve_conversation_session_by_call_sid("CA_media") is None
+        client.list_conversations.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_none_when_no_participant_is_on_the_voice_channel(self) -> None:
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+        client = tac.conversation_orchestrator_client
+        client.list_conversations = AsyncMock(
+            return_value=[conversation("conv_other", "ACTIVE", "2026-09-30T10:00:00Z")]
+        )
+        client.list_participants = AsyncMock(
+            return_value=[
+                ParticipantResponse(
+                    id="PA_customer",
+                    conversation_id="conv_other",
+                    account_id="ACtest123",
+                    name="Caller",
+                    type="CUSTOMER",
+                    profile_id="profile_caller",
+                    addresses=[ParticipantAddress(channel="SMS", address="+15559998888")],
+                )
+            ]
+        )
+
+        assert await channel.resolve_conversation_session_by_call_sid("CA_nonvoice") is None

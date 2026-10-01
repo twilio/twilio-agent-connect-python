@@ -37,7 +37,8 @@ class ConversationSession(BaseModel):
         "correlation key for call events (VoiceChannel.on_call_status / on_amd / "
         "on_recording) and end_call. Equals conversation_id in relay-only mode; "
         "look the session up the other way with "
-        "VoiceChannel.get_conversation_session_by_call_sid.",
+        "VoiceChannel.get_conversation_session_by_call_sid, or, from another "
+        "instance, VoiceChannel.resolve_conversation_session_by_call_sid.",
     )
     profile_id: str | None = Field(
         None, description="Profile ID associated with conversation (optional)"

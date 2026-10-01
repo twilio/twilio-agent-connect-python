@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncGenerator, Awaitable, Callable
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -12,6 +12,7 @@ from tac.channels.base import BaseChannel
 from tac.channels.websocket_protocol import WebSocketProtocol
 from tac.core.analytics import track_event
 from tac.core.tac import TAC
+from tac.models.conversation import ConversationResponse
 from tac.models.outbound import (
     InitiateVoiceConversationOptions,
     InitiateVoiceConversationResult,
@@ -40,6 +41,25 @@ CO_VOICE_CHANNEL = "VOICE"
 
 #: Default seconds :meth:`VoiceChannel.aclose` waits for calls to end.
 DEFAULT_DRAIN_GRACE_PERIOD = 30.0
+
+
+def _created_at_key(conversation: ConversationResponse) -> datetime:
+    """Parse ``ConversationResponse.created_at`` for chronological sorting.
+
+    Naive timestamps are treated as UTC. A missing or unparseable value
+    sorts first (``datetime.min``), so a conversation with good data always
+    wins over one without.
+    """
+    value = conversation.created_at
+    if value is None:
+        return datetime.min.replace(tzinfo=timezone.utc)
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return datetime.min.replace(tzinfo=timezone.utc)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
 
 
 class VoiceChannel(BaseChannel):
@@ -666,13 +686,90 @@ class VoiceChannel(BaseChannel):
         Returns:
             The session, or ``None`` — not created yet (relay-only mode, or
             orchestrator mode where the background CO lookup hasn't finished),
-            the call ended, or it landed on another instance (see the
-            horizontal-scaling note in CLAUDE.md).
+            the call ended, or it landed on another instance. For the last
+            case, :meth:`resolve_conversation_session_by_call_sid` falls back
+            to Conversation Orchestrator.
         """
         for session in self._conversations.values():
             if session.call_sid == call_sid:
                 return session
         return None
+
+    async def resolve_conversation_session_by_call_sid(
+        self, call_sid: str
+    ) -> ConversationSession | None:
+        """Look up a call's session on any instance, falling back to
+        Conversation Orchestrator when this instance doesn't hold the call.
+
+        Out-of-band call events (``on_call_status``, ``on_amd``,
+        ``on_recording``) carry only a CallSid and, without
+        ``TACConfig.instance_public_domain``, can reach any replica. This
+        returns the live session when the call is held here — same as
+        :meth:`get_conversation_session_by_call_sid` — and otherwise, for a
+        ConversationRelay call in orchestrator mode, a session rebuilt from
+        Conversation Orchestrator.
+
+        A rebuilt session carries identity only (conversation id,
+        ``call_sid``, profile, both participants), is not tracked, and can't
+        be used with :meth:`send_response`: the call's WebSocket is on
+        another instance. If CO holds several conversations for the call
+        (it starts a new one when a conversation closes mid-call), the
+        active one wins, else the newest.
+
+        To tell live from rebuilt, check
+        ``voice_channel.get_websocket(session.conversation_id) is not None``
+        — true only for a session live on this instance. A rebuilt
+        session's ``started_at`` is the rebuild time, not the call's, and
+        its ``metadata`` is always empty.
+
+        Cost: on a local miss this makes up to two Conversation Orchestrator
+        requests (list conversations, then participants). Prefer
+        :meth:`get_conversation_session_by_call_sid` on hot paths, or when
+        ``TACConfig.instance_public_domain`` already routes call events to
+        the instance holding the call.
+
+        Example:
+            ```python
+            async def on_status(event: CallStatusEvent) -> None:
+                session = await voice_channel.resolve_conversation_session_by_call_sid(
+                    event.call_sid
+                )
+                if session is not None:
+                    audit_log(session.conversation_id, session.profile_id, event.call_status)
+            ```
+
+        Args:
+            call_sid: Twilio Call SID, e.g. from a call event.
+
+        Returns:
+            The live or rebuilt session, or ``None`` — relay-only or Media
+            Streams mode (no CO conversation behind the call), CO knows no
+            conversation for it, or the lookup failed (logged).
+        """
+        session = self.get_conversation_session_by_call_sid(call_sid)
+        if session is not None:
+            return session
+
+        client = self.tac.conversation_orchestrator_client
+        if client is None or not self._provider._conversation_closed_by_orchestrator:
+            return None
+
+        try:
+            conversations = await client.list_conversations(channel_id=call_sid)
+        except Exception as e:
+            self.logger.error(
+                "Failed to look up the conversation for a call",
+                call_sid=call_sid,
+                error=str(e),
+                exc_info=True,
+            )
+            return None
+        if not conversations:
+            return None
+
+        active = [c for c in conversations if c.status == "ACTIVE"]
+        chosen = max(active or conversations, key=_created_at_key)
+        return await self._rebuild_session(chosen.id, call_sid)
 
     async def handle_websocket(self, websocket: WebSocketProtocol) -> None:
         """
