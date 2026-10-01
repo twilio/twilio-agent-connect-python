@@ -320,6 +320,7 @@ def mount_dashboard(
     tac: Any,
     channels: list[Any] | None = None,
     messages: dict[str, list[Any]] | None = None,
+    messaging_sessions: dict[str, ConversationSession] | None = None,
 ) -> None:
     """Mount the dashboard onto a FastAPI app in one call.
 
@@ -328,21 +329,22 @@ def mount_dashboard(
         tac: TAC instance. Uses ``conversation_memory_client`` and
             ``conversation_orchestrator_client`` for data fetches.
         channels: Channel instances (SMSChannel, VoiceChannel, ChatChannel, etc.).
-            Sessions are read from each channel's ``_conversations`` dict.
+            Voice sessions are read live from the channel — a call is pinned to
+            this process for its lifetime, so the channel holds them.
         messages: Conversation message history ``{conv_id: [{role, content}, ...]}``.
+        messaging_sessions: Sessions the *application* is keeping for messaging
+            conversations. Messaging channels are stateless — each webhook
+            derives its own session and discards it — so there is nothing to
+            read off the channel. Populate this from ``on_message_ready`` if
+            you want a live messaging panel.
     """
-    from tac.channels.sms import SMSChannel
     from tac.channels.voice import VoiceChannel
 
-    sms_channels = [c for c in (channels or []) if isinstance(c, SMSChannel)]
     voice_channels = [c for c in (channels or []) if isinstance(c, VoiceChannel)]
-    other_channels = [c for c in (channels or []) if not isinstance(c, (SMSChannel, VoiceChannel))]
+    tracked_messaging = messaging_sessions if messaging_sessions is not None else {}
 
     def _get_sms_sessions() -> dict[str, ConversationSession]:
-        result: dict[str, ConversationSession] = {}
-        for ch in sms_channels + other_channels:
-            result.update(ch._conversations)
-        return result
+        return dict(tracked_messaging)
 
     def _get_voice_sessions() -> dict[str, ConversationSession]:
         result: dict[str, ConversationSession] = {}
@@ -356,7 +358,7 @@ def mount_dashboard(
     ci_events: dict[str, list[dict[str, Any]]] = {}
 
     router = create_dashboard_router(
-        get_sms_sessions=_get_sms_sessions if (sms_channels or other_channels) else None,
+        get_sms_sessions=_get_sms_sessions if messaging_sessions is not None else None,
         get_voice_sessions=_get_voice_sessions if voice_channels else None,
         get_messages=(
             (lambda conv_id: list(messages.get(conv_id, []))) if messages is not None else None
