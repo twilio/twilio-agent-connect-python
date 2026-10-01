@@ -515,9 +515,31 @@ The mode split from §3.1 matters here. G1, G4 and G7 apply **only to Conversati
 *Rejected alternative: defer to hangup.* Mark the session closed and fire both hooks at teardown with the full live session. That gives a richer session, but the timing would depend on routing: CLOSED landing on another instance (N−1 of N times) can't see the socket and fires immediately from a rebuilt session, while only the owning instance would defer. See also V3.
 
 **G2. Media Streams per-call `session_config` survives only with instance affinity.**
-§4.3 says the config travels on the TwiML. The code sends only a **token** in `<Stream>` custom parameters; the config itself stays in an instance-local `ExpiringDict` (`media_streams/openai_realtime/provider.py:94`). Sending a token is the right choice, because each `<Parameter>` name+value must be under 500 chars. But without `instance_public_domain`, an inbound call whose WebSocket lands on another replica finds no entry and silently falls back to `default_session_config`. The same goes for an outbound call placed on one replica and streamed to another.
+`session_config` is the OpenAI session body (model, instructions, voice, audio format, tool schemas) that TAC sends as `session.update` (`session.start` on GPT-Live) when it opens the model socket for a call. A call's config comes from, in order:
 
-*Fix direction:* document the dependency on affinity, and/or rebuild the config when the stream connects (re-run `on_inbound_call_session_config` from the `start` message's CallSid + custom parameters) when the token misses locally. On current `main` this logic lives in the shared Media Streams base, so the fix covers GPT-Live too.
+1. a per-call override: `on_inbound_call_session_config(twiml_request)` for inbound, or `InitiateVoiceConversationOptionsOpenAIRealtime.session_config` for outbound;
+2. `default_session_config`;
+3. neither, and the call fails.
+
+The override is produced in one request (the inbound TwiML webhook, or the `initiate_outbound_conversation` call) and used in a later, separate one (the Media Streams WebSocket). Those can reach different replicas.
+
+§4.3 says the config travels on the TwiML. The code sends only a **token** in `<Stream>` custom parameters; the config itself stays in an instance-local `ExpiringDict` (`media_streams/openai_realtime/provider.py:94`). Sending a token is the right choice: the config carries the full system prompt plus tool schemas, often thousands of characters, and each `<Parameter>` name+value must be under 500. But without `instance_public_domain`, a WebSocket that lands on another replica finds no entry, and `_connect_model` (`provider.py:389`) behaves differently depending on configuration:
+
+- **`default_session_config` set:** the call **silently runs with the default**, e.g. a caller routed to Spanish instructions gets the English agent.
+- **`default_session_config` not set:** **the call fails** ("No session_config available") and the caller is dropped.
+
+This affects inbound and outbound calls alike.
+
+*Fix direction:* when the token misses locally, rebuild the config on the replica holding the WebSocket. Inbound and outbound differ:
+
+- **Inbound: re-run `on_inbound_call_session_config`.** The catch is its input. It takes a full `TwiMLRequest` (`From`, `To`, `CallerCountry`, `CallerState`, `CallerCity`, `Direction`, plus `extra` holding every other form field), while the WebSocket `start` message carries only `streamSid`, `callSid`, `mediaFormat` and `customParameters`. Options:
+  - TAC forwards the core `TwiMLRequest` fields as extra `<Stream>` parameters (each well under 500 chars) and rebuilds a `TwiMLRequest` on connect. The callback signature stays the same, but `extra` can't be forwarded wholesale, so a callback that reads `extra` would see less on the second run.
+  - A new callback keyed on what the WebSocket side knows (`call_sid` + custom parameters). That's a new public API.
+
+  Either way, the callback may now run **twice per call** (once on the TwiML replica, once on the WebSocket replica), so it must be deterministic and free of side effects. That needs documenting.
+- **Outbound: there's no callback to re-run.** The config is a value the app passed to `initiate_outbound_conversation` on the replica that placed the call. Rebuilding it on another replica needs either affinity, or a new resolver callback with a small app-chosen key carried in custom parameters.
+
+Separately, document that per-call `session_config` overrides depend on `instance_public_domain` until this lands. On current `main` this logic lives in the shared Media Streams base, so the fix covers GPT-Live too.
 
 ### Coverage gaps
 
