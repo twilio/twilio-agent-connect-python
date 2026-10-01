@@ -99,6 +99,14 @@ class ConversationRelayProvider(VoiceProvider):
             return setup_msg.to_number
         return setup_msg.from_number
 
+    @staticmethod
+    def _agent_address(setup_msg: SetupMessage) -> str | None:
+        """TAC's own number for this call: the dialed number on inbound, the
+        caller ID on outbound (the complement of `_caller_address`)."""
+        if setup_msg.direction and setup_msg.direction.upper() == "OUTBOUND":
+            return setup_msg.from_number
+        return setup_msg.to_number
+
     async def handle_incoming_call(
         self,
         twiml_request: TwiMLRequest | None = None,
@@ -282,11 +290,29 @@ class ConversationRelayProvider(VoiceProvider):
 
         # Resolve the agent participant so ai_agent_info is populated on the
         # session, matching the messaging channels. The agent is the participant
-        # that owns TAC's address (the configured phone number) on the VOICE
-        # channel and has an agent type. A HUMAN_AGENT added by a
-        # redirected/escalated call is NOT TAC and is not adopted here.
-        agent_participant = self.channel._find_agent_participant(
-            participants, "VOICE", self.channel.tac.config.phone_number
+        # that owns TAC's address on the VOICE channel and has an agent type. A
+        # HUMAN_AGENT added by a redirected/escalated call is NOT TAC and is not
+        # adopted here.
+        #
+        # TAC's address for THIS call is the dialed number from the setup
+        # message, not blindly the default `phone_number` — a call may have
+        # come in on any number in the configured allowlist. Fall back to the
+        # default (guaranteed non-None post-validation: TACConfig requires at
+        # least one of phone_number/phone_numbers and back-fills the default)
+        # if the dialed number is missing or not one of ours.
+        cfg = self.channel.tac.config
+        dialed = self._agent_address(setup_msg)
+        if dialed is not None and dialed not in cfg.phone_numbers:
+            self.logger.warning(
+                "Inbound call to a number not in the configured set; using default",
+                dialed=mask_phone(dialed),
+            )
+            dialed = None
+        agent_number = dialed or cfg.phone_number
+        agent_participant = (
+            self.channel._find_agent_participant(participants, "VOICE", agent_number)
+            if agent_number is not None
+            else None
         )
         agent_address = (
             next(
@@ -312,11 +338,14 @@ class ConversationRelayProvider(VoiceProvider):
             session.author_info = AuthorInfo(address=profile_lookup_address)
 
         if agent_participant:
-            # Fall back to the configured phone number we matched on — the
-            # participant owns it by definition, so it's a meaningful address
-            # even in the unlikely case it carries no explicit VOICE address.
+            # agent_participant is only ever resolved when agent_number is not
+            # None (see the guarded _find_agent_participant call above).
+            assert agent_number is not None
+            # Fall back to the number we matched on — the participant owns it
+            # by definition, so it's a meaningful address even in the unlikely
+            # case it carries no explicit VOICE address.
             session.ai_agent_info = AuthorInfo(
-                address=agent_address or self.channel.tac.config.phone_number,
+                address=agent_address or agent_number,
                 participant_id=agent_participant.id,
             )
 
@@ -529,7 +558,7 @@ class ConversationRelayProvider(VoiceProvider):
                 f"{type(twiml_options).__name__}"
             )
 
-        from_number = self.channel.tac.config.phone_number
+        from_number = self._resolve_from_number(options.from_)
 
         self.logger.info(
             "Initiating outbound voice conversation",

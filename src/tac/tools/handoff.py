@@ -194,12 +194,24 @@ async def _handoff_impl(
         # conversation we've already flagged INACTIVE — report that honestly
         # so the LLM can tell the user instead of claiming success.
         config = tac_instance.config
+        # Studio's `From` is the Twilio sender its widgets reply from, so it must
+        # match the channel of `To` (the customer address). SMS/RCS/WhatsApp hand
+        # off From the sender the customer actually reached
+        # (`session.ai_agent_info.address`), in the same channel-prefixed form as
+        # `To` — `+1555…`, `rcs:<sender_id>`, `whatsapp:+1555…` — which is what
+        # Studio expects for those channels. Chat's agent address is an identity
+        # (e.g. "ai-assistant"), not a Twilio sender, so it keeps the configured
+        # default phone number.
+        if channel != "CHAT" and session.ai_agent_info is not None:
+            from_address = session.ai_agent_info.address
+        else:
+            from_address = config.phone_number
         try:
             await post_studio_handoff(
                 payload,
                 session,
                 handoff_url=studio_executions_url(config.studio_handoff_flow_sid),
-                from_address=config.phone_number,
+                from_address=from_address,
                 api_key=config.api_key,
                 api_secret=config.api_secret,
             )

@@ -269,6 +269,75 @@ class TestHandoffExecution:
         assert session.pending_handoff_data is None
         assert result == {"status": "handoff_initiated", "channel": "SMS"}
 
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("channel", "agent_address"),
+        [
+            ("SMS", "+14440000000"),
+            ("RCS", "rcs:other_sender_id"),
+            ("WHATSAPP", "whatsapp:+14440000000"),
+        ],
+    )
+    async def test_handoff_digital_uses_session_agent_address(
+        self, monkeypatch: pytest.MonkeyPatch, channel: str, agent_address: str
+    ) -> None:
+        """Digital handoff sends From the sender the customer is talking to, not the default,
+        keeping the channel prefix (`rcs:` / `whatsapp:`) that Studio needs to match `To`."""
+        flow_sid = "FW" + "a" * 32
+        tac = TAC(
+            get_test_config(
+                studio_handoff_flow_sid=flow_sid,
+                phone_number="+15551234567",
+                api_key="SK_key",
+                api_secret="tok",
+            )
+        )
+        tac.conversation_orchestrator_client.update_conversation = AsyncMock()
+        tac.conversation_orchestrator_client.clear_status_callbacks = AsyncMock()
+
+        post_mock = AsyncMock()
+        monkeypatch.setattr(handoff_module, "post_studio_handoff", post_mock)
+
+        session = ConversationSession(conversation_id="conv_123", channel=channel)
+        session.ai_agent_info = AuthorInfo(address=agent_address, participant_id="p_agent")
+
+        tool = create_studio_handoff_tool(tac, session)
+        await tool(reason="Customer wants human")
+
+        _, call_kwargs = post_mock.call_args
+        assert call_kwargs["from_address"] == agent_address
+
+    @pytest.mark.asyncio
+    async def test_handoff_chat_uses_configured_phone_number_not_identity(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Chat's agent address is an identity (e.g. "ai-assistant"), not a Twilio
+        sender, so Chat keeps the configured default sender instead of the session's
+        Chat identity."""
+        flow_sid = "FW" + "a" * 32
+        tac = TAC(
+            get_test_config(
+                studio_handoff_flow_sid=flow_sid,
+                phone_number="+15551234567",
+                api_key="SK_key",
+                api_secret="tok",
+            )
+        )
+        tac.conversation_orchestrator_client.update_conversation = AsyncMock()
+        tac.conversation_orchestrator_client.clear_status_callbacks = AsyncMock()
+
+        post_mock = AsyncMock()
+        monkeypatch.setattr(handoff_module, "post_studio_handoff", post_mock)
+
+        session = ConversationSession(conversation_id="conv_123", channel="CHAT")
+        session.ai_agent_info = AuthorInfo(address="ai-assistant", participant_id="p_agent")
+
+        tool = create_studio_handoff_tool(tac, session)
+        await tool(reason="Customer wants human")
+
+        _, call_kwargs = post_mock.call_args
+        assert call_kwargs["from_address"] == "+15551234567"
+
     def test_factory_raises_without_flow_sid(self) -> None:
         """Factory rejects missing studio_handoff_flow_sid — it's misconfig, not a soft fallback."""
         tac = TAC(get_test_config(studio_handoff_flow_sid=None))

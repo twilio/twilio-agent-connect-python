@@ -39,6 +39,7 @@ class ChatChannel(MessagingChannel):
     # `author.participant_id`; promoting some other channel-matching UNKNOWN
     # CHAT participant could pick the wrong recipient.
     reconcile_customer_type = False
+    derive_inbound_agent_from_recipients = False
 
     def __init__(
         self,
@@ -101,7 +102,11 @@ class ChatChannel(MessagingChannel):
         """
         return await self._initiate_messaging_conversation(
             options=options,
-            from_address=self.agent_address,
+            from_address=self._resolve_outbound_from(
+                options.from_,
+                allowlist=[self.agent_address],
+                default=self.agent_address,
+            ),
             customer_address_kwargs={"channel_id": options.channel_id},
             agent_address_kwargs={"channel_id": options.channel_id},
             extra_metadata={"channel_id": options.channel_id},

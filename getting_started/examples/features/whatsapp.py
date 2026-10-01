@@ -4,7 +4,8 @@ Example: WhatsApp Channel with OpenAI Agents SDK
 Demonstrates WhatsApp channel with TAC memory injection.
 WhatsApp supports rich media and interactive messaging.
 
-Requires ``OPENAI_API_KEY`` and ``TWILIO_WHATSAPP_NUMBER`` in addition to standard TAC env vars.
+Requires ``OPENAI_API_KEY`` and ``TWILIO_WHATSAPP_NUMBER`` (or ``TWILIO_WHATSAPP_NUMBERS``) in
+addition to standard TAC env vars.
 
 Usage:
     python whatsapp.py

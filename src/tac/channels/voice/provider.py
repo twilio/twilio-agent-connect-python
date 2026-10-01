@@ -120,6 +120,17 @@ class VoiceProvider:
                 call_kwargs.setdefault(param, url)
         return call_kwargs
 
+    def _resolve_from_number(self, requested: str | None) -> str:
+        """Resolve the outbound caller ID for a voice call.
+
+        Validates `requested` against `config.phone_numbers`, defaulting to
+        `config.phone_number` — see `BaseChannel._resolve_outbound_from`.
+        """
+        cfg = self.channel.tac.config
+        return self.channel._resolve_outbound_from(
+            requested, allowlist=cfg.phone_numbers, default=cfg.phone_number
+        )
+
 
 class VoiceProviderConfig(BaseModel):
     """Base configuration for a ``VoiceChannel``'s real-time media provider."""
