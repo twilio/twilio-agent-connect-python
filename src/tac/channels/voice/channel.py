@@ -472,7 +472,7 @@ class VoiceChannel(BaseChannel):
         )
         return session
 
-    async def _handle_conversation_closed(self, conv_id: str, call_sid: str | None = None) -> None:
+    async def _handle_conversation_closed(self, conv_id: str) -> None:
         """Fire ``on_conversation_ended`` for a CLOSED webhook.
 
         The session is normally already released (the socket closed when the
@@ -484,7 +484,7 @@ class VoiceChannel(BaseChannel):
         if session is None:
             if not self.tac._has_conversation_ended_callback():
                 return
-            session = await self._rebuild_session(conv_id, call_sid)
+            session = await self._rebuild_session(conv_id)
             if session is None:
                 return
         await self._trigger_conversation_ended(session)
@@ -496,7 +496,9 @@ class VoiceChannel(BaseChannel):
 
         Carries identity only — conversation id, call_sid, profile, both
         participants. Live in-memory state (transcript, metadata) is gone by
-        now; use ``on_call_ended`` for that. Returns ``None`` if no
+        now; use ``on_call_ended`` for that. ``call_sid`` defaults to a VOICE
+        participant address's ``channelId`` — the customer's if present, else
+        the agent's, else any other participant's. Returns ``None`` if no
         participant is on the voice channel, which is how another channel's
         CLOSED is filtered out.
         """
@@ -528,6 +530,25 @@ class VoiceChannel(BaseChannel):
             ),
             None,
         )
+
+        if call_sid is None:
+            # CO's conversation webhooks carry no channel ids; the call a
+            # voice participant is on is recorded on its VOICE address.
+            # Prefer the customer's, then the agent's, then anyone else's.
+            ordered = [p for p in (customer, agent) if p is not None] + [
+                p for p in participants if p is not customer and p is not agent
+            ]
+            call_sid = next(
+                (
+                    a.channel_id
+                    for p in ordered
+                    for a in p.addresses
+                    if a.channel == CO_VOICE_CHANNEL and a.channel_id
+                ),
+                None,
+            )
+            if call_sid is None:
+                self.logger.debug("Rebuilt voice session has no call_sid", conversation_id=conv_id)
 
         session = ConversationSession(
             conversation_id=conv_id,
@@ -721,7 +742,7 @@ class VoiceChannel(BaseChannel):
                 # behind its calls; on_conversation_ended already fired at
                 # teardown and firing again here would double it.
                 return
-            await self._handle_conversation_closed(conv_id, event_data.get("channelId"))
+            await self._handle_conversation_closed(conv_id)
         elif status == "INACTIVE" and self.memory_mode == "once":
             session = self._conversations.get(conv_id)
             if session is None:

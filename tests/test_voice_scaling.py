@@ -43,15 +43,13 @@ def get_test_config(**overrides: Any) -> dict:
     return config
 
 
-def closed_webhook(conv_id: str, call_sid: str | None = None) -> dict:
-    data: dict[str, Any] = {
-        "id": conv_id,
-        "status": "CLOSED",
-        "configurationId": CONFIGURATION_ID,
+def closed_webhook(conv_id: str) -> dict:
+    """A CONVERSATION_UPDATED/CLOSED payload, as CO documents it: the
+    Conversation resource carries no channel or channelId."""
+    return {
+        "eventType": "CONVERSATION_UPDATED",
+        "data": {"id": conv_id, "status": "CLOSED", "configurationId": CONFIGURATION_ID},
     }
-    if call_sid is not None:
-        data["channelId"] = call_sid
-    return {"eventType": "CONVERSATION_UPDATED", "data": data}
 
 
 def collect(sink: list[ConversationSession]) -> Any:
@@ -63,8 +61,12 @@ def collect(sink: list[ConversationSession]) -> Any:
     return handler
 
 
-def voice_participants(conv_id: str) -> list[ParticipantResponse]:
-    """A realistic post-call participant set: customer + TAC's AI_AGENT."""
+def voice_participants(conv_id: str, call_sid: str | None = None) -> list[ParticipantResponse]:
+    """A realistic post-call participant set: customer + TAC's AI_AGENT.
+
+    ``call_sid`` lands on the VOICE addresses' ``channelId``, which is where
+    CO records the call a voice participant is on.
+    """
     return [
         ParticipantResponse(
             id="PA_customer",
@@ -73,7 +75,9 @@ def voice_participants(conv_id: str) -> list[ParticipantResponse]:
             name="Caller",
             type="CUSTOMER",
             profile_id="profile_caller",
-            addresses=[ParticipantAddress(channel="VOICE", address="+15559998888")],
+            addresses=[
+                ParticipantAddress(channel="VOICE", address="+15559998888", channel_id=call_sid)
+            ],
         ),
         ParticipantResponse(
             id="PA_agent",
@@ -81,7 +85,9 @@ def voice_participants(conv_id: str) -> list[ParticipantResponse]:
             account_id="ACtest123",
             name="TAC Agent",
             type="AI_AGENT",
-            addresses=[ParticipantAddress(channel="VOICE", address="+15551234567")],
+            addresses=[
+                ParticipantAddress(channel="VOICE", address="+15551234567", channel_id=call_sid)
+            ],
         ),
     ]
 
@@ -163,9 +169,9 @@ class TestStatelessConversationClosed:
 
         # CO's CLOSED webhook lands on B, which has never seen this call.
         tac_b.conversation_orchestrator_client.list_participants = AsyncMock(
-            return_value=voice_participants("conv_shared")
+            return_value=voice_participants("conv_shared", call_sid="CA_shared")
         )
-        await instance_b.process_webhook(closed_webhook("conv_shared", call_sid="CA_shared"))
+        await instance_b.process_webhook(closed_webhook("conv_shared"))
 
         assert len(ended) == 1
         rebuilt = ended[0]
@@ -260,6 +266,147 @@ class TestStatelessConversationClosed:
         await channel.process_webhook(closed_webhook("conv_5"))
 
         assert ended == []
+
+    @pytest.mark.asyncio
+    async def test_rebuilt_call_sid_is_none_without_a_voice_channel_id(self) -> None:
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+        ended: list[ConversationSession] = []
+        tac.on_conversation_ended(lambda s: ended.append(s))
+
+        tac.conversation_orchestrator_client.list_participants = AsyncMock(
+            return_value=voice_participants("conv_no_sid")
+        )
+        await channel.process_webhook(closed_webhook("conv_no_sid"))
+
+        assert len(ended) == 1
+        assert ended[0].call_sid is None
+
+    @pytest.mark.asyncio
+    async def test_prefers_the_customers_call_sid_over_the_agents(self) -> None:
+        """The customer's VOICE channelId wins even if the agent is listed first."""
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+        participants = [
+            ParticipantResponse(
+                id="PA_agent",
+                conversation_id="conv_both",
+                account_id="ACtest123",
+                name="TAC Agent",
+                type="AI_AGENT",
+                addresses=[
+                    ParticipantAddress(
+                        channel="VOICE", address="+15551234567", channel_id="CA_agent"
+                    )
+                ],
+            ),
+            ParticipantResponse(
+                id="PA_customer",
+                conversation_id="conv_both",
+                account_id="ACtest123",
+                name="Caller",
+                type="CUSTOMER",
+                profile_id="profile_caller",
+                addresses=[
+                    ParticipantAddress(
+                        channel="VOICE", address="+15559998888", channel_id="CA_customer"
+                    )
+                ],
+            ),
+        ]
+        tac.conversation_orchestrator_client.list_participants = AsyncMock(
+            return_value=participants
+        )
+
+        session = await channel._rebuild_session("conv_both")
+
+        assert session is not None
+        assert session.call_sid == "CA_customer"
+
+    @pytest.mark.asyncio
+    async def test_falls_back_to_the_agents_call_sid_when_the_customer_has_none(self) -> None:
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+        participants = [
+            ParticipantResponse(
+                id="PA_customer",
+                conversation_id="conv_agent_only",
+                account_id="ACtest123",
+                name="Caller",
+                type="CUSTOMER",
+                profile_id="profile_caller",
+                addresses=[ParticipantAddress(channel="VOICE", address="+15559998888")],
+            ),
+            ParticipantResponse(
+                id="PA_agent",
+                conversation_id="conv_agent_only",
+                account_id="ACtest123",
+                name="TAC Agent",
+                type="AI_AGENT",
+                addresses=[
+                    ParticipantAddress(
+                        channel="VOICE", address="+15551234567", channel_id="CA_agent"
+                    )
+                ],
+            ),
+        ]
+        tac.conversation_orchestrator_client.list_participants = AsyncMock(
+            return_value=participants
+        )
+
+        session = await channel._rebuild_session("conv_agent_only")
+
+        assert session is not None
+        assert session.call_sid == "CA_agent"
+
+    @pytest.mark.asyncio
+    async def test_explicit_call_sid_overrides_the_derived_one(self) -> None:
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+        tac.conversation_orchestrator_client.list_participants = AsyncMock(
+            return_value=voice_participants("conv_x", call_sid="CA_derived")
+        )
+
+        session = await channel._rebuild_session("conv_x", "CA_explicit")
+
+        assert session is not None
+        assert session.call_sid == "CA_explicit"
+
+    @pytest.mark.asyncio
+    async def test_empty_string_channel_id_yields_no_call_sid(self) -> None:
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+        participants = [
+            ParticipantResponse(
+                id="PA_customer",
+                conversation_id="conv_empty",
+                account_id="ACtest123",
+                name="Caller",
+                type="CUSTOMER",
+                profile_id="profile_caller",
+                addresses=[
+                    ParticipantAddress(channel="VOICE", address="+15559998888", channel_id="")
+                ],
+            ),
+            ParticipantResponse(
+                id="PA_agent",
+                conversation_id="conv_empty",
+                account_id="ACtest123",
+                name="TAC Agent",
+                type="AI_AGENT",
+                addresses=[
+                    ParticipantAddress(channel="VOICE", address="+15551234567", channel_id="")
+                ],
+            ),
+        ]
+        tac.conversation_orchestrator_client.list_participants = AsyncMock(
+            return_value=participants
+        )
+
+        session = await channel._rebuild_session("conv_empty")
+
+        assert session is not None
+        assert session.call_sid is None
 
     @pytest.mark.asyncio
     async def test_relay_only_closed_webhook_does_not_double_fire(self) -> None:
