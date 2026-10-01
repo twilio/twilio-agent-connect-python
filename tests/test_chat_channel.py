@@ -138,7 +138,7 @@ class TestChatChannel:
         channel = ChatChannel(tac, config=ChatChannelConfig(agent_address="my-bot"))
 
         with patch.object(channel, "_initiate_messaging_conversation", new=AsyncMock()):
-            with pytest.raises(ValueError, match="not a configured CHAT sender"):
+            with pytest.raises(ValueError, match="not a configured chat sender"):
                 await channel.initiate_outbound_conversation(
                     InitiateChatConversationOptions(
                         to="user@example.com", message="hi", channel_id="CH1", from_="other-bot"

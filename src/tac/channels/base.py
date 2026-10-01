@@ -126,6 +126,30 @@ class BaseChannel(ABC):
         """
         return self.get_channel_name().lower()
 
+    def _resolve_outbound_from(
+        self,
+        requested: str | None,
+        *,
+        allowlist: list[str],
+        default: str | None,
+    ) -> str:
+        """Resolve the outbound sender address for this channel.
+
+        `requested` (the caller's `options.from_`) wins when it is one of the
+        channel's configured senders; otherwise raises. When omitted, the
+        channel default is used.
+        """
+        if requested is not None:
+            if requested not in allowlist:
+                raise ValueError(
+                    f"from_ '{requested}' is not a configured {self._telemetry_channel} "
+                    f"sender; configured senders: {allowlist}"
+                )
+            return requested
+        if default is None:
+            raise RuntimeError(f"No default sender configured for {self._telemetry_channel}.")
+        return default
+
     def _is_duplicate_webhook(self, idempotency_token: str) -> bool:
         """Check if a webhook has already been processed using Twilio's idempotency token.
 

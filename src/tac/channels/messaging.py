@@ -110,16 +110,17 @@ class MessagingChannel(BaseChannel):
 
     @abstractmethod
     def is_default_agent_address(self, author_address: str) -> bool:
-        """Fast-path check: is the author address this channel's default agent address?
+        """Fast-path check: is the author address one of this channel's configured agent addresses?
 
-        For example, config.phone_number for SMS, config.rcs_sender_id for RCS,
-        config.whatsapp_number for WhatsApp, agent_address for Chat.
+        Checks the channel's full sender allowlist, not just the default sender:
+        `config.phone_numbers` for SMS, `config.rcs_sender_ids` for RCS,
+        `config.whatsapp_numbers` for WhatsApp, and `agent_address` for Chat.
 
         Args:
             author_address: The address of the message author
 
         Returns:
-            True if the address matches the channel's default agent address
+            True if the address matches one of the channel's configured agent addresses
         """
         pass
 
@@ -498,30 +499,6 @@ class MessagingChannel(BaseChannel):
                         "Invalidated cached memory on INACTIVE status",
                         conversation_id=conv_id,
                     )
-
-    def _resolve_outbound_from(
-        self,
-        requested: str | None,
-        *,
-        allowlist: list[str],
-        default: str | None,
-    ) -> str:
-        """Resolve the outbound sender address for this channel.
-
-        `requested` (the caller's `options.from_`) wins when it is one of the
-        channel's configured senders; otherwise raises. When omitted, the
-        channel default is used.
-        """
-        if requested is not None:
-            if requested not in allowlist:
-                raise ValueError(
-                    f"from_ '{requested}' is not a configured {self.get_channel_name()} "
-                    f"sender; configured senders: {allowlist}"
-                )
-            return requested
-        if default is None:
-            raise RuntimeError(f"No default sender configured for {self.get_channel_name()}.")
-        return default
 
     async def _initiate_messaging_conversation(
         self,

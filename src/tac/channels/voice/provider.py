@@ -123,21 +123,13 @@ class VoiceProvider:
     def _resolve_from_number(self, requested: str | None) -> str:
         """Resolve the outbound caller ID for a voice call.
 
-        `requested` (the caller's `options.from_`) wins when it is one of
-        `config.phone_numbers`; otherwise raises. When omitted, the default
-        `config.phone_number` is used.
+        Validates `requested` against `config.phone_numbers`, defaulting to
+        `config.phone_number` — see `BaseChannel._resolve_outbound_from`.
         """
         cfg = self.channel.tac.config
-        if requested is not None:
-            if requested not in cfg.phone_numbers:
-                raise ValueError(
-                    f"from_ '{requested}' is not a configured phone number; "
-                    f"configured: {cfg.phone_numbers}"
-                )
-            return requested
-        if cfg.phone_number is None:
-            raise RuntimeError("No phone_number configured for outbound voice calls.")
-        return cfg.phone_number
+        return self.channel._resolve_outbound_from(
+            requested, allowlist=cfg.phone_numbers, default=cfg.phone_number
+        )
 
 
 class VoiceProviderConfig(BaseModel):
