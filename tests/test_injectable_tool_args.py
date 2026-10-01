@@ -127,3 +127,73 @@ async def test_sync_tool_with_injection() -> None:
 
     result = await sync_tool(query="sync test")
     assert result == "Processed: sync test"
+
+
+@pytest.mark.asyncio
+async def test_caller_arguments_cannot_override_injected_values() -> None:
+    """Caller arguments named after an injected parameter must not take effect."""
+
+    @function_tool()
+    async def my_tool(
+        user_input: str,
+        tenant_id: Annotated[str, InjectedToolArg],
+    ) -> str:
+        """A tool scoped to a tenant.
+
+        Args:
+            user_input: The user's input query
+        """
+        return f"{tenant_id}:{user_input}"
+
+    my_tool.configure_injection(tenant_id="tenant_configured_by_application")
+
+    result = await my_tool(user_input="q", tenant_id="tenant_supplied_by_caller")
+
+    assert result == "tenant_configured_by_application:q"
+
+
+@pytest.mark.asyncio
+async def test_openai_agents_adapter_cannot_override_injected_values() -> None:
+    """The same guarantee must hold for arguments decoded from model tool calls."""
+    pytest.importorskip("agents")
+
+    @function_tool()
+    async def my_tool(
+        user_input: str,
+        tenant_id: Annotated[str, InjectedToolArg],
+    ) -> str:
+        """A tool scoped to a tenant.
+
+        Args:
+            user_input: The user's input query
+        """
+        return f"{tenant_id}:{user_input}"
+
+    my_tool.configure_injection(tenant_id="tenant_configured_by_application")
+    sdk_tool = my_tool.to_openai_agents_sdk_tool()
+
+    result = await sdk_tool.on_invoke_tool(
+        None,  # type: ignore[arg-type]
+        '{"user_input": "q", "tenant_id": "tenant_supplied_by_model"}',
+    )
+
+    assert "tenant_configured_by_application:q" in str(result)
+    assert "tenant_supplied_by_model" not in str(result)
+
+
+def test_injected_parameters_stay_out_of_the_schema() -> None:
+    """The dropped names are exactly the ones never advertised to the model."""
+
+    @function_tool()
+    async def my_tool(
+        user_input: str,
+        tenant_id: Annotated[str, InjectedToolArg],
+    ) -> str:
+        """A tool scoped to a tenant.
+
+        Args:
+            user_input: The user's input query
+        """
+        return f"{tenant_id}:{user_input}"
+
+    assert "tenant_id" not in my_tool.params_json_schema["properties"]
