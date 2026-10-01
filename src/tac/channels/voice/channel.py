@@ -479,14 +479,39 @@ class VoiceChannel(BaseChannel):
         caller hung up), so the usual path is a rebuild from Conversation
         Orchestrator — which is also what lets the hook fire on whichever
         instance received the webhook.
+
+        If this instance still holds the session, the call is live: CO closed
+        the conversation mid-call (a closed timeout during a long hold, or the
+        app closing it). The hook fires now, from a snapshot, and the session
+        stays for the call's own teardown to release — which is what keeps
+        ``on_call_ended`` firing and the rest of the call working. The call
+        then carries on under the closed conversation's id; CO starts a new
+        conversation for its later traffic, whose own CLOSED arrives here
+        later and takes the rebuild path.
+
+        The hook is at-least-once: a duplicate CLOSED delivery that isn't
+        deduped by its idempotency token fires it again, same as
+        `on_message_ready`.
         """
-        session = self._conversations.pop(conv_id, None)
+        live = self._conversations.get(conv_id)
+        if live is not None:
+            self.logger.warning(
+                "Conversation closed while its call is still live; the call continues "
+                "under the closed conversation's id",
+                conversation_id=conv_id,
+                call_sid=live.call_sid,
+            )
+            # Top-level copy of metadata so later writes by the live call don't
+            # show through the snapshot the callback holds.
+            snapshot = live.model_copy(update={"metadata": dict(live.metadata)})
+            await self._trigger_conversation_ended(snapshot)
+            return
+
+        if not self.tac._has_conversation_ended_callback():
+            return
+        session = await self._rebuild_session(conv_id)
         if session is None:
-            if not self.tac._has_conversation_ended_callback():
-                return
-            session = await self._rebuild_session(conv_id)
-            if session is None:
-                return
+            return
         await self._trigger_conversation_ended(session)
 
     async def _rebuild_session(
@@ -699,7 +724,14 @@ class VoiceChannel(BaseChannel):
           normally already released (the WebSocket closed when the caller hung
           up), so this rebuilds it from Conversation Orchestrator — which is
           also what makes the hook fire on whichever instance received the
-          webhook rather than only on the one that held the call.
+          webhook rather than only on the one that held the call. If this
+          instance still holds the call's session (the call is live), the hook
+          fires now instead, with a snapshot of that live session, and the
+          session stays until the call's own teardown — which still fires
+          ``on_call_ended``. A single call can then produce a second
+          ``on_conversation_ended``, under a different conversation id, when
+          Conversation Orchestrator later closes the conversation it started
+          for the call's remaining traffic.
         - **INACTIVE**: invalidate cached memory, if this instance holds the
           session. A call is pinned to one instance for its lifetime, so an
           INACTIVE landing elsewhere has no cache to clear and is ignored.

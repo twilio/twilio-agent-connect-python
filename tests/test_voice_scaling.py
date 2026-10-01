@@ -425,6 +425,104 @@ class TestStatelessConversationClosed:
         assert len(ended) == 1
 
 
+class TestClosedDuringLiveCall:
+    """CO can close a conversation while its call is still live (a closed
+    timeout during a long hold, or the app closing it). The call keeps
+    running, so the session must survive until teardown (G1)."""
+
+    @pytest.mark.asyncio
+    async def test_fires_conversation_ended_now_and_keeps_the_session(self) -> None:
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+        call_ended: list[ConversationSession] = []
+        conversation_ended: list[ConversationSession] = []
+        channel.on_call_ended(collect(call_ended))
+        tac.on_conversation_ended(lambda s: conversation_ended.append(s))
+        tac.conversation_orchestrator_client.list_participants = AsyncMock()
+
+        live = channel._start_conversation("conv_live", "profile_caller")
+        live.call_sid = "CA_live"
+        await channel.process_webhook(closed_webhook("conv_live"))
+
+        assert [s.conversation_id for s in conversation_ended] == ["conv_live"]
+        assert conversation_ended[0].call_sid == "CA_live"
+        assert channel._conversations["conv_live"] is live
+        assert call_ended == []
+        # The live session is used as-is; no rebuild from CO.
+        tac.conversation_orchestrator_client.list_participants.assert_not_awaited()
+
+        await channel._provider._cleanup_connection("conv_live")
+
+        assert [s.conversation_id for s in call_ended] == ["conv_live"]
+        assert len(conversation_ended) == 1
+        assert_no_residual_state(channel, "conv_live")
+
+    @pytest.mark.asyncio
+    async def test_callback_gets_a_snapshot_of_the_live_session(self) -> None:
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+        conversation_ended: list[ConversationSession] = []
+        tac.on_conversation_ended(lambda s: conversation_ended.append(s))
+
+        live = channel._start_conversation("conv_snap", None)
+        live.metadata["transcript"] = ["hello"]
+        await channel.process_webhook(closed_webhook("conv_snap"))
+        live.metadata["late_key"] = "written after CLOSED"
+
+        snapshot = conversation_ended[0]
+        assert snapshot is not live
+        assert snapshot.metadata == {"transcript": ["hello"]}
+
+    @pytest.mark.asyncio
+    async def test_end_call_after_the_live_close_still_fires_call_ended_once(self) -> None:
+        """Hanging up after a mid-call CLOSED still releases the session
+        normally: on_call_ended fires once, and on_conversation_ended isn't
+        fired again (it already fired from the live CLOSED path)."""
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+        call_ended: list[ConversationSession] = []
+        conversation_ended: list[ConversationSession] = []
+        channel.on_call_ended(collect(call_ended))
+        tac.on_conversation_ended(lambda s: conversation_ended.append(s))
+
+        live = channel._start_conversation("conv_end_live", "profile_caller")
+        live.call_sid = "CA_end_live"
+        await channel.process_webhook(closed_webhook("conv_end_live"))
+        assert len(conversation_ended) == 1
+
+        with patch.object(channel, "_get_twilio_client", return_value=MagicMock()):
+            await channel.end_call("CA_end_live")
+
+        assert [s.conversation_id for s in call_ended] == ["conv_end_live"]
+        assert len(conversation_ended) == 1
+        assert_no_residual_state(channel, "conv_end_live")
+
+    @pytest.mark.asyncio
+    async def test_a_raising_callback_leaves_the_session_for_teardown(self) -> None:
+        """A developer's on_conversation_ended raising on the live path must
+        not prevent the session from staying for the call's own teardown."""
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+        call_ended: list[ConversationSession] = []
+        channel.on_call_ended(collect(call_ended))
+
+        async def boom(session: ConversationSession) -> None:
+            raise RuntimeError("handler exploded")
+
+        tac.on_conversation_ended(boom)
+
+        live = channel._start_conversation("conv_raise", None)
+        live.call_sid = "CA_raise"
+        await channel.process_webhook(closed_webhook("conv_raise"))
+
+        assert channel._conversations["conv_raise"] is live
+
+        await channel._provider._cleanup_connection("conv_raise")
+
+        assert [s.conversation_id for s in call_ended] == ["conv_raise"]
+        assert_no_residual_state(channel, "conv_raise")
+
+
 class TestTeardownInvariant:
     """No failure mode may leave residue behind (§3.2)."""
 

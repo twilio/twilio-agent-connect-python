@@ -429,7 +429,9 @@ class TestVoiceChannel:
 
     @pytest.mark.asyncio
     async def test_process_webhook_conversation_closed(self) -> None:
-        """Test that process_webhook cleans up on CONVERSATION_UPDATED with CLOSED status."""
+        """CLOSED while the call is still live keeps the session for the call's
+        own teardown to release (G1); see TestClosedDuringLiveCall for the
+        on_conversation_ended behavior this triggers."""
         tac = TAC(get_test_config())
         channel = VoiceChannel(tac)
 
@@ -448,8 +450,8 @@ class TestVoiceChannel:
         }
         await channel.process_webhook(webhook_data)
 
-        # Should clean up the conversation
-        assert "CONV123" not in channel._conversations
+        # The call is still live, so the session stays for teardown to release.
+        assert "CONV123" in channel._conversations
 
     @pytest.mark.asyncio
     async def test_process_webhook_conversation_inactive(self) -> None:
@@ -1126,7 +1128,11 @@ class TestVoiceChannel:
 
     @pytest.mark.asyncio
     async def test_webhook_triggers_conversation_ended_callback(self) -> None:
-        """Webhook with CLOSED status triggers on_conversation_ended callback."""
+        """Webhook with CLOSED status triggers on_conversation_ended callback.
+
+        The call is still live here, so the session itself stays until the
+        call's own teardown releases it (G1); see TestClosedDuringLiveCall.
+        """
         tac = TAC(get_test_config())
         channel = VoiceChannel(tac)
         captured: list[ConversationSession] = []
@@ -1153,8 +1159,8 @@ class TestVoiceChannel:
         assert len(captured) == 1
         assert captured[0].conversation_id == "CALL_ASYNC1"
         assert captured[0].channel == "VOICE"
-        # Conversation should be removed
-        assert "CALL_ASYNC1" not in channel._conversations
+        # The call is still live, so the session stays for teardown to release.
+        assert "CALL_ASYNC1" in channel._conversations
 
     @pytest.mark.asyncio
     async def test_cleanup_connection_idempotent(self) -> None:
