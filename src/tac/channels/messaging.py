@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 from tac import TAC
 from tac.channels.base import AGENT_TYPES, BaseChannel
 from tac.context.conversation import ConversationClient
-from tac.core.analytics import track_event
+from tac.core.analytics import analytics_enabled, track_event
 from tac.core.logging import get_logger
 from tac.models.conversation import (
     ActionChannelSettings,
@@ -29,6 +29,7 @@ from tac.models.memory import MemoryMode
 from tac.models.outbound import InitiateConversationResult, InitiateMessagingConversationOptions
 from tac.models.session import AuthorInfo, ConversationSession
 from tac.utils.redaction import mask_address
+from tac.utils.timestamps import elapsed_ms
 
 logger = get_logger(__name__)
 
@@ -148,6 +149,9 @@ class MessagingChannel(BaseChannel):
             True if the address matches one of the channel's configured agent addresses
         """
         pass
+
+    def _is_own_co_address(self, address: str) -> bool:
+        return self.is_default_agent_address(address)
 
     def _is_own_message(
         self,
@@ -411,8 +415,9 @@ class MessagingChannel(BaseChannel):
         Handles:
 
         - COMMUNICATION_CREATED: Process incoming messages from customers
-        - CONVERSATION_UPDATED: Fire `on_conversation_ended` when the
-          conversation closes
+        - CONVERSATION_UPDATED: Fire `on_conversation_ended` and report
+          "Conversation Ended" when the conversation closes
+        - PARTICIPANT_ADDED: Report "Conversation Started" when the customer joins on this channel
 
         Any replica can handle any webhook. The idempotency cache is
         per-process, though, so a Twilio retry landing on a different replica
@@ -444,6 +449,8 @@ class MessagingChannel(BaseChannel):
             await self._handle_communication_created(event_data)
         elif event_type == "CONVERSATION_UPDATED":
             await self._handle_conversation_updated(event_data)
+        elif event_type == "PARTICIPANT_ADDED":
+            self._track_conversation_started(event_data)
 
     def _resolve_session(
         self,
@@ -625,11 +632,12 @@ class MessagingChannel(BaseChannel):
     async def _handle_conversation_updated(self, event_data: Any) -> None:
         """Handle CONVERSATION_UPDATED event.
 
-        Only CLOSED is acted on, and only when an `on_conversation_ended`
-        handler is registered, so the common case costs nothing. The rebuild
-        also confirms the conversation belongs to this channel (a CHAT close
-        must not fire on SMS), and is what lets the hook fire on whichever
-        replica Twilio picked.
+        Only CLOSED is acted on: it fires `on_conversation_ended` and reports
+        "Conversation Ended". With neither a handler registered nor analytics
+        on, it costs nothing. Otherwise one participant lookup — shared with
+        the other channels handling the same webhook — confirms the
+        conversation is on this channel (a CHAT close must not fire on SMS)
+        and lets this work on whichever replica Twilio picked.
         """
         conversation_data = ConversationResponse.model_validate(event_data)
         conv_id = conversation_data.id
@@ -638,16 +646,29 @@ class MessagingChannel(BaseChannel):
             return
         if conversation_data.status != "CLOSED":
             return
-        if not self.tac._has_conversation_ended_callback():
+        notify = self.tac._has_conversation_ended_callback()
+        report = analytics_enabled()
+        if not (notify or report):
             return
 
-        participants = await self._list_participants(conv_id)
-        if participants is None:
+        try:
+            participants = await self.tac._list_participants_shared(conv_id)
+        except Exception as e:
+            self.logger.error(
+                "Failed to list participants for a closed conversation",
+                conversation_id=conv_id,
+                error=str(e),
+            )
             return
         session = self._session_from_participants(conv_id, participants)
         if session is None:
             return
-        await self._trigger_conversation_ended(session)
+        if report:
+            self._track_conversation_ended(
+                conv_id, elapsed_ms(conversation_data.created_at, conversation_data.updated_at)
+            )
+        if notify:
+            await self._trigger_conversation_ended(session)
 
     async def _initiate_messaging_conversation(
         self,

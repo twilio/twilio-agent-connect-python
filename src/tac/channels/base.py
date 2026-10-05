@@ -6,7 +6,10 @@ from collections import OrderedDict
 from collections.abc import AsyncGenerator
 from typing import Any
 
+from pydantic import ValidationError
+
 from tac import TAC
+from tac.core.analytics import track_event
 from tac.core.logging import get_logger
 from tac.models.conversation import ParticipantResponse
 from tac.models.memory import MemoryMode
@@ -148,6 +151,61 @@ class BaseChannel(ABC):
         if default is None:
             raise RuntimeError(f"No default sender configured for {self._telemetry_channel}.")
         return default
+
+    @property
+    def _co_channel(self) -> str:
+        """This channel's type as Conversation Orchestrator writes it on
+        participant addresses (``"SMS"``, ``"WHATSAPP"``, ``"VOICE"``, …)."""
+        return self.get_channel_name()
+
+    def _is_own_co_address(self, address: str) -> bool:
+        """Whether ``address`` is TAC's own address on this channel.
+
+        Channels override this; the default claims no address.
+        """
+        return False
+
+    def _track_conversation_started(self, event_data: dict[str, Any]) -> None:
+        """Report "Conversation Started" from a CO ``PARTICIPANT_ADDED`` event.
+
+        Counts the customer joining on this channel: a ``CUSTOMER``, or an
+        ``UNKNOWN`` participant that isn't TAC's own address (capture can add
+        the customer untyped). Each channel reports only its own channel type,
+        so a webhook handed to every channel counts once per channel.
+        """
+        try:
+            participant = ParticipantResponse.model_validate(event_data)
+        except ValidationError as e:
+            self.logger.debug("Skipping unparseable PARTICIPANT_ADDED payload", error=str(e))
+            return
+        if participant.type not in ("CUSTOMER", "UNKNOWN"):
+            return
+        addresses = [a.address for a in participant.addresses if a.channel == self._co_channel]
+        if not addresses:
+            return
+        if participant.type == "UNKNOWN" and any(self._is_own_co_address(a) for a in addresses):
+            return
+        track_event(
+            "Conversation Started",
+            self.tac.config.account_sid,
+            channel=self._telemetry_channel,
+            conversation_id=participant.conversation_id,
+            has_profile_id=participant.profile_id is not None,
+        )
+
+    def _track_conversation_ended(self, conversation_id: str, duration_ms: int | None) -> None:
+        """Report "Conversation Ended" for a conversation CO closed.
+
+        ``duration_ms`` is CO's ``updatedAt − createdAt``; ``None`` leaves it
+        out rather than guessing.
+        """
+        track_event(
+            "Conversation Ended",
+            self.tac.config.account_sid,
+            channel=self._telemetry_channel,
+            conversation_id=conversation_id,
+            duration_ms=duration_ms,
+        )
 
     def _is_duplicate_webhook(self, idempotency_token: str) -> bool:
         """Check if a webhook has already been processed using Twilio's idempotency token.

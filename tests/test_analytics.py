@@ -24,6 +24,7 @@ from tac.channels.websocket_protocol import WebSocketDisconnectError
 from tac.channels.whatsapp import WhatsAppChannel
 from tac.core import analytics
 from tac.core.analytics import _reset_analytics, shutdown_analytics, track_event
+from tac.models.conversation import ParticipantAddress, ParticipantResponse
 from tac.models.handoff import PendingHandoffData
 from tac.models.session import AuthorInfo, ConversationSession
 
@@ -253,6 +254,59 @@ def assert_contract(client: MagicMock) -> None:
         assert properties["account_sid"] == call["anonymous_id"]
 
 
+CONFIGURATION_ID = "conv_configuration_test123"
+
+
+def participant_added(
+    conv_id: str, ptype: str, channel: str, address: str, profile_id: str | None = None
+) -> dict[str, Any]:
+    """A CO PARTICIPANT_ADDED webhook, shaped like CO's documented example."""
+    return {
+        "eventType": "PARTICIPANT_ADDED",
+        "data": {
+            "id": f"PA_{ptype}_{channel}",
+            "conversationId": conv_id,
+            "accountId": "ACtest123",
+            "name": address,
+            "type": ptype,
+            "profileId": profile_id,
+            "addresses": [{"channel": channel, "address": address, "channelId": None}],
+        },
+    }
+
+
+def conversation_closed(
+    conv_id: str,
+    created_at: str | None = "2026-09-30T10:00:00Z",
+    updated_at: str | None = "2026-09-30T10:05:00Z",
+) -> dict[str, Any]:
+    """A CO CONVERSATION_UPDATED/CLOSED webhook (no channel info, as documented)."""
+    data: dict[str, Any] = {
+        "id": conv_id,
+        "accountId": "ACtest123",
+        "configurationId": CONFIGURATION_ID,
+        "status": "CLOSED",
+    }
+    if created_at is not None:
+        data["createdAt"] = created_at
+    if updated_at is not None:
+        data["updatedAt"] = updated_at
+    return {"eventType": "CONVERSATION_UPDATED", "data": data}
+
+
+def co_participant(
+    ptype: str, channel: str, address: str, conv_id: str = "conv-1"
+) -> ParticipantResponse:
+    return ParticipantResponse(
+        id=f"PA_{ptype}_{channel}",
+        conversation_id=conv_id,
+        account_id="ACtest123",
+        name=address,
+        type=ptype,
+        addresses=[ParticipantAddress(channel=channel, address=address)],
+    )
+
+
 class TestMessagingCallSites:
     @pytest.fixture
     def tac(self) -> TAC:
@@ -318,6 +372,148 @@ class TestMessagingCallSites:
         await channel.send_response(self.session("SMS"), "hello")
 
         assert not [c for c in tracked(mock_client) if c["event"] == "Response Sent"]
+
+
+class TestMessagingLifecycleFromCO:
+    """Started/Ended come from CO webhooks, each channel reporting its own
+    channel type, so any replica can report them exactly once per channel."""
+
+    @pytest.fixture
+    def tac(self) -> TAC:
+        return TAC(get_test_config())
+
+    @pytest.mark.asyncio
+    async def test_customer_added_reports_started(self, mock_client: MagicMock, tac: TAC) -> None:
+        channel = SMSChannel(tac)
+
+        await channel.process_webhook(
+            participant_added("conv-1", "CUSTOMER", "SMS", "+15551112222", "mem_profile_1")
+        )
+
+        properties = only(mock_client, "Conversation Started")["properties"]
+        assert properties["channel"] == "sms"
+        assert properties["conversation_id"] == "conv-1"
+        assert properties["has_profile_id"] is True
+        assert_contract(mock_client)
+
+    @pytest.mark.asyncio
+    async def test_untyped_customer_added_reports_started(
+        self, mock_client: MagicMock, tac: TAC
+    ) -> None:
+        """Capture can add the customer as UNKNOWN before reconciliation."""
+        channel = SMSChannel(tac)
+
+        await channel.process_webhook(participant_added("conv-1", "UNKNOWN", "SMS", "+15551112222"))
+
+        assert only(mock_client, "Conversation Started")["properties"]["has_profile_id"] is False
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("ptype", "address"),
+        [("UNKNOWN", "+15551234567"), ("AI_AGENT", "+15551234567"), ("HUMAN_AGENT", "+1555")],
+    )
+    async def test_non_customer_participants_are_not_a_start(
+        self, mock_client: MagicMock, tac: TAC, ptype: str, address: str
+    ) -> None:
+        """+15551234567 is TAC's own number (phone_number in the test config)."""
+        channel = SMSChannel(tac)
+
+        await channel.process_webhook(participant_added("conv-1", ptype, "SMS", address))
+
+        assert not [c for c in tracked(mock_client) if c["event"] == "Conversation Started"]
+
+    @pytest.mark.asyncio
+    async def test_another_channels_participant_is_ignored(
+        self, mock_client: MagicMock, tac: TAC
+    ) -> None:
+        channel = SMSChannel(tac)
+
+        await channel.process_webhook(
+            participant_added("conv-1", "CUSTOMER", "WHATSAPP", "+15551112222")
+        )
+
+        assert not tracked(mock_client)
+
+    @pytest.mark.asyncio
+    async def test_closed_reports_ended_with_co_duration(
+        self, mock_client: MagicMock, tac: TAC
+    ) -> None:
+        channel = SMSChannel(tac)
+        lookup = AsyncMock(
+            return_value=[
+                co_participant("CUSTOMER", "SMS", "+15551112222"),
+                co_participant("AI_AGENT", "SMS", "+15551234567"),
+            ]
+        )
+        tac.conversation_orchestrator_client.list_participants = lookup
+
+        await channel.process_webhook(conversation_closed("conv-1"))
+
+        properties = only(mock_client, "Conversation Ended")["properties"]
+        assert properties["channel"] == "sms"
+        assert properties["conversation_id"] == "conv-1"
+        assert properties["duration_ms"] == 300_000
+        lookup.assert_awaited_once_with("conv-1")
+        assert_contract(mock_client)
+
+    @pytest.mark.asyncio
+    async def test_closed_for_another_channel_is_not_reported(
+        self, mock_client: MagicMock, tac: TAC
+    ) -> None:
+        channel = SMSChannel(tac)
+        tac.conversation_orchestrator_client.list_participants = AsyncMock(
+            return_value=[co_participant("CUSTOMER", "CHAT", "user@example.com")]
+        )
+
+        await channel.process_webhook(conversation_closed("conv-1"))
+
+        assert not tracked(mock_client)
+
+    @pytest.mark.asyncio
+    async def test_one_closed_webhook_across_channels_costs_one_lookup(
+        self, mock_client: MagicMock, tac: TAC
+    ) -> None:
+        """Each channel reports its own channel; the lookup is shared."""
+        sms = SMSChannel(tac)
+        whatsapp = WhatsAppChannel(tac)
+        lookup = AsyncMock(
+            return_value=[
+                co_participant("CUSTOMER", "SMS", "+15551112222"),
+                co_participant("CUSTOMER", "WHATSAPP", "+15551112222"),
+            ]
+        )
+        tac.conversation_orchestrator_client.list_participants = lookup
+        webhook = conversation_closed("conv-1")
+
+        await asyncio.gather(sms.process_webhook(webhook), whatsapp.process_webhook(webhook))
+
+        ended = [c for c in tracked(mock_client) if c["event"] == "Conversation Ended"]
+        assert sorted(c["properties"]["channel"] for c in ended) == ["sms", "whatsapp"]
+        lookup.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_unparseable_timestamps_leave_duration_out(
+        self, mock_client: MagicMock, tac: TAC
+    ) -> None:
+        channel = SMSChannel(tac)
+        tac.conversation_orchestrator_client.list_participants = AsyncMock(
+            return_value=[co_participant("CUSTOMER", "SMS", "+15551112222")]
+        )
+
+        await channel.process_webhook(conversation_closed("conv-1", created_at=None))
+
+        assert "duration_ms" not in only(mock_client, "Conversation Ended")["properties"]
+
+    @pytest.mark.asyncio
+    async def test_closed_with_analytics_off_and_no_callback_costs_nothing(self, tac: TAC) -> None:
+        """No mock_client fixture: conftest disables analytics."""
+        channel = SMSChannel(tac)
+        lookup = AsyncMock(return_value=[])
+        tac.conversation_orchestrator_client.list_participants = lookup
+
+        await channel.process_webhook(conversation_closed("conv-1"))
+
+        lookup.assert_not_awaited()
 
 
 class TestVoiceSessionLifecycle:
