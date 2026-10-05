@@ -25,6 +25,7 @@ from tac.models.voice import (
     TwiMLRequest,
     VoiceTwiMLOptions,
 )
+from tac.utils.timestamps import parse_iso8601
 
 from .conversation_relay import ConversationRelayProviderConfig
 from .provider import VoiceProviderConfig
@@ -50,16 +51,7 @@ def _created_at_key(conversation: ConversationResponse) -> datetime:
     sorts first (``datetime.min``), so a conversation with good data always
     wins over one without.
     """
-    value = conversation.created_at
-    if value is None:
-        return datetime.min.replace(tzinfo=timezone.utc)
-    try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        return datetime.min.replace(tzinfo=timezone.utc)
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed
+    return parse_iso8601(conversation.created_at) or datetime.min.replace(tzinfo=timezone.utc)
 
 
 class VoiceChannel(BaseChannel):
