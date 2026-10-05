@@ -182,6 +182,12 @@ class TestTrackEvent:
             _reset_analytics()
             os.environ["TAC_ANALYTICS_DISABLED"] = "true"
 
+    def test_analytics_enabled_follows_the_env_var(self, mock_client: MagicMock) -> None:
+        assert analytics.analytics_enabled() is True
+        analytics._reset_analytics()
+        os.environ["TAC_ANALYTICS_DISABLED"] = "true"
+        assert analytics.analytics_enabled() is False
+
 
 class TestShutdown:
     def test_flushes_the_client(self, mock_client: MagicMock) -> None:
