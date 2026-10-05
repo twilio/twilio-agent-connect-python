@@ -156,6 +156,30 @@ class MediaStreamsOpenAIProvider(VoiceProvider, Generic[TCallState]):
         call_kwargs = call_options.to_call_kwargs() if call_options else {}
         return self._apply_call_event_callbacks(call_kwargs)
 
+    def _claim_session_config(self, token: str | None, conv_id: str) -> None:
+        """Move the session config stashed under ``token`` to this call's id.
+
+        A token this instance doesn't hold means the config was stashed on
+        another instance — the TwiML webhook or ``initiate_outbound_conversation``
+        ran somewhere other than where the stream connected — or it expired.
+        The call then falls back to ``default_session_config``, so this warns:
+        with multiple instances, per-call session configs need
+        ``TACConfig.instance_public_domain``.
+        """
+        if token is None:
+            return
+        session_config = self._call_session_configs.pop(token, None)
+        if session_config is None:
+            self.logger.warning(
+                "Per-call session_config not found on this instance; using "
+                "default_session_config. With multiple instances, set "
+                "TACConfig.instance_public_domain so the stream connects to the "
+                "instance that stashed it.",
+                conversation_id=conv_id,
+            )
+            return
+        self._call_session_configs[conv_id] = session_config
+
     async def _handle_model_events(self, conv_id: str) -> None:
         """Read model events until the socket closes, dispatching each one.
 

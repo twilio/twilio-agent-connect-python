@@ -129,14 +129,45 @@ TACConfig(
 The WebSocket URL, the action URL, and every call-event callback then point at
 this process, so a call's webhooks come back to the replica holding it.
 
-This needs per-pod addressability — on Kubernetes, a headless Service plus
-`POD_IP`/`POD_NAME`. Without it, leave the setting unset (the load balancer
-domain remains the default) and either route by `CallSid` at the balancer or
-look the call up with `VoiceChannel.resolve_conversation_session_by_call_sid`.
-For a ConversationRelay call in orchestrated mode it falls back to
-Conversation Orchestrator and returns an identity-only session — enough to
-correlate an event with its conversation and customer, though not to reply on
-the call, whose WebSocket is on another replica.
+This needs each replica to be reachable **from Twilio, over the public
+internet**, at its own hostname with a valid TLS certificate (streams are
+`wss://`). On Kubernetes that means per-pod Ingress hostnames with a wildcard
+certificate. A headless Service isn't enough, because its DNS only resolves
+inside the cluster. Many managed platforms can't give instances their own
+public address at all, for example Cloud Run, App Runner, Azure Container
+Apps, Heroku, or ECS behind an ALB.
+
+Without it, leave the setting unset (the load balancer domain remains the
+default) and either route by `CallSid` at the balancer or look the call up
+with `VoiceChannel.resolve_conversation_session_by_call_sid`. For a
+ConversationRelay call in orchestrated mode it falls back to Conversation
+Orchestrator and returns an identity-only session — enough to correlate an
+event with its conversation and customer, though not to reply on the call,
+whose WebSocket is on another replica.
+
+### What needs instance affinity
+
+Everything TAC itself needs works without `instance_public_domain`: lifecycle
+callbacks, analytics, and CallSid lookups. A few things do need the request to
+reach the replica holding the call:
+
+- **Per-call Media Streams session configs.** This is **required** when you
+  run OpenAI Realtime or GPT-Live on more than one replica and use
+  `on_inbound_call_session_config` or a per-call `session_config` on
+  `initiate_outbound_conversation`. The config is computed on the replica that
+  serves the TwiML webhook or places the call, and kept there in memory; only
+  a token travels with the call. If the stream connects to another replica,
+  the call runs with `default_session_config` (or fails if none is set), and
+  TAC logs a warning naming `instance_public_domain`. With only
+  `default_session_config`, nothing here needs affinity.
+- **Acting on a live call from outside it.** Speaking with `send_response`,
+  or reading the live transcript, only works on the replica holding the call.
+  Do it from the call's own callbacks (`on_message_ready`, tools), which always
+  run there. Or set `instance_public_domain` so call events (status, AMD,
+  recording) land there too.
+- **`memory_mode="once"` refresh during a call.** An INACTIVE webhook that
+  reaches another replica doesn't refresh a live call's cached memory, so the
+  call keeps the memory it fetched at the start.
 
 ### Draining on shutdown
 

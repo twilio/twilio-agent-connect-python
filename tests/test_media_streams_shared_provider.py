@@ -8,14 +8,19 @@ test_openai_realtime_provider.py's ``TestCallEventCallbackWiring`` docstring
 for the same reasoning applied to call-event wiring.
 """
 
+from typing import Any
+from unittest.mock import MagicMock, patch
+
 import pytest
 
 from tac import TAC
 from tac.channels.voice import VoiceChannel
+from tac.channels.voice.media_streams.gpt_live import GPTLiveProviderConfig
 from tac.channels.voice.media_streams.openai_realtime import OpenAIRealtimeProviderConfig
 from tac.channels.voice.media_streams.openai_realtime.provider import (
     TWILIO_AUDIO_FORMAT_FOR_REALTIME,
 )
+from tac.channels.voice.media_streams.shared.openai_provider import SESSION_CONFIG_TOKEN_PARAM
 from tac.models.voice import (
     TwiMLRequest,
     VoiceTwiMLOptionsConversationRelay,
@@ -109,3 +114,55 @@ class TestHandleIncomingCallTypeChecks:
 
         with pytest.raises(TypeError, match="on_inbound_call_twiml customizer"):
             await provider.handle_incoming_call(twiml_request=TwiMLRequest(call_sid="CA1"))
+
+
+def make_media_streams_provider(kind: str) -> Any:
+    tac = TAC(get_test_tac_config())
+    config: Any
+    if kind == "gpt_live":
+        config = GPTLiveProviderConfig(
+            openai_api_key="sk-test", default_session_config={"model": "gpt-live-1"}
+        )
+    else:
+        config = OpenAIRealtimeProviderConfig(openai_api_key="sk-test")
+    return VoiceChannel(tac, config=config)._provider
+
+
+def stream_start(token: str | None) -> dict[str, Any]:
+    params = {} if token is None else {SESSION_CONFIG_TOKEN_PARAM: token}
+    return {"callSid": "CA1", "streamSid": "MZ1", "customParameters": params}
+
+
+@pytest.mark.parametrize("kind", ["openai_realtime", "gpt_live"])
+class TestSessionConfigClaim:
+    """A per-call session config is stashed on the instance that served the
+    TwiML webhook or placed the call; the stream must claim it there."""
+
+    def test_claims_a_config_stashed_on_this_instance(self, kind: str) -> None:
+        provider = make_media_streams_provider(kind)
+        provider._call_session_configs["t1"] = {"model": "per-call"}
+
+        with patch.object(provider.logger, "warning") as warning:
+            provider._register_call(stream_start("t1"), MagicMock())
+
+        assert provider._call_session_configs.pop("CA1") == {"model": "per-call"}
+        assert "t1" not in provider._call_session_configs
+        warning.assert_not_called()
+
+    def test_warns_when_the_config_was_stashed_elsewhere(self, kind: str) -> None:
+        provider = make_media_streams_provider(kind)
+
+        with patch.object(provider.logger, "warning") as warning:
+            provider._register_call(stream_start("t_other_instance"), MagicMock())
+
+        warning.assert_called_once()
+        assert "instance_public_domain" in warning.call_args.args[0]
+        assert "CA1" not in provider._call_session_configs
+
+    def test_a_call_without_a_per_call_config_does_not_warn(self, kind: str) -> None:
+        provider = make_media_streams_provider(kind)
+
+        with patch.object(provider.logger, "warning") as warning:
+            provider._register_call(stream_start(None), MagicMock())
+
+        warning.assert_not_called()

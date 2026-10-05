@@ -254,11 +254,9 @@ class OpenAIRealtimeProvider(MediaStreamsOpenAIProvider[_CallState]):
         message = StreamStartMessage(**start)
         conv_id = message.conversation_id
 
-        token = message.custom_parameters.get(SESSION_CONFIG_TOKEN_PARAM)
-        if token is not None:
-            session_config = self._call_session_configs.pop(token, None)
-            if session_config is not None:
-                self._call_session_configs[conv_id] = session_config
+        self._claim_session_config(
+            message.custom_parameters.get(SESSION_CONFIG_TOKEN_PARAM), conv_id
+        )
 
         self._calls[conv_id] = _CallState(twilio_ws=websocket)
 
