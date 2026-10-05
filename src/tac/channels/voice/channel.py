@@ -511,9 +511,9 @@ class VoiceChannel(BaseChannel):
         `on_message_ready`.
 
         Also reports "Conversation Ended" (``duration_ms`` is CO's
-        ``updatedAt − createdAt``). On the live path the session in hand only
-        proves the conversation is on voice; otherwise it is reported only if
-        the rebuilt conversation is on voice.
+        ``updatedAt − createdAt``). On the live path the session in hand already
+        proves the conversation is on voice, so no lookup is needed; otherwise
+        it is reported only if the rebuilt conversation is on voice.
         """
         live = self._conversations.get(conv_id)
         if live is not None:

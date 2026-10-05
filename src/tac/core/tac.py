@@ -162,9 +162,9 @@ class TAC:
         A CO webhook is handed to every channel, and several may need the
         same conversation's participants — to rebuild a closed conversation's
         session, or to report it ended. Concurrent callers share one in-flight
-        request, and later callers reuse its result for a minute. A failure
-        isn't cached. Not for paths that need fresh participants, like
-        reconciliation.
+        request, and later callers reuse its result until a minute after the
+        request started. A failure isn't cached. Not for paths that need fresh
+        participants, like reconciliation or resolving a session by CallSid.
 
         Raises:
             RuntimeError: If Conversation Orchestrator isn't configured.

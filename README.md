@@ -186,6 +186,8 @@ Telemetry is on by default. To disable it, set the following environment variabl
 TAC_ANALYTICS_DISABLED=true
 ```
 
+Reporting when a conversation ends costs one Conversation Orchestrator participant lookup per closed conversation. Disabling telemetry removes that call, unless you've registered an `on_conversation_ended` handler, which needs it anyway.
+
 ## Learn More
 
 **Examples & Guides:**
