@@ -945,7 +945,7 @@ class ConversationRelayProvider(VoiceProvider):
             self.session_manager.remove_session(conv_id)
 
         # Before the release below, so Websocket Disconnected always
-        # precedes the Conversation Ended it triggers.
+        # precedes any Conversation Ended that teardown reports (relay-only).
         track_event(
             "Websocket Disconnected",
             self.channel.tac.config.account_sid,

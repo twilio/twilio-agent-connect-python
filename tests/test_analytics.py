@@ -492,6 +492,28 @@ class TestMessagingLifecycleFromCO:
         lookup.assert_awaited_once()
 
     @pytest.mark.asyncio
+    async def test_voice_shares_the_closed_lookup_with_messaging(
+        self, mock_client: MagicMock, tac: TAC
+    ) -> None:
+        """Voice's CLOSED rebuild must use the shared lookup, not a fresh one."""
+        sms = SMSChannel(tac)
+        voice = VoiceChannel(tac)
+        lookup = AsyncMock(
+            return_value=[
+                co_participant("CUSTOMER", "SMS", "+15551112222"),
+                co_participant("CUSTOMER", "VOICE", "+15551112222"),
+            ]
+        )
+        tac.conversation_orchestrator_client.list_participants = lookup
+        webhook = conversation_closed("conv-1")
+
+        await asyncio.gather(sms.process_webhook(webhook), voice.process_webhook(webhook))
+
+        ended = [c for c in tracked(mock_client) if c["event"] == "Conversation Ended"]
+        assert sorted(c["properties"]["channel"] for c in ended) == ["sms", "voice"]
+        lookup.assert_awaited_once()
+
+    @pytest.mark.asyncio
     async def test_unparseable_timestamps_leave_duration_out(
         self, mock_client: MagicMock, tac: TAC
     ) -> None:
@@ -517,12 +539,17 @@ class TestMessagingLifecycleFromCO:
 
 
 class TestVoiceSessionLifecycle:
-    """Conversation Started / Ended are emitted by the voice session store —
-    the only channel family that still holds a session across requests."""
+    """In relay-only and Media Streams modes, Conversation Started / Ended come
+    from the voice session store: no CO conversation sits behind the call, and
+    the store is the only place that still holds a session across requests."""
 
     @pytest.fixture
     def tac(self) -> TAC:
-        return TAC(get_test_config())
+        """Relay-only: no CO conversation behind the call, so the session
+        itself reports Started/Ended."""
+        config = get_test_config()
+        config.conversation_configuration_id = None
+        return TAC(config)
 
     def test_conversation_started_reports_profile_presence(
         self, mock_client: MagicMock, tac: TAC
@@ -606,6 +633,115 @@ class TestVoiceSessionLifecycle:
         channel = VoiceChannel(tac)
 
         await channel._release_session("conv-unknown")
+
+        assert not tracked(mock_client)
+
+
+class TestOrchestratedVoiceLifecycleFromCO:
+    """With a CO conversation behind the call (orchestrated ConversationRelay),
+    Started/Ended come from CO webhooks, not the call's session."""
+
+    @pytest.fixture
+    def tac(self) -> TAC:
+        return TAC(get_test_config())
+
+    @pytest.mark.asyncio
+    async def test_session_start_and_teardown_report_nothing(
+        self, mock_client: MagicMock, tac: TAC
+    ) -> None:
+        channel = VoiceChannel(tac)
+        channel._start_conversation("conv-1", "mem_profile_1")
+        await channel._release_session("conv-1")
+
+        lifecycle = {"Conversation Started", "Conversation Ended"}
+        assert not [c for c in tracked(mock_client) if c["event"] in lifecycle]
+
+    @pytest.mark.asyncio
+    async def test_customer_added_on_voice_reports_started(
+        self, mock_client: MagicMock, tac: TAC
+    ) -> None:
+        channel = VoiceChannel(tac)
+
+        await channel.process_webhook(
+            participant_added("conv-1", "CUSTOMER", "VOICE", "+15551112222", "mem_profile_1")
+        )
+
+        properties = only(mock_client, "Conversation Started")["properties"]
+        assert properties["channel"] == "voice"
+        assert properties["conversation_id"] == "conv-1"
+        assert_contract(mock_client)
+
+    @pytest.mark.asyncio
+    async def test_tac_number_added_untyped_is_not_a_start(
+        self, mock_client: MagicMock, tac: TAC
+    ) -> None:
+        channel = VoiceChannel(tac)
+
+        await channel.process_webhook(
+            participant_added("conv-1", "UNKNOWN", "VOICE", "+15551234567")
+        )
+
+        assert not tracked(mock_client)
+
+    @pytest.mark.asyncio
+    async def test_closed_after_hangup_reports_ended_with_co_duration(
+        self, mock_client: MagicMock, tac: TAC
+    ) -> None:
+        channel = VoiceChannel(tac)
+        lookup = AsyncMock(
+            return_value=[
+                co_participant("CUSTOMER", "VOICE", "+15551112222"),
+                co_participant("AI_AGENT", "VOICE", "+15551234567"),
+            ]
+        )
+        tac.conversation_orchestrator_client.list_participants = lookup
+
+        await channel.process_webhook(conversation_closed("conv-1"))
+
+        properties = only(mock_client, "Conversation Ended")["properties"]
+        assert properties["channel"] == "voice"
+        assert properties["duration_ms"] == 300_000
+        lookup.assert_awaited_once_with("conv-1")
+        assert_contract(mock_client)
+
+    @pytest.mark.asyncio
+    async def test_closed_during_a_live_call_reports_ended_without_a_lookup(
+        self, mock_client: MagicMock, tac: TAC
+    ) -> None:
+        channel = VoiceChannel(tac)
+        lookup = AsyncMock()
+        tac.conversation_orchestrator_client.list_participants = lookup
+        channel._start_conversation("conv-live", None)
+
+        await channel.process_webhook(conversation_closed("conv-live"))
+
+        assert only(mock_client, "Conversation Ended")["properties"]["duration_ms"] == 300_000
+        lookup.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_closed_for_a_non_voice_conversation_is_not_reported(
+        self, mock_client: MagicMock, tac: TAC
+    ) -> None:
+        channel = VoiceChannel(tac)
+        tac.conversation_orchestrator_client.list_participants = AsyncMock(
+            return_value=[co_participant("CUSTOMER", "SMS", "+15551112222")]
+        )
+
+        await channel.process_webhook(conversation_closed("conv-1"))
+
+        assert not tracked(mock_client)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("kind", ["openai_realtime", "gpt_live"])
+    async def test_media_streams_ignores_co_participant_events(
+        self, mock_client: MagicMock, kind: str
+    ) -> None:
+        """Media Streams reports at session start; counting CO too would double it."""
+        channel = media_streams_channel(kind)
+
+        await channel.process_webhook(
+            participant_added("conv-1", "CUSTOMER", "VOICE", "+15551112222")
+        )
 
         assert not tracked(mock_client)
 

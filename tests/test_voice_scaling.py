@@ -889,6 +889,32 @@ class TestResolveSessionByCallSid:
         assert "conv_remote" not in channel._conversations
 
     @pytest.mark.asyncio
+    async def test_participants_are_never_served_from_the_shared_cache(self) -> None:
+        """Early in a call participants still change (profile_id, customer
+        joining), so each lookup must see fresh data."""
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+        client = tac.conversation_orchestrator_client
+        client.list_conversations = AsyncMock(
+            return_value=[conversation("conv_remote", "ACTIVE", "2026-09-30T10:00:00Z")]
+        )
+
+        def participants_with(profile_id: str) -> list[ParticipantResponse]:
+            return [
+                p.model_copy(update={"profile_id": profile_id}) if p.type == "CUSTOMER" else p
+                for p in voice_participants("conv_remote")
+            ]
+
+        client.list_participants = AsyncMock(return_value=participants_with("profile_old"))
+        first = await channel.resolve_conversation_session_by_call_sid("CA_remote")
+        client.list_participants.return_value = participants_with("profile_new")
+        second = await channel.resolve_conversation_session_by_call_sid("CA_remote")
+
+        assert first is not None and first.profile_id == "profile_old"
+        assert second is not None and second.profile_id == "profile_new"
+        assert client.list_participants.await_count == 2
+
+    @pytest.mark.asyncio
     async def test_prefers_the_active_conversation_over_a_closed_one(self) -> None:
         """After a mid-call CLOSED, CO starts a new conversation for the same call."""
         tac = TAC(get_test_config())

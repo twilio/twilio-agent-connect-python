@@ -10,7 +10,7 @@ if TYPE_CHECKING:
 
 from tac.channels.base import BaseChannel
 from tac.channels.websocket_protocol import WebSocketProtocol
-from tac.core.analytics import track_event
+from tac.core.analytics import analytics_enabled, track_event
 from tac.core.tac import TAC
 from tac.models.conversation import ConversationResponse
 from tac.models.outbound import (
@@ -25,7 +25,7 @@ from tac.models.voice import (
     TwiMLRequest,
     VoiceTwiMLOptions,
 )
-from tac.utils.timestamps import parse_iso8601
+from tac.utils.timestamps import elapsed_ms, parse_iso8601
 
 from .conversation_relay import ConversationRelayProviderConfig
 from .provider import VoiceProviderConfig
@@ -424,13 +424,16 @@ class VoiceChannel(BaseChannel):
             profile_id=profile_id,
         )
 
-        track_event(
-            "Conversation Started",
-            self.tac.config.account_sid,
-            channel=self._telemetry_channel,
-            conversation_id=conv_id,
-            has_profile_id=profile_id is not None,
-        )
+        # With a CO conversation behind the call, CO's PARTICIPANT_ADDED
+        # reports the start instead — see _track_conversation_started.
+        if not self._provider._conversation_closed_by_orchestrator:
+            track_event(
+                "Conversation Started",
+                self.tac.config.account_sid,
+                channel=self._telemetry_channel,
+                conversation_id=conv_id,
+                has_profile_id=profile_id is not None,
+            )
 
         return self._conversations[conv_id]
 
@@ -466,16 +469,16 @@ class VoiceChannel(BaseChannel):
         if not self._provider._conversation_closed_by_orchestrator:
             await self._trigger_conversation_ended(session)
 
-        # Emitted at teardown, the only point that holds the live session and
-        # so a real start time. A session rebuilt from Conversation
-        # Orchestrator for a CLOSED webhook has neither, so it doesn't emit.
-        track_event(
-            "Conversation Ended",
-            self.tac.config.account_sid,
-            channel=self._telemetry_channel,
-            conversation_id=conv_id,
-            duration_ms=duration_ms,
-        )
+        # Only when no CO conversation sits behind the call (relay-only, Media
+        # Streams): otherwise CO's CLOSED reports the end, with CO's duration.
+        if not self._provider._conversation_closed_by_orchestrator:
+            track_event(
+                "Conversation Ended",
+                self.tac.config.account_sid,
+                channel=self._telemetry_channel,
+                conversation_id=conv_id,
+                duration_ms=duration_ms,
+            )
 
         self.logger.debug(
             "Released voice session",
@@ -484,7 +487,9 @@ class VoiceChannel(BaseChannel):
         )
         return session
 
-    async def _handle_conversation_closed(self, conv_id: str) -> None:
+    async def _handle_conversation_closed(
+        self, conv_id: str, duration_ms: int | None = None
+    ) -> None:
         """Fire ``on_conversation_ended`` for a CLOSED webhook.
 
         The session is normally already released (the socket closed when the
@@ -504,6 +509,11 @@ class VoiceChannel(BaseChannel):
         The hook is at-least-once: a duplicate CLOSED delivery that isn't
         deduped by its idempotency token fires it again, same as
         `on_message_ready`.
+
+        Also reports "Conversation Ended" (``duration_ms`` is CO's
+        ``updatedAt − createdAt``). On the live path the session in hand only
+        proves the conversation is on voice; otherwise it is reported only if
+        the rebuilt conversation is on voice.
         """
         live = self._conversations.get(conv_id)
         if live is not None:
@@ -513,21 +523,27 @@ class VoiceChannel(BaseChannel):
                 conversation_id=conv_id,
                 call_sid=live.call_sid,
             )
+            self._track_conversation_ended(conv_id, duration_ms)
             # Top-level copy of metadata so later writes by the live call don't
             # show through the snapshot the callback holds.
             snapshot = live.model_copy(update={"metadata": dict(live.metadata)})
             await self._trigger_conversation_ended(snapshot)
             return
 
-        if not self.tac._has_conversation_ended_callback():
+        notify = self.tac._has_conversation_ended_callback()
+        report = analytics_enabled()
+        if not (notify or report):
             return
-        session = await self._rebuild_session(conv_id)
+        session = await self._rebuild_session(conv_id, shared=True)
         if session is None:
             return
-        await self._trigger_conversation_ended(session)
+        if report:
+            self._track_conversation_ended(conv_id, duration_ms)
+        if notify:
+            await self._trigger_conversation_ended(session)
 
     async def _rebuild_session(
-        self, conv_id: str, call_sid: str | None = None
+        self, conv_id: str, call_sid: str | None = None, *, shared: bool = False
     ) -> ConversationSession | None:
         """Reconstruct a session from Conversation Orchestrator.
 
@@ -538,16 +554,23 @@ class VoiceChannel(BaseChannel):
         the agent's, else any other participant's. Returns ``None`` if no
         participant is on the voice channel, which is how another channel's
         CLOSED is filtered out.
+
+        ``shared=True`` (the CLOSED path) shares the participant lookup with
+        the other channels handling the same webhook; other callers need
+        fresh participants.
         """
         client = self.tac.conversation_orchestrator_client
         if client is None:
             return None
 
         try:
-            participants = await client.list_participants(conv_id)
+            if shared:
+                participants = await self.tac._list_participants_shared(conv_id)
+            else:
+                participants = await client.list_participants(conv_id)
         except Exception as e:
             self.logger.error(
-                "Failed to list participants while rebuilding a closed voice conversation",
+                "Failed to list participants while rebuilding a voice session",
                 conversation_id=conv_id,
                 error=str(e),
             )
@@ -811,20 +834,23 @@ class VoiceChannel(BaseChannel):
     ) -> None:
         """Process conversation webhooks for cleanup and cache invalidation.
 
-        Voice channel processes CONVERSATION_UPDATED events:
+        Voice channel processes these events:
 
-        - **CLOSED**: fire ``on_conversation_ended``. The call's session is
-          normally already released (the WebSocket closed when the caller hung
-          up), so this rebuilds it from Conversation Orchestrator — which is
-          also what makes the hook fire on whichever instance received the
-          webhook rather than only on the one that held the call. If this
-          instance still holds the call's session (the call is live), the hook
-          fires now instead, with a snapshot of that live session, and the
-          session stays until the call's own teardown — which still fires
-          ``on_call_ended``. A single call can then produce a second
-          ``on_conversation_ended``, under a different conversation id, when
-          Conversation Orchestrator later closes the conversation it started
-          for the call's remaining traffic.
+        - **PARTICIPANT_ADDED**: report "Conversation Started" when the customer
+          joins on voice (orchestrated ConversationRelay only).
+        - **CLOSED** (CONVERSATION_UPDATED): fire ``on_conversation_ended``.
+          The call's session is normally already released (the WebSocket
+          closed when the caller hung up), so this rebuilds it from
+          Conversation Orchestrator — which is also what makes the hook fire
+          on whichever instance received the webhook rather than only on the
+          one that held the call. If this instance still holds the call's
+          session (the call is live), the hook fires now instead, with a
+          snapshot of that live session, and the session stays until the
+          call's own teardown — which still fires ``on_call_ended``. A single
+          call can then produce a second ``on_conversation_ended``, under a
+          different conversation id, when Conversation Orchestrator later
+          closes the conversation it started for the call's remaining
+          traffic. It also reports "Conversation Ended", with CO's duration.
         - **INACTIVE**: invalidate cached memory, if this instance holds the
           session. A call is pinned to one instance for its lifetime, so an
           INACTIVE landing elsewhere has no cache to clear and is ignored.
@@ -850,6 +876,12 @@ class VoiceChannel(BaseChannel):
             )
             return
 
+        if event_type == "PARTICIPANT_ADDED":
+            # Only with a CO conversation behind calls; otherwise the session
+            # reports the start and counting this too would double it.
+            if self._provider._conversation_closed_by_orchestrator:
+                self._track_conversation_started(event_data)
+            return
         if event_type != "CONVERSATION_UPDATED":
             return
 
@@ -867,7 +899,9 @@ class VoiceChannel(BaseChannel):
                 # behind its calls; on_conversation_ended already fired at
                 # teardown and firing again here would double it.
                 return
-            await self._handle_conversation_closed(conv_id)
+            await self._handle_conversation_closed(
+                conv_id, elapsed_ms(event_data.get("createdAt"), event_data.get("updatedAt"))
+            )
         elif status == "INACTIVE" and self.memory_mode == "once":
             session = self._conversations.get(conv_id)
             if session is None:
@@ -904,6 +938,15 @@ class VoiceChannel(BaseChannel):
 
     def get_channel_name(self) -> str:
         return self._provider.channel_name
+
+    @property
+    def _co_channel(self) -> str:
+        # get_channel_name() is the provider's transport label; CO always
+        # records voice participants as VOICE.
+        return CO_VOICE_CHANNEL
+
+    def _is_own_co_address(self, address: str) -> bool:
+        return address == self.tac.config.phone_number
 
     @property
     def _telemetry_channel(self) -> str:
