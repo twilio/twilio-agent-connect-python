@@ -501,6 +501,25 @@ Two of these, **G3 and G6**, don't exist on this branch yet. They appear when it
 
 The mode split from §3.1 matters here. G1, G4, G7 and G10 apply **only to ConversationRelay in orchestrated mode**: that's the one combination where a CO `CLOSED` webhook ends the conversation, and it can land on another instance. In relay-only mode and in every Media Streams provider, teardown is the only end event.
 
+### Status (2026-10-05)
+
+Fixes land in #132, which carries #123 rebased onto `main` (including #128, multi-sender) plus the changes below.
+
+| Gap | Status in #132 |
+|---|---|
+| G1 | **Fixed.** CLOSED for a live call fires from a snapshot and keeps the session; the stale `conversation_id` after a mid-call close is documented. |
+| G2 | **Documented, fix deferred.** Per-call Media Streams `session_config` needs `instance_public_domain` with more than one instance; TAC warns when a stream's config was stashed elsewhere. The re-derive fix (option B) is recorded in `CLAUDE.md`. |
+| G3 | **Fixed.** Lifecycle analytics come from CO webhooks (`PARTICIPANT_ADDED`, CLOSED with CO's duration), each channel reporting its own type, with a shared participant lookup. |
+| G4 | **Fixed.** `VoiceChannel.resolve_conversation_session_by_call_sid()`, using fresh participant lookups. |
+| G5 | **Documented** in `docs/deployment.md` ("What needs instance affinity"). |
+| G6 | **Fixed.** The token handoff and `ExpiringDict` are in the shared Media Streams base; GPT-Live's timers are removed. |
+| G7 | **Documented** in the PR's behavior changes. |
+| G8 | **Fixed.** Outbound metadata is written to CO; a per-instance best-effort cache keeps `session.metadata` across turns; `session.conversation_metadata()` reads it on any instance. |
+| G9 | **Fixed.** Messaging `"once"` warns and runs as `"always"`. |
+| G10 | **Fixed.** `call_sid` comes from the VOICE participant's `channelId`, customer first. |
+| G11 (new) | **Documented.** An INACTIVE webhook landing on another replica doesn't refresh a live call's `"once"` memory. |
+| V1–V5 | **Open.** Live-account checks; V5 (below) gates G8. |
+
 ### Correctness bugs
 
 **G1. CLOSED during a live call removes the live session.**
@@ -609,6 +628,8 @@ Anything an app writes in turn N is gone in turn N+1. The outbound `direction: o
 **V3. CO after a mid-call CLOSED** (G1). **Answered by the docs:** yes, a new conversation. Per the lifecycle docs, a closed conversation is immutable and *"any new matching traffic starts a new conversation."* See G1's follow-up. A live check is still worthwhile to confirm the new conversation is findable by `channel_id=call_sid`.
 
 **V4. VOICE participant `channelId` is the CallSid** (G10): G10's fix reads the CallSid from the VOICE participant's `addresses[].channelId`. Confirm on a live ConversationRelay call that this field holds the CallSid.
+
+**V5. CO conversation metadata** (G8): confirm that CO accepts `metadata` when a conversation is created, merges it on `PATCH` (only the given keys change), and returns it on `GET` and in `CONVERSATION_*` webhooks. The API reference didn't list the field when G8 was written; the concepts page (updated 2026-09-29) did.
 
 ### Proposed sequencing
 
