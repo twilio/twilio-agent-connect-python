@@ -281,8 +281,14 @@ class ConversationRelayProvider(VoiceProvider):
 
         participants = await conversation_orchestrator_client.list_participants(conv_id)
 
+        # A conversation grouped across channels may list another channel's
+        # customer first; the caller is the CUSTOMER on VOICE.
         customer_participant = next(
-            (p for p in participants if p.type == "CUSTOMER"),
+            (
+                p
+                for p in participants
+                if p.type == "CUSTOMER" and any(a.channel == "VOICE" for a in p.addresses)
+            ),
             None,
         )
         customer_address = (

@@ -107,6 +107,23 @@ def voice_participants(conv_id: str, call_sid: str | None = None) -> list[Partic
     ]
 
 
+def mixed_channel_participants(conv_id: str) -> list[ParticipantResponse]:
+    """A conversation grouped across channels: an SMS-only CUSTOMER listed
+    before the caller, and the agent's leg on its own CallSid."""
+    sms_customer = ParticipantResponse(
+        id="PA_sms_customer",
+        conversation_id=conv_id,
+        account_id="ACtest123",
+        name="Texter",
+        type="CUSTOMER",
+        profile_id="profile_sms",
+        addresses=[ParticipantAddress(channel="SMS", address="+15550001111")],
+    )
+    customer, agent = voice_participants(conv_id, call_sid="CA_customer")
+    agent.addresses[0].channel_id = "CA_agent_leg"
+    return [sms_customer, customer, agent]
+
+
 def conversation(conv_id: str, status: str, created_at: str) -> ConversationResponse:
     return ConversationResponse(
         id=conv_id,
@@ -207,6 +224,26 @@ class TestStatelessConversationClosed:
         assert rebuilt.author_info.address == "+15559998888"
         assert rebuilt.ai_agent_info is not None
         assert rebuilt.ai_agent_info.participant_id == "PA_agent"
+
+    @pytest.mark.asyncio
+    async def test_rebuild_takes_the_voice_customer_not_the_first_customer(self) -> None:
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+        ended: list[ConversationSession] = []
+        tac.on_conversation_ended(lambda s: ended.append(s))
+        tac.conversation_orchestrator_client.list_participants = AsyncMock(
+            return_value=mixed_channel_participants("conv_mixed")
+        )
+
+        await channel.process_webhook(closed_webhook("conv_mixed"))
+
+        assert len(ended) == 1
+        rebuilt = ended[0]
+        assert rebuilt.profile_id == "profile_caller"
+        assert rebuilt.call_sid == "CA_customer"
+        assert rebuilt.author_info is not None
+        assert rebuilt.author_info.address == "+15559998888"
+        assert rebuilt.author_info.participant_id == "PA_customer"
 
     @pytest.mark.asyncio
     async def test_fires_once_after_local_teardown_on_the_same_instance(self) -> None:
@@ -1099,6 +1136,23 @@ class TestResolveSessionByCallSid:
         client.list_conversations.assert_awaited_once_with(channel_id="CA_remote")
         # Identity only: nothing is tracked locally.
         assert "conv_remote" not in channel._conversations
+
+    @pytest.mark.asyncio
+    async def test_rebuild_takes_the_voice_customer_not_the_first_customer(self) -> None:
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+        client = tac.conversation_orchestrator_client
+        client.list_conversations = AsyncMock(
+            return_value=[conversation("conv_mixed", "ACTIVE", "2026-09-30T10:00:00Z")]
+        )
+        client.list_participants = AsyncMock(return_value=mixed_channel_participants("conv_mixed"))
+
+        session = await channel.resolve_conversation_session_by_call_sid("CA_customer")
+
+        assert session is not None
+        assert session.profile_id == "profile_caller"
+        assert session.author_info is not None
+        assert session.author_info.participant_id == "PA_customer"
 
     @pytest.mark.asyncio
     async def test_participants_are_never_served_from_the_shared_cache(self) -> None:

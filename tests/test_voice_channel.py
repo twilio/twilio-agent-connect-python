@@ -227,6 +227,50 @@ class TestVoiceChannel:
         assert session.ai_agent_info is None
 
     @pytest.mark.asyncio
+    async def test_initialize_conversation_picks_the_voice_customer(self) -> None:
+        """A conversation grouped across channels can list an SMS-only
+        CUSTOMER before the caller; the session takes the VOICE customer's
+        identity."""
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+
+        conversation = ConversationResponse(id="conv_mixed", accountId="ACtest123", status="ACTIVE")
+        sms_customer = ParticipantResponse(
+            id="part_sms",
+            conversationId="conv_mixed",
+            accountId="ACtest123",
+            name="Texter",
+            type="CUSTOMER",
+            profileId="profile_sms",
+            addresses=[ParticipantAddress(channel="SMS", address="+15550001111")],
+        )
+        voice_customer = ParticipantResponse(
+            id="part_voice",
+            conversationId="conv_mixed",
+            accountId="ACtest123",
+            name="Caller",
+            type="CUSTOMER",
+            profileId="profile_caller",
+            addresses=[ParticipantAddress(channel="VOICE", address="+15559998888")],
+        )
+
+        co_client = MagicMock()
+        co_client.list_conversations = AsyncMock(return_value=[conversation])
+        co_client.list_participants = AsyncMock(return_value=[sms_customer, voice_customer])
+        tac.conversation_orchestrator_client = co_client
+
+        setup_msg = SetupMessage(type="setup", callSid="CALL789", **{"from": "+15559998888"})
+
+        conv_id, _ = await channel._provider._initialize_conversation(
+            "CALL789", setup_msg, MagicMock()
+        )
+
+        session = channel._conversations[conv_id]
+        assert session.profile_id == "profile_caller"
+        assert session.author_info is not None
+        assert session.author_info.address == "+15559998888"
+
+    @pytest.mark.asyncio
     async def test_initialize_conversation_resolves_agent_from_dialed_number(self) -> None:
         """An inbound call dialed to a NON-default number in `phone_numbers`
         resolves the agent participant addressed at that dialed number, not

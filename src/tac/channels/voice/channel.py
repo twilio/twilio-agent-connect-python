@@ -631,7 +631,16 @@ class VoiceChannel(BaseChannel):
         if not any(a.channel == CO_VOICE_CHANNEL for p in participants for a in p.addresses):
             return None
 
-        customer = next((p for p in participants if p.type == "CUSTOMER"), None)
+        # A conversation grouped across channels may list another channel's
+        # customer first; the caller is the CUSTOMER on VOICE.
+        customer = next(
+            (
+                p
+                for p in participants
+                if p.type == "CUSTOMER" and any(a.channel == CO_VOICE_CHANNEL for a in p.addresses)
+            ),
+            None,
+        )
         # TAC may own several numbers; the agent is whichever one this call used.
         agent = next(
             (
