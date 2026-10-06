@@ -684,6 +684,21 @@ class TestOrchestratedVoiceLifecycleFromCO:
         assert not tracked(mock_client)
 
     @pytest.mark.asyncio
+    async def test_non_default_tac_number_added_untyped_is_not_a_start(
+        self, mock_client: MagicMock
+    ) -> None:
+        tac = TAC(
+            get_test_config().model_copy(update={"phone_numbers": ["+15551234567", "+15559990000"]})
+        )
+        channel = VoiceChannel(tac)
+
+        await channel.process_webhook(
+            participant_added("conv-1", "UNKNOWN", "VOICE", "+15559990000")
+        )
+
+        assert not tracked(mock_client)
+
+    @pytest.mark.asyncio
     async def test_closed_after_hangup_reports_ended_with_co_duration(
         self, mock_client: MagicMock, tac: TAC
     ) -> None:

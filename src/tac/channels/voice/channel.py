@@ -1044,7 +1044,7 @@ class VoiceChannel(BaseChannel):
         return CO_VOICE_CHANNEL
 
     def _is_own_co_address(self, address: str) -> bool:
-        return address == self.tac.config.phone_number
+        return address in self.tac.config.phone_numbers
 
     @property
     def _telemetry_channel(self) -> str:
