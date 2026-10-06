@@ -50,6 +50,10 @@ class _CachedConversation:
     nothing relies on it for correctness. It gives `session.metadata` its
     per-instance persistence across turns, and answers
     `conversation_metadata()` without a lookup when the CO metadata is known.
+
+    `co_metadata` is only metadata **this instance wrote itself** (at outbound
+    initiation), so a later change made on another instance is not seen here.
+    Metadata fetched from CO is kept per turn on the session, not in this cache.
     """
 
     metadata: dict[str, Any]

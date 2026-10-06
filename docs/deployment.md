@@ -73,6 +73,26 @@ replica — the common case, and free. It cannot catch one landing elsewhere.
 Tolerating that in the handler is cheaper than a distributed lock. If you
 genuinely can't, route by `conversation_id` at the load balancer.
 
+### Metadata across turns
+
+Metadata you pass to `initiate_outbound_conversation` is stored on the
+conversation in Conversation Orchestrator (keys of letters, digits, `.`, `_`
+or `-`; string values up to 512 characters; at most 8 keys including TAC's
+`direction`), so a reply can find it on any replica:
+
+```python
+async def on_message(text, session, memory):
+    metadata = await session.conversation_metadata()
+    appointment_id = metadata.get("appointment_id")
+```
+
+That costs one Conversation Orchestrator request on a replica that hasn't
+seen the conversation, and nothing otherwise. `session.metadata` still
+carries values between turns, including ones you write during a turn, but
+only on the replica that handled the conversation before. Treat it as a
+per-replica scratchpad. Entries that don't fit Conversation Orchestrator's
+limits stay only in `session.metadata`, with a warning.
+
 ## Voice is pinned to one process, deliberately
 
 A live WebSocket ties a call to the process that accepted it for the call's
