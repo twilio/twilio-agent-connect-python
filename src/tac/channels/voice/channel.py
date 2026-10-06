@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
@@ -524,10 +525,7 @@ class VoiceChannel(BaseChannel):
                 call_sid=live.call_sid,
             )
             self._track_conversation_ended(conv_id, duration_ms)
-            # Top-level copy of metadata so later writes by the live call don't
-            # show through the snapshot the callback holds.
-            snapshot = live.model_copy(update={"metadata": dict(live.metadata)})
-            await self._trigger_conversation_ended(snapshot)
+            await self._trigger_conversation_ended(self._detached_snapshot(live))
             return
 
         notify = self.tac._has_conversation_ended_callback()
@@ -541,6 +539,42 @@ class VoiceChannel(BaseChannel):
             self._track_conversation_ended(conv_id, duration_ms)
         if notify:
             await self._trigger_conversation_ended(session)
+
+    def _detached_snapshot(self, live: ConversationSession) -> ConversationSession:
+        """A copy of a live call's session that shares no mutable state with it.
+
+        `on_conversation_ended` may keep or edit what it's given while the call
+        carries on, so the callback-visible data — `metadata` and the nested
+        models — is deep-copied. The snapshot gets its own `cache_lock` rather
+        than the live call's, so nothing the callback does can block the call.
+        A `metadata` value that can't be copied (an app-owned handle, say) is
+        shared rather than failing the hook.
+        """
+        conv_id = live.conversation_id
+
+        def detached(value: Any, what: str) -> Any:
+            try:
+                return copy.deepcopy(value)
+            except Exception as e:
+                self.logger.debug(
+                    "Sharing a value that can't be copied into the CLOSED snapshot",
+                    conversation_id=conv_id,
+                    value=what,
+                    error=str(e),
+                )
+                return value
+
+        return live.model_copy(
+            update={
+                "metadata": {k: detached(v, f"metadata[{k!r}]") for k, v in live.metadata.items()},
+                "profile": detached(live.profile, "profile"),
+                "author_info": detached(live.author_info, "author_info"),
+                "ai_agent_info": detached(live.ai_agent_info, "ai_agent_info"),
+                "pending_handoff_data": detached(live.pending_handoff_data, "pending_handoff_data"),
+                "cached_memory": detached(live.cached_memory, "cached_memory"),
+                "cache_lock": asyncio.Lock(),
+            }
+        )
 
     async def _rebuild_session(
         self, conv_id: str, call_sid: str | None = None, *, shared: bool = False

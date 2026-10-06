@@ -12,6 +12,7 @@ Three things have to hold for N replicas behind a load balancer:
 from __future__ import annotations
 
 import asyncio
+import threading
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -30,7 +31,8 @@ from tac.models.conversation import (
     ParticipantAddress,
     ParticipantResponse,
 )
-from tac.models.session import ConversationSession
+from tac.models.handoff import PendingHandoffData
+from tac.models.session import AuthorInfo, ConversationSession
 from tac.session import ThreadSafeSessionManager
 from tests.voice_invariants import assert_no_residual_state
 
@@ -490,6 +492,57 @@ class TestClosedDuringLiveCall:
         snapshot = conversation_ended[0]
         assert snapshot is not live
         assert snapshot.metadata == {"transcript": ["hello"]}
+
+    @pytest.mark.asyncio
+    async def test_callback_mutating_nested_data_leaves_the_live_session_unchanged(
+        self,
+    ) -> None:
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+        live = channel._start_conversation("conv_nested", "profile_caller")
+        live.metadata["transcript"] = [{"role": "user", "text": "hello"}]
+        live.author_info = AuthorInfo(address="+15559998888", participant_id="PA_customer")
+        live.pending_handoff_data = PendingHandoffData(handoffData='{"reason": "agent"}')
+        held: list[ConversationSession] = []
+
+        def on_ended(snapshot: ConversationSession) -> None:
+            held.append(snapshot)
+            snapshot.metadata["transcript"].clear()
+            assert snapshot.author_info is not None
+            snapshot.author_info.address = "changed"
+            assert snapshot.pending_handoff_data is not None
+            snapshot.pending_handoff_data.handoff_data = "changed"
+
+        tac.on_conversation_ended(on_ended)
+        await channel.process_webhook(closed_webhook("conv_nested"))
+
+        # The callback's edits don't reach the live call...
+        assert live.metadata["transcript"] == [{"role": "user", "text": "hello"}]
+        assert live.author_info.address == "+15559998888"
+        assert live.pending_handoff_data.handoff_data == '{"reason": "agent"}'
+        # ...and the live call's later writes don't reach the snapshot it kept.
+        live.metadata["transcript"].append({"role": "assistant", "text": "still here"})
+        assert held[0].metadata["transcript"] == []
+        # The snapshot doesn't hold the live call's lock.
+        assert held[0].cache_lock is not live.cache_lock
+
+    @pytest.mark.asyncio
+    async def test_uncopyable_metadata_still_fires_the_hook(self) -> None:
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+        live = channel._start_conversation("conv_uncopyable", None)
+        app_handle = threading.Lock()  # deepcopy raises TypeError on this
+        live.metadata["handle"] = app_handle
+        live.metadata["transcript"] = ["hello"]
+        ended: list[ConversationSession] = []
+        tac.on_conversation_ended(lambda s: ended.append(s))
+
+        await channel.process_webhook(closed_webhook("conv_uncopyable"))
+
+        assert len(ended) == 1
+        assert ended[0].metadata["handle"] is app_handle
+        assert ended[0].metadata["transcript"] == ["hello"]
+        assert ended[0].metadata["transcript"] is not live.metadata["transcript"]
 
     @pytest.mark.asyncio
     async def test_end_call_after_the_live_close_still_fires_call_ended_once(self) -> None:
