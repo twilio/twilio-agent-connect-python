@@ -200,6 +200,9 @@ def _mock_sms_outbound(
 ) -> None:
     co = tac.conversation_orchestrator_client
     co.create_or_reuse_conversation = AsyncMock(return_value=(conv_id, reused))
+    co.patch_conversation_metadata = AsyncMock(
+        return_value=ConversationResponse(id=conv_id, account_id="ACtest123", metadata={})
+    )
     co.list_participants = AsyncMock(
         return_value=[
             make_participant(
@@ -291,6 +294,9 @@ class TestSMSOutbound:
 
         co = tac.conversation_orchestrator_client
         co.create_or_reuse_conversation = AsyncMock(return_value=("CHreused", True))
+        co.patch_conversation_metadata = AsyncMock(
+            return_value=ConversationResponse(id="CHreused", account_id="ACtest123", metadata={})
+        )
         co.list_participants = AsyncMock(return_value=[])
         co.update_conversation = AsyncMock()
 
@@ -359,6 +365,9 @@ def _mock_chat_outbound(
 ) -> None:
     co = tac.conversation_orchestrator_client
     co.create_or_reuse_conversation = AsyncMock(return_value=(conv_id, reused))
+    co.patch_conversation_metadata = AsyncMock(
+        return_value=ConversationResponse(id=conv_id, account_id="ACtest123", metadata={})
+    )
     co.list_participants = AsyncMock(
         return_value=[
             make_participant(
@@ -1005,6 +1014,11 @@ class TestInitiateConversationActionFailure:
 
         co = tac.conversation_orchestrator_client
         co.create_or_reuse_conversation = AsyncMock(return_value=("CHreused_action", True))
+        co.patch_conversation_metadata = AsyncMock(
+            return_value=ConversationResponse(
+                id="CHreused_action", account_id="ACtest123", metadata={}
+            )
+        )
         co.list_participants = AsyncMock(
             return_value=[
                 make_participant(
@@ -1240,6 +1254,9 @@ def _mock_rcs_outbound(
 ) -> None:
     co = tac.conversation_orchestrator_client
     co.create_or_reuse_conversation = AsyncMock(return_value=(conv_id, reused))
+    co.patch_conversation_metadata = AsyncMock(
+        return_value=ConversationResponse(id=conv_id, account_id="ACtest123", metadata={})
+    )
     co.list_participants = AsyncMock(
         return_value=[
             make_participant(
@@ -1333,6 +1350,9 @@ def _mock_whatsapp_outbound(
 ) -> None:
     co = tac.conversation_orchestrator_client
     co.create_or_reuse_conversation = AsyncMock(return_value=(conv_id, reused))
+    co.patch_conversation_metadata = AsyncMock(
+        return_value=ConversationResponse(id=conv_id, account_id="ACtest123", metadata={})
+    )
     co.list_participants = AsyncMock(
         return_value=[
             make_participant(

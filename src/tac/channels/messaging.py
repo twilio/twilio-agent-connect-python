@@ -2,7 +2,8 @@
 
 import warnings
 from abc import abstractmethod
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable, Callable
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
@@ -28,10 +29,31 @@ from tac.models.conversation import (
 from tac.models.memory import MemoryMode
 from tac.models.outbound import InitiateConversationResult, InitiateMessagingConversationOptions
 from tac.models.session import AuthorInfo, ConversationSession
+from tac.utils.conversation_metadata import fit_conversation_metadata
+from tac.utils.expiring_dict import ExpiringDict
 from tac.utils.redaction import mask_address
 from tac.utils.timestamps import elapsed_ms
 
 logger = get_logger(__name__)
+
+#: Lifetime and size of a channel's per-instance conversation-metadata cache.
+#: The TTL slides: each turn refreshes it.
+_METADATA_CACHE_TTL_SECONDS = 24 * 60 * 60
+_METADATA_CACHE_MAX_ENTRIES = 10_000
+
+
+@dataclass
+class _CachedConversation:
+    """What this instance remembers about a conversation between webhooks.
+
+    Best-effort: another instance, a restart or an eviction starts empty, and
+    nothing relies on it for correctness. It gives `session.metadata` its
+    per-instance persistence across turns, and answers
+    `conversation_metadata()` without a lookup when the CO metadata is known.
+    """
+
+    metadata: dict[str, Any]
+    co_metadata: dict[str, str] | None = None
 
 
 class MessagingChannelConfig(BaseModel):
@@ -69,10 +91,14 @@ class MessagingChannel(BaseChannel):
     Conversation Orchestrator webhooks with COMMUNICATION_CREATED
     and CONVERSATION_UPDATED event types.
 
-    **Stateless by construction.** No conversation state is kept between
+    **Stateless by construction.** No conversation session is kept between
     webhooks: each request derives its own `ConversationSession` from the
     payload, config, and one `list_participants` call it needs anyway. So any
     replica can serve any webhook — no sticky sessions, no shared datastore.
+    A bounded, best-effort cache keeps each conversation's `session.metadata`
+    on the instance that handled it, so `main`'s per-instance behavior holds.
+    `ConversationSession.conversation_metadata()` reads the metadata stored on
+    Conversation Orchestrator from any instance.
 
     Subclasses must implement:
 
@@ -133,6 +159,10 @@ class MessagingChannel(BaseChannel):
             tac.conversation_orchestrator_client
         )
         super().__init__(tac, memory_mode=memory_mode, dedup_capacity=dedup_capacity)
+        # Best-effort, per-instance; see _CachedConversation.
+        self._metadata_cache: ExpiringDict[_CachedConversation] = ExpiringDict(
+            ttl_seconds=_METADATA_CACHE_TTL_SECONDS, max_entries=_METADATA_CACHE_MAX_ENTRIES
+        )
 
     @abstractmethod
     def is_default_agent_address(self, author_address: str) -> bool:
@@ -452,6 +482,49 @@ class MessagingChannel(BaseChannel):
         elif event_type == "PARTICIPANT_ADDED":
             self._track_conversation_started(event_data)
 
+    def _cached_conversation(self, conv_id: str) -> _CachedConversation:
+        """This instance's cache entry for a conversation, created if missing.
+
+        Re-inserting refreshes the entry's TTL, so an active conversation stays.
+        """
+        try:
+            entry = self._metadata_cache[conv_id]
+        except KeyError:
+            entry = _CachedConversation(metadata={})
+        self._metadata_cache[conv_id] = entry
+        return entry
+
+    def _bind_session_metadata(
+        self, session: ConversationSession, entry: _CachedConversation
+    ) -> None:
+        """Share the entry's metadata dict with the session and wire
+        `conversation_metadata()` to the entry, falling back to CO."""
+        entry.metadata.update(session.metadata)
+        session.metadata = entry.metadata
+        session._co_metadata = entry.co_metadata
+        session._co_metadata_loader = self._co_metadata_loader(session.conversation_id)
+
+    def _co_metadata_loader(self, conv_id: str) -> Callable[[], Awaitable[dict[str, str] | None]]:
+        """A loader that fetches a conversation's CO metadata.
+
+        The result is kept by the session for its turn only, never in the
+        cache: another instance may change it between turns.
+        """
+
+        async def load() -> dict[str, str] | None:
+            try:
+                conversation = await self.conversation_orchestrator_client.get_conversation(conv_id)
+            except Exception as e:
+                self.logger.warning(
+                    "Failed to fetch conversation metadata",
+                    conversation_id=conv_id,
+                    error=str(e),
+                )
+                return None
+            return dict(conversation.metadata or {})
+
+        return load
+
     def _resolve_session(
         self,
         conv_id: str,
@@ -480,6 +553,7 @@ class MessagingChannel(BaseChannel):
         session.ai_agent_info = AuthorInfo(
             address=agent_address or self.get_agent_address(session).address
         )
+        self._bind_session_metadata(session, self._cached_conversation(conv_id))
         return session
 
     async def _handle_communication_created(self, event_data: Any) -> None:
@@ -638,6 +712,9 @@ class MessagingChannel(BaseChannel):
         the other channels handling the same webhook — confirms the
         conversation is on this channel (a CHAT close must not fire on SMS)
         and lets this work on whichever replica Twilio picked.
+
+        CLOSED also evicts this instance's metadata cache entry, and the
+        rebuilt session carries the payload's metadata.
         """
         conversation_data = ConversationResponse.model_validate(event_data)
         conv_id = conversation_data.id
@@ -646,6 +723,8 @@ class MessagingChannel(BaseChannel):
             return
         if conversation_data.status != "CLOSED":
             return
+        # The conversation is over: drop what this instance remembered of it.
+        entry = self._metadata_cache.pop(conv_id, None)
         notify = self.tac._has_conversation_ended_callback()
         report = analytics_enabled()
         if not (notify or report):
@@ -663,6 +742,16 @@ class MessagingChannel(BaseChannel):
         session = self._session_from_participants(conv_id, participants)
         if session is None:
             return
+        payload_metadata = dict(conversation_data.metadata or {})
+        closed_metadata = entry.metadata if entry is not None else dict(payload_metadata)
+        closed_metadata.update(session.metadata)
+        session.metadata = closed_metadata
+        if conversation_data.metadata is not None:
+            session._co_metadata = payload_metadata
+        else:
+            # A payload without metadata says nothing: fetch on demand.
+            session._co_metadata = None
+            session._co_metadata_loader = self._co_metadata_loader(conv_id)
         if report:
             self._track_conversation_ended(
                 conv_id, elapsed_ms(conversation_data.created_at, conversation_data.updated_at)
@@ -686,6 +775,17 @@ class MessagingChannel(BaseChannel):
         channel_type = self.get_channel_name()
         conversation_id: str | None = None
         reused = False
+
+        co_metadata, skipped = fit_conversation_metadata(
+            options.metadata, reserved={"direction": "outbound"}
+        )
+        if skipped:
+            self.logger.warning(
+                "Outbound metadata not stored on the conversation: Conversation "
+                "Orchestrator allows at most 8 keys of letters, digits, '.', '_' or '-', "
+                "with string values up to 512 characters",
+                skipped_keys=skipped,
+            )
 
         try:
             (
@@ -713,8 +813,27 @@ class MessagingChannel(BaseChannel):
                             )
                         ],
                     ),
-                ]
+                ],
+                metadata=co_metadata,
             )
+
+            known_co_metadata: dict[str, str] | None = co_metadata
+            if reused:
+                # Existing conversation: merge ours in; CO keeps keys set earlier.
+                try:
+                    patched = (
+                        await self.conversation_orchestrator_client.patch_conversation_metadata(
+                            conversation_id, co_metadata
+                        )
+                    )
+                    known_co_metadata = dict(patched.metadata or {})
+                except Exception as e:
+                    self.logger.warning(
+                        "Failed to store outbound metadata on the reused conversation",
+                        conversation_id=conversation_id,
+                        error=str(e),
+                    )
+                    known_co_metadata = None
 
             participants = await self.conversation_orchestrator_client.list_participants(
                 conversation_id
@@ -769,6 +888,9 @@ class MessagingChannel(BaseChannel):
                 conversation_id=conversation_id,
                 to=mask_address(options.to),
             )
+            entry = self._cached_conversation(conversation_id)
+            entry.co_metadata = known_co_metadata
+            self._bind_session_metadata(session, entry)
             return InitiateConversationResult(conversation_id=conversation_id, session=session)
 
         except Exception:
