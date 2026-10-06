@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 from tac.models.handoff import PendingHandoffData
 from tac.models.memory import ProfileResponse
@@ -80,6 +81,14 @@ class ConversationSession(BaseModel):
         exclude=True,
     )
 
+    # Conversation Orchestrator metadata for this conversation, if known, and
+    # how to fetch it when it isn't. Set by the channel; read through
+    # conversation_metadata(). Private, so never dumped.
+    _co_metadata: dict[str, str] | None = PrivateAttr(default=None)
+    _co_metadata_loader: Callable[[], Awaitable[dict[str, str] | None]] | None = PrivateAttr(
+        default=None
+    )
+
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     def build_profile_prompt(self, trait_groups: list[str] | None = None) -> str | None:
@@ -130,3 +139,29 @@ class ConversationSession(BaseModel):
             lines.append(f"- {key}: {value}")
 
         return "\n".join(lines)
+
+    async def conversation_metadata(self) -> dict[str, str]:
+        """The metadata stored on this conversation in Conversation Orchestrator.
+
+        `metadata` is this process's own data for the conversation, which
+        another replica doesn't see. This reads what's stored on the
+        conversation itself — for example the `metadata` passed to
+        `initiate_outbound_conversation` — so it works on whichever replica
+        handles the turn. It's answered locally when this process already
+        knows it; otherwise it costs one Conversation Orchestrator request,
+        kept for the rest of this turn.
+
+        Returns a copy, so editing it changes nothing. Returns `{}` when the
+        conversation has no metadata or the lookup fails; a failed lookup is
+        retried on the next call.
+
+        Example:
+            ```python
+            async def on_message(text, session, memory):
+                metadata = await session.conversation_metadata()
+                appointment_id = metadata.get("appointment_id")
+            ```
+        """
+        if self._co_metadata is None and self._co_metadata_loader is not None:
+            self._co_metadata = await self._co_metadata_loader()
+        return dict(self._co_metadata or {})
