@@ -136,14 +136,30 @@ class MediaStreamsOpenAIProvider(VoiceProvider, Generic[TCallState]):
             # so the config can be found when the call's stream connects
             # instead of being keyed to a CallSid.
             token = uuid.uuid4().hex
-            existing_params = (customized.custom_parameters or {}) if customized else {}
-            customized = (customized or VoiceTwiMLOptionsMediaStreams()).model_copy(
-                update={"custom_parameters": {**existing_params, SESSION_CONFIG_TOKEN_PARAM: token}}
-            )
+            customized = self._with_session_config_token(host_twiml_options, customized, token)
             self._call_session_configs[token] = session_config
 
         return self._twiml.build(
             "handle_incoming_call", host=host_twiml_options, per_call=customized
+        )
+
+    def _with_session_config_token(
+        self,
+        host: VoiceTwiMLOptionsMediaStreams | None,
+        per_call: VoiceTwiMLOptionsMediaStreams | None,
+        token: str,
+    ) -> VoiceTwiMLOptionsMediaStreams:
+        """Return ``per_call`` with the session-config token added to the
+        stream's custom parameters.
+
+        The builder replaces whole fields, so the token is added to the
+        parameters the call would otherwise get — from ``per_call``,
+        ``default_twiml_options`` or ``host``, by the builder's precedence —
+        rather than to ``per_call``'s alone, which would drop inherited ones.
+        """
+        effective = self._twiml._build_twiml_options(host, per_call).custom_parameters or {}
+        return (per_call or VoiceTwiMLOptionsMediaStreams()).model_copy(
+            update={"custom_parameters": {**effective, SESSION_CONFIG_TOKEN_PARAM: token}}
         )
 
     def _build_call_kwargs(self, call_options: CallOptions | None) -> dict[str, Any]:

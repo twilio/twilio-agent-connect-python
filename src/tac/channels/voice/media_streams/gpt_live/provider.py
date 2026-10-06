@@ -122,14 +122,8 @@ class GPTLiveProvider(MediaStreamsOpenAIProvider[_CallState]):
         session_config_token: str | None = None
         if session_config is not None:
             session_config_token = uuid.uuid4().hex
-            existing_params = (twiml_options.custom_parameters or {}) if twiml_options else {}
-            twiml_options = (twiml_options or VoiceTwiMLOptionsMediaStreams()).model_copy(
-                update={
-                    "custom_parameters": {
-                        **existing_params,
-                        SESSION_CONFIG_TOKEN_PARAM: session_config_token,
-                    }
-                }
+            twiml_options = self._with_session_config_token(
+                None, twiml_options, session_config_token
             )
 
         from_number = self._resolve_from_number(options.from_)
