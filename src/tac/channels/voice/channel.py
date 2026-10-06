@@ -699,8 +699,10 @@ class VoiceChannel(BaseChannel):
         setup that has no session yet — and for end-of-call callbacks
         (`on_call_ended`, `on_conversation_ended`) still running. After the
         grace period, calls still running are cancelled (their teardown still
-        runs and fires the end-of-call hooks), then any session left is
-        released.
+        runs and fires the end-of-call hooks). Any call still held after that
+        is force-closed through its provider: the transport is closed and the
+        provider's full teardown runs — sockets, stream tasks, model
+        connection and provider state — before the session is released.
 
         Without this a scale-in drops live calls with no callback at all.
         Fail your readiness probe before calling it, so the load balancer
@@ -735,7 +737,10 @@ class VoiceChannel(BaseChannel):
                 count=len(remaining),
             )
         for conv_id in remaining:
-            await self._release_session(conv_id)
+            # The provider closes the transport and runs its full teardown
+            # (sockets, stream tasks, provider state), which also releases the
+            # channel session and fires the end-of-call hooks.
+            await self._provider._force_close_call(conv_id)
 
     def get_conversation_session_by_call_sid(self, call_sid: str) -> ConversationSession | None:
         """Look up the active voice session for a Twilio Call SID.

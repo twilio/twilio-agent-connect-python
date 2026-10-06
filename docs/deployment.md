@@ -220,7 +220,10 @@ Draining refuses new WebSocket connections and waits up to the grace period for
 calls to end naturally. That includes calls still being set up, which have no
 session yet, and end-of-call hooks that are still running. After the grace
 period it cancels calls still running, giving their teardown up to 5 seconds to
-fire the hooks, then force-releases whatever sessions remain.
+fire the hooks. Any call still held after that is force-closed: its WebSocket
+(and model connection, for Media Streams) is closed and the provider's full
+teardown runs before the session is released, so no sockets, tasks or provider
+state survive the drain.
 Fail your readiness probe *before* it runs so the balancer stops routing here,
 and keep the grace period, plus those 5 seconds, below your orchestrator's
 termination grace period or the process is killed mid-drain.

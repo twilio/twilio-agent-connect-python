@@ -520,6 +520,10 @@ class OpenAIRealtimeProvider(MediaStreamsOpenAIProvider[_CallState]):
         await self._model_send(conv_id, {"type": "response.create"})
 
     async def _cleanup_call(self, conv_id: str) -> None:
+        if conv_id not in self._calls and conv_id not in self.channel._conversations:
+            # Already torn down (e.g. a shutdown force-close ran first).
+            self._call_session_configs.pop(conv_id, None)
+            return
         call = self._calls.pop(conv_id, None)
         if call is not None and call.model_ws is not None:
             try:

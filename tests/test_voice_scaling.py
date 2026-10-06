@@ -21,7 +21,12 @@ import pytest
 from tac import TAC
 from tac.channels.voice import VoiceChannel
 from tac.channels.voice.conversation_relay import ConversationRelayProviderConfig
+from tac.channels.voice.media_streams.gpt_live import GPTLiveProviderConfig
+from tac.channels.voice.media_streams.gpt_live.models import _CallState as GPTLiveCallState
 from tac.channels.voice.media_streams.openai_realtime import OpenAIRealtimeProviderConfig
+from tac.channels.voice.media_streams.openai_realtime.models import (
+    _CallState as RealtimeCallState,
+)
 from tac.channels.voice.media_streams.openai_realtime.provider import (
     TWILIO_AUDIO_FORMAT_FOR_REALTIME,
 )
@@ -822,6 +827,80 @@ class TestDrain:
 
         assert archived == ["conv_archive"]
         assert teardown.done()
+
+    @pytest.mark.asyncio
+    async def test_force_close_tears_down_a_relay_call(self) -> None:
+        """A call still held after the grace period is torn down at the
+        transport too: socket closed and unregistered, stream task cancelled,
+        session-manager state removed — not just the channel's session."""
+        tac = TAC(get_test_config())
+        session_manager = ThreadSafeSessionManager()
+        channel = VoiceChannel(
+            tac, config=ConversationRelayProviderConfig(session_manager=session_manager)
+        )
+        call_ended: list[ConversationSession] = []
+        channel.on_call_ended(collect(call_ended))
+        websocket = AsyncMock()
+        channel._provider._websocket_manager.add_websocket("conv_force", websocket)
+        state = session_manager.get_or_create_session("conv_force")
+        state.stream_task = asyncio.create_task(asyncio.sleep(3600))
+        channel._start_conversation("conv_force", None)
+
+        await channel.aclose(grace_period=0)
+
+        websocket.close.assert_awaited_once()
+        assert state.stream_task.cancelled()
+        assert [s.conversation_id for s in call_ended] == ["conv_force"]
+        assert_no_residual_state(channel, "conv_force")
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("kind", ["openai_realtime", "gpt_live"])
+    async def test_force_close_tears_down_a_media_streams_call(self, kind: str) -> None:
+        tac = TAC(get_test_config())
+        config: Any
+        call_state: Any
+        if kind == "gpt_live":
+            config = GPTLiveProviderConfig(
+                openai_api_key="sk-test", default_session_config={"model": "gpt-live-1"}
+            )
+            call_state = GPTLiveCallState
+        else:
+            config = OpenAIRealtimeProviderConfig(openai_api_key="sk-test")
+            call_state = RealtimeCallState
+        channel = VoiceChannel(tac, config=config)
+        provider: Any = channel._provider
+        twilio_ws = AsyncMock()
+        model_ws = AsyncMock()
+        call = call_state(twilio_ws=twilio_ws, model_ws=model_ws)
+        if kind == "gpt_live":
+            call.closed_event.set()  # the model already acknowledged session.close
+        provider._calls["CA_force"] = call
+        provider._call_session_configs["CA_force"] = {"model": "per-call"}
+        channel._start_conversation("CA_force", None)
+
+        await channel.aclose(grace_period=0)
+
+        twilio_ws.close.assert_awaited_once()
+        model_ws.close.assert_awaited_once()
+        assert_no_residual_state(channel, "CA_force")
+
+    @pytest.mark.asyncio
+    async def test_teardown_after_a_force_close_is_a_no_op(self) -> None:
+        """A stuck handler that finishes after the force-close runs its own
+        cleanup again; that must not fire the end-of-call hooks twice."""
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+        call_ended: list[ConversationSession] = []
+        channel.on_call_ended(collect(call_ended))
+        channel._provider._websocket_manager.add_websocket("conv_twice", AsyncMock())
+        channel._start_conversation("conv_twice", None)
+
+        await channel.aclose(grace_period=0)
+        with patch("tac.channels.voice.conversation_relay.provider.track_event") as tracked:
+            await channel._provider._cleanup_connection("conv_twice")
+
+        assert len(call_ended) == 1
+        tracked.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_refuses_new_calls_once_draining(self) -> None:

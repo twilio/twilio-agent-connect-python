@@ -62,6 +62,19 @@ class VoiceProvider:
         """
         return False
 
+    async def _force_close_call(self, conversation_id: str) -> None:
+        """Close a call's transport and run this provider's full teardown.
+
+        Used by `VoiceChannel.aclose()` for a call still held once the drain's
+        grace period is over. Must leave none of the call's state behind, and
+        stay safe if the call's own handler later runs its teardown too.
+
+        The default suits a provider that keeps no transport state of its own:
+        it only releases the channel's session. Providers with sockets or tasks
+        override it.
+        """
+        await self.channel._release_session(conversation_id)
+
     async def handle_incoming_call(
         self,
         twiml_request: TwiMLRequest | None = None,

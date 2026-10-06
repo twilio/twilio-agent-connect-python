@@ -920,6 +920,22 @@ class ConversationRelayProvider(VoiceProvider):
                 f"Received interrupt for unknown conversation {conv_id}, skipping callback"
             )
 
+    async def _force_close_call(self, conversation_id: str) -> None:
+        """Close the call's WebSocket, then run the full connection teardown:
+        unregister the socket, cancel the stream task, drop session-manager
+        state and release the channel session."""
+        websocket = self._websocket_manager.get_websocket(conversation_id)
+        if websocket is not None:
+            try:
+                await websocket.close()
+            except Exception as e:
+                self.logger.debug(
+                    "Error closing WebSocket during shutdown",
+                    conversation_id=conversation_id,
+                    error=str(e),
+                )
+        await self._cleanup_connection(conversation_id)
+
     async def _cleanup_connection(self, conv_id: str) -> None:
         """
         Clean up WebSocket and session resources when the connection closes.
@@ -930,9 +946,19 @@ class ConversationRelayProvider(VoiceProvider):
         ``_release_session`` fires ``on_call_ended`` here and defers
         ``on_conversation_ended`` to CO's CLOSED webhook when orchestrated.
 
+        Idempotent: a second run for a call already torn down (say, by a
+        shutdown force-close before its handler finished) does nothing.
+
         Args:
             conv_id: Conversation ID
         """
+        if (
+            not self._websocket_manager.has_websocket(conv_id)
+            and not (self.session_manager is not None and self.session_manager.has_session(conv_id))
+            and conv_id not in self.channel._conversations
+        ):
+            return
+
         # Remove WebSocket from manager
         if self._websocket_manager.has_websocket(conv_id):
             self._websocket_manager.remove_websocket(conv_id)
