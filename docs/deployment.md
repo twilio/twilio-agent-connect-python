@@ -216,11 +216,14 @@ Two cases need you to do it yourself:
 - **You're not using `TACFastAPIServer`.** Call
   `await voice_channel.aclose()` from your framework's shutdown hook.
 
-Draining refuses new WebSocket connections, waits up to the grace period for
-calls to end naturally, then force-releases whatever remains so the hooks fire.
+Draining refuses new WebSocket connections and waits up to the grace period for
+calls to end naturally. That includes calls still being set up, which have no
+session yet, and end-of-call hooks that are still running. After the grace
+period it cancels calls still running, giving their teardown up to 5 seconds to
+fire the hooks, then force-releases whatever sessions remain.
 Fail your readiness probe *before* it runs so the balancer stops routing here,
-and keep the grace period below your orchestrator's termination grace period or
-the process is killed mid-drain.
+and keep the grace period, plus those 5 seconds, below your orchestrator's
+termination grace period or the process is killed mid-drain.
 
 ## What TAC does not do
 

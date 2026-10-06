@@ -44,6 +44,10 @@ CO_VOICE_CHANNEL = "VOICE"
 #: Default seconds :meth:`VoiceChannel.aclose` waits for calls to end.
 DEFAULT_DRAIN_GRACE_PERIOD = 30.0
 
+#: After the grace period, how long aclose() waits for cancelled calls to run
+#: their teardown before releasing whatever sessions remain.
+_FORCED_STOP_TIMEOUT_SECONDS = 5.0
+
 
 def _created_at_key(conversation: ConversationResponse) -> datetime:
     """Parse ``ConversationResponse.created_at`` for chronological sorting.
@@ -117,6 +121,11 @@ class VoiceChannel(BaseChannel):
         self._on_call_ended: CallEndedHandler | None = None
         self._twilio_client: Client | None = None
         self._accepting_calls = True  # cleared by aclose()
+        # Call work aclose() must wait for besides live sessions: admitted
+        # WebSocket handlers (one may still be in setup, with no session yet)
+        # and teardowns still running their end-of-call callbacks.
+        self._handler_tasks: set[asyncio.Task[Any]] = set()
+        self._releases_in_flight = 0
 
     def on_inbound_call_twiml(self, callback: InboundCallTwiMLHandler) -> None:
         """Register a callback that produces per-call overrides for the
@@ -450,7 +459,16 @@ class VoiceChannel(BaseChannel):
         session = self._conversations.pop(conv_id, None)
         if session is None:
             return None
+        # The session is gone from the store but its callbacks haven't run:
+        # count it so aclose() doesn't mistake an empty store for a finished drain.
+        self._releases_in_flight += 1
+        try:
+            return await self._run_release(conv_id, session)
+        finally:
+            self._releases_in_flight -= 1
 
+    async def _run_release(self, conv_id: str, session: ConversationSession) -> ConversationSession:
+        """The end-of-call work for a session `_release_session` just popped."""
         # Measured before the callbacks below, which are application-owned:
         # they are awaited and may do network I/O or mutate the session, and
         # neither their latency nor their edits belong in the reported duration.
@@ -669,9 +687,20 @@ class VoiceChannel(BaseChannel):
             )
         return session
 
+    def _has_call_work(self) -> bool:
+        """Whether any call is still live, being set up, or being torn down."""
+        return bool(self._conversations or self._handler_tasks or self._releases_in_flight)
+
     async def aclose(self, *, grace_period: float = DEFAULT_DRAIN_GRACE_PERIOD) -> None:
         """Drain live calls at shutdown: refuse new ones, wait up to
         ``grace_period`` seconds for the rest to end, then force-release them.
+
+        It waits for every admitted call to finish — including one still in
+        setup that has no session yet — and for end-of-call callbacks
+        (`on_call_ended`, `on_conversation_ended`) still running. After the
+        grace period, calls still running are cancelled (their teardown still
+        runs and fires the end-of-call hooks), then any session left is
+        released.
 
         Without this a scale-in drops live calls with no callback at all.
         Fail your readiness probe before calling it, so the load balancer
@@ -684,8 +713,20 @@ class VoiceChannel(BaseChannel):
 
         loop = asyncio.get_running_loop()
         deadline = loop.time() + max(grace_period, 0.0)
-        while self._conversations and loop.time() < deadline:
+        while self._has_call_work() and loop.time() < deadline:
             await asyncio.sleep(0.1)
+
+        current = asyncio.current_task()
+        stragglers = [t for t in self._handler_tasks if t is not current and not t.done()]
+        if stragglers:
+            self.logger.warning(
+                "Cancelling voice calls still running at shutdown",
+                count=len(stragglers),
+            )
+            for task in stragglers:
+                task.cancel()
+            # Let their teardown (which fires the end-of-call hooks) run.
+            await asyncio.wait(stragglers, timeout=_FORCED_STOP_TIMEOUT_SECONDS)
 
         remaining = list(self._conversations)
         if remaining:
@@ -850,7 +891,16 @@ class VoiceChannel(BaseChannel):
             provider=self._provider.provider_id,
             orchestrator_enabled=self.tac.is_orchestrator_enabled(),
         )
-        await self._provider.handle_websocket(websocket)
+        # Tracked from admission to completion, so aclose() waits for a call
+        # still in setup — before it has a session to see.
+        task = asyncio.current_task()
+        if task is not None:
+            self._handler_tasks.add(task)
+        try:
+            await self._provider.handle_websocket(websocket)
+        finally:
+            if task is not None:
+                self._handler_tasks.discard(task)
 
     async def initiate_outbound_conversation(
         self,

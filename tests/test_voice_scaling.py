@@ -744,6 +744,86 @@ class TestDrain:
         assert channel._conversations == {}
 
     @pytest.mark.asyncio
+    async def test_waits_for_a_call_still_initializing(self) -> None:
+        """An admitted WebSocket still in setup (e.g. the background CO lookup)
+        has no session yet. The drain must wait for it rather than return while
+        it can still create one."""
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+        call_ended: list[ConversationSession] = []
+        channel.on_call_ended(collect(call_ended))
+        setup_done = asyncio.Event()
+
+        async def slow_handler(websocket: Any) -> None:
+            await setup_done.wait()  # still initializing: no session yet
+            channel._start_conversation("conv_late", None)
+            await channel._release_session("conv_late")
+
+        channel._provider.handle_websocket = slow_handler  # type: ignore[method-assign]
+        handler = asyncio.create_task(channel.handle_websocket(MagicMock()))
+        await asyncio.sleep(0)  # admitted, waiting in setup
+        assert channel._conversations == {}
+
+        async def finish_setup_shortly() -> None:
+            await asyncio.sleep(0.05)
+            setup_done.set()
+
+        asyncio.create_task(finish_setup_shortly())
+        await channel.aclose(grace_period=5)
+
+        assert handler.done()
+        assert [s.conversation_id for s in call_ended] == ["conv_late"]
+        assert channel._conversations == {}
+
+    @pytest.mark.asyncio
+    async def test_cancels_a_call_still_initializing_after_the_grace_period(self) -> None:
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+        never = asyncio.Event()
+
+        async def stuck_handler(websocket: Any) -> None:
+            await never.wait()
+
+        channel._provider.handle_websocket = stuck_handler  # type: ignore[method-assign]
+        handler = asyncio.create_task(channel.handle_websocket(MagicMock()))
+        await asyncio.sleep(0)
+
+        await channel.aclose(grace_period=0.1)
+
+        assert handler.done()
+        assert handler.cancelled()
+        assert channel._conversations == {}
+
+    @pytest.mark.asyncio
+    async def test_waits_for_a_blocked_call_ended_callback(self) -> None:
+        """`_release_session` pops the session before awaiting `on_call_ended`,
+        so an empty session store doesn't mean teardown has finished."""
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+        archived: list[str] = []
+        release_callback = asyncio.Event()
+
+        async def archive(session: ConversationSession) -> None:
+            await release_callback.wait()
+            archived.append(session.conversation_id)
+
+        channel.on_call_ended(archive)
+        channel._start_conversation("conv_archive", None)
+        teardown = asyncio.create_task(channel._release_session("conv_archive"))
+        await asyncio.sleep(0)  # popped, now blocked in on_call_ended
+        assert "conv_archive" not in channel._conversations
+
+        async def finish_archiving_shortly() -> None:
+            await asyncio.sleep(0.05)
+            release_callback.set()
+
+        asyncio.create_task(finish_archiving_shortly())
+        await channel.aclose(grace_period=5)
+
+        assert archived == ["conv_archive"]
+        assert teardown.done()
+
+    @pytest.mark.asyncio
     async def test_refuses_new_calls_once_draining(self) -> None:
         tac = TAC(get_test_config())
         channel = VoiceChannel(tac)
