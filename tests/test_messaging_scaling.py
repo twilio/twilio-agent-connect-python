@@ -701,3 +701,38 @@ class TestConversationMetadata:
         await channel.process_webhook(closed(metadata={"n": 1, "x": None, "ok": "yes"}))
 
         assert results == [{"ok": "yes"}]
+
+    @pytest.mark.asyncio
+    async def test_closed_without_payload_metadata_uses_what_this_instance_wrote(self) -> None:
+        tac, channel, counter = make_sms_channel()
+        tac.conversation_orchestrator_client.create_or_reuse_conversation = AsyncMock(
+            return_value=("CH123", False)
+        )
+        results: list[dict[str, str]] = []
+
+        async def on_ended(session: ConversationSession) -> None:
+            results.append(await session.conversation_metadata())
+
+        tac.on_conversation_ended(on_ended)
+
+        await send_outbound(channel, {"appointment_id": "apt_42"})
+        await channel.process_webhook(closed())
+
+        assert results == [{"direction": "outbound", "appointment_id": "apt_42"}]
+        assert counter.count("get_conversation") == 0
+
+    @pytest.mark.asyncio
+    async def test_closed_session_metadata_is_the_payload_plus_local_entries(self) -> None:
+        tac, channel, _counter = make_sms_channel()
+        tac.conversation_orchestrator_client.create_or_reuse_conversation = AsyncMock(
+            return_value=("CH123", False)
+        )
+        seen: list[dict[str, Any]] = []
+        tac.on_conversation_ended(lambda session: seen.append(dict(session.metadata)))
+
+        await send_outbound(channel, {"appointment_id": "apt_42"})
+        await channel.process_webhook(closed(metadata={"from_payload": "yes"}))
+
+        assert seen[0]["from_payload"] == "yes"
+        assert seen[0]["appointment_id"] == "apt_42"
+        assert seen[0]["direction"] == "outbound"

@@ -717,8 +717,15 @@ class MessagingChannel(BaseChannel):
         conversation is on this channel (a CHAT close must not fire on SMS)
         and lets this work on whichever replica Twilio picked.
 
-        CLOSED also evicts this instance's metadata cache entry, and the
-        rebuilt session carries the payload's metadata.
+        CLOSED also evicts this instance's metadata cache entry. The rebuilt
+        session's `metadata` is built the same way on every replica: the
+        payload's metadata when present, with this instance's local entries
+        (if it had any) layered over it, then the session's own fields. Keys
+        held locally, including outbound metadata this instance wrote, win
+        over the payload, so they can be older than CO's values; use
+        `conversation_metadata()` for those. There the payload's metadata
+        wins; without it, what this instance wrote itself; without either, a
+        fetch on demand.
         """
         conversation_data = ConversationResponse.model_validate(event_data)
         conv_id = conversation_data.id
@@ -746,14 +753,22 @@ class MessagingChannel(BaseChannel):
         session = self._session_from_participants(conv_id, participants)
         if session is None:
             return
+        # Built the same way on every replica: the payload's metadata (when
+        # present), then this instance's local entries over it (they win, even
+        # when CO has since changed a key), then what the rebuilt session carries.
         payload_metadata = dict(conversation_data.metadata or {})
-        closed_metadata = entry.metadata if entry is not None else dict(payload_metadata)
+        closed_metadata: dict[str, Any] = dict(payload_metadata)
+        if entry is not None:
+            closed_metadata.update(entry.metadata)
         closed_metadata.update(session.metadata)
         session.metadata = closed_metadata
         if conversation_data.metadata is not None:
             session._co_metadata = payload_metadata
+        elif entry is not None and entry.co_metadata is not None:
+            # A payload without metadata says nothing; this instance wrote it itself.
+            session._co_metadata = dict(entry.co_metadata)
         else:
-            # A payload without metadata says nothing: fetch on demand.
+            # Nothing known: fetch on demand.
             session._co_metadata = None
             session._co_metadata_loader = self._co_metadata_loader(conv_id)
         if report:
@@ -824,6 +839,8 @@ class MessagingChannel(BaseChannel):
             known_co_metadata: dict[str, str] | None = co_metadata
             if reused:
                 # Existing conversation: merge ours in; CO keeps keys set earlier.
+                # This sets `direction` to `outbound` on a conversation that may have
+                # begun inbound, matching what `session.metadata` reports.
                 try:
                     patched = (
                         await self.conversation_orchestrator_client.patch_conversation_metadata(

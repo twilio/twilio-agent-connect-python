@@ -149,7 +149,9 @@ class ConversationSession(BaseModel):
         `initiate_outbound_conversation` — so it works on whichever replica
         handles the turn. It's answered locally when this process already
         knows it; otherwise it costs one Conversation Orchestrator request,
-        kept for the rest of this turn.
+        kept for the rest of this turn. When it's answered from what this
+        process wrote itself, a later change made elsewhere (another replica,
+        or another tool) isn't seen until a turn on an instance that fetches it.
 
         Returns a copy, so editing it changes nothing. Returns `{}` when the
         conversation has no metadata or the lookup fails; a failed lookup is
