@@ -125,15 +125,22 @@ a rebuild from Conversation Orchestrator restores identity — conversation id,
 `call_sid`, profile, both participants — but not a transcript.
 
 If Conversation Orchestrator closes a conversation while its call is still
-live — a closed timeout during a long hold, or your code closing it —
-`on_conversation_ended` fires at that moment with a snapshot of the live
-session, and the call keeps running. `on_call_ended` still fires when the
-call hangs up. CO starts a new conversation for the call's later traffic,
-but the live session keeps the closed conversation's id; the new
-conversation's own `on_conversation_ended` fires from a rebuilt session
-when it closes. Until the call ends, `resolve_conversation_session_by_call_sid`
-returns the old id on the replica holding the call and the new one
-elsewhere, so key cross-replica correlation on `call_sid`.
+live — a non-null voice closed timeout expiring during a long silent hold,
+or your code closing it — `on_conversation_ended` fires at that moment and
+the call keeps running. On the replica holding the call it fires from a
+snapshot of the live session; on any other replica, from a session rebuilt
+from Conversation Orchestrator (identity only). `on_call_ended` still fires
+when the call hangs up.
+
+A closed conversation takes no new communications, so the call's later
+traffic starts a new conversation in Conversation Orchestrator. The live
+session keeps the closed conversation's id; the new conversation's own
+`on_conversation_ended` fires from a rebuilt session when it closes. Until
+the call ends, `resolve_conversation_session_by_call_sid` returns the closed
+conversation's id on the replica holding the call. Elsewhere it returns the
+new conversation once one exists (an active conversation wins, then the
+newest), and the closed one before that. Key cross-replica correlation on
+`call_sid`, not the conversation id.
 
 ### Instance affinity for voice
 
@@ -141,7 +148,7 @@ A call's out-of-band webhooks — status, AMD, recording, and the
 ConversationRelay `<Connect action>` callback — carry only a `CallSid` and
 arrive independently of the WebSocket. Pointed at a load balancer they land on
 an arbitrary replica, where `get_conversation_session_by_call_sid` finds
-nothing. TAC mints those URLs, so it can make them instance-specific:
+nothing. TAC mints the URLs it controls, so it can make them instance-specific:
 
 ```python
 TACConfig(
@@ -151,8 +158,11 @@ TACConfig(
 )
 ```
 
-The WebSocket URL, the action URL, and every call-event callback then point at
-this process, so a call's webhooks come back to the replica holding it.
+The WebSocket URL and the action URL then point at this process, and so does
+every status, AMD and recording callback on calls TAC places. On inbound
+calls those callbacks come from the phone number's own configuration, which
+TAC doesn't set, so they still reach the load balancer: route them by
+`CallSid` or look the call up as below.
 
 This needs each replica to be reachable **from Twilio, over the public
 internet**, at its own hostname with a valid TLS certificate (streams are
@@ -189,7 +199,7 @@ reach the replica holding the call:
   or reading the live transcript, only works on the replica holding the call.
   Do it from the call's own callbacks (`on_message_ready`, tools), which always
   run there. Or set `instance_public_domain` so call events (status, AMD,
-  recording) land there too.
+  recording) on calls TAC places land there too.
 - **`memory_mode="once"` refresh during a call.** An INACTIVE webhook that
   reaches another replica doesn't refresh a live call's cached memory, so the
   call keeps the memory it fetched at the start.
