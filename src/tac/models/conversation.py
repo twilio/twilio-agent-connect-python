@@ -183,6 +183,11 @@ class ConversationRequest(BaseModel):
         default=None,
         description="Optional inline participants created atomically with the conversation",
     )
+    metadata: dict[str, str] | None = Field(
+        default=None,
+        description="Customer-managed key-value data stored on the conversation "
+        "(at most 8 keys; string values)",
+    )
 
     model_config = {"populate_by_name": True}
 
@@ -213,6 +218,9 @@ class ConversationResponse(BaseModel):
     )
     created_at: str | None = Field(None, alias="createdAt", description="Creation timestamp")
     updated_at: str | None = Field(None, alias="updatedAt", description="Last update timestamp")
+    metadata: dict[str, str] | None = Field(
+        None, description="Customer-managed key-value data stored on the conversation"
+    )
 
     model_config = {"populate_by_name": True}
 

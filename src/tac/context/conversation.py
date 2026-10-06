@@ -242,6 +242,7 @@ class ConversationClient(BaseAPIClient):
         self,
         name: str | None = None,
         participants: list[ParticipantRequest] | None = None,
+        metadata: dict[str, str] | None = None,
     ) -> ConversationResponse:
         """
         Create a new conversation, optionally with inline participants.
@@ -254,6 +255,7 @@ class ConversationClient(BaseAPIClient):
         Args:
             name: Conversation name (optional)
             participants: Optional list of participants to create with the conversation
+            metadata: Optional conversation metadata (string values; CO allows at most 8 keys)
 
         Returns:
             ConversationResponse object containing the created conversation details
@@ -264,9 +266,14 @@ class ConversationClient(BaseAPIClient):
         url = f"{self.base_url}/v2/Conversations"
 
         request_data = ConversationRequest(
-            configuration_id=self.configuration_id, name=name, participants=participants
+            configuration_id=self.configuration_id,
+            name=name,
+            participants=participants,
+            metadata=metadata,
         )
         request_payload = request_data.model_dump(by_alias=True, exclude_none=True)
+        # Metadata is customer data: keep its values out of logs.
+        loggable_payload = {k: v for k, v in request_payload.items() if k != "metadata"}
 
         try:
             async with self._get_client() as client:
@@ -285,7 +292,7 @@ class ConversationClient(BaseAPIClient):
                 self.logger.error(
                     f"Failed to create conversation: {e}\n"
                     f"URL: {url}\n"
-                    f"Request body: {request_payload}\n"
+                    f"Request body: {loggable_payload}\n"
                     f"Response: {e.response.text}"
                 )
             raise
@@ -298,7 +305,7 @@ class ConversationClient(BaseAPIClient):
             self.logger.error(
                 f"Failed to create conversation: {e}\n"
                 f"URL: {url}\n"
-                f"Request body: {request_payload}\n"
+                f"Request body: {loggable_payload}\n"
                 f"Response: {response_text}"
             )
             raise
@@ -306,11 +313,17 @@ class ConversationClient(BaseAPIClient):
     async def create_or_reuse_conversation(
         self,
         participants: list[ParticipantRequest],
+        metadata: dict[str, str] | None = None,
     ) -> tuple[str, bool]:
         """Create a conversation with inline participants, reusing an existing one on 409.
 
         On 409 CO returns the existing conversation ID in the
         X-Conflicting-Resource-Id response header.
+
+        Args:
+            participants: Participants to create with the conversation
+            metadata: Set at creation; not applied when an existing conversation is
+                reused — the caller patches it
 
         Returns:
             Tuple of (conversation_id, reused) where reused is True if an
@@ -321,7 +334,9 @@ class ConversationClient(BaseAPIClient):
             RuntimeError: If 409 is returned without X-Conflicting-Resource-Id header
         """
         try:
-            conversation = await self.create_conversation(participants=participants)
+            conversation = await self.create_conversation(
+                participants=participants, metadata=metadata
+            )
             return conversation.id, False
         except httpx.HTTPStatusError as e:
             if e.response.status_code != 409:
@@ -382,6 +397,59 @@ class ConversationClient(BaseAPIClient):
                 f"Request body: {request_payload}\n"
                 f"Response: {response_text}"
             )
+            raise
+
+    async def get_conversation(self, conversation_id: str) -> ConversationResponse:
+        """
+        Fetch a conversation, including its metadata.
+
+        Args:
+            conversation_id: The conversation ID to fetch
+
+        Returns:
+            ConversationResponse for the conversation
+
+        Raises:
+            httpx.HTTPError: If the API request fails
+        """
+        url = f"{self.base_url}/v2/Conversations/{conversation_id}"
+        try:
+            async with self._get_client() as client:
+                response = await client.get(url)
+                response.raise_for_status()
+                return ConversationResponse(**response.json())
+        except httpx.HTTPError as e:
+            self.logger.error(f"Failed to fetch conversation: {e}\nURL: {url}")
+            raise
+
+    async def patch_conversation_metadata(
+        self, conversation_id: str, metadata: dict[str, str]
+    ) -> ConversationResponse:
+        """
+        Merge `metadata` into a conversation's metadata.
+
+        A `PATCH` with only the given keys: other keys already on the
+        conversation are kept. Conversation Orchestrator rejects metadata
+        changes once the conversation is CLOSED.
+
+        Args:
+            conversation_id: The conversation ID to update
+            metadata: Keys to set (string values)
+
+        Returns:
+            ConversationResponse with the conversation's merged metadata
+
+        Raises:
+            httpx.HTTPError: If the API request fails
+        """
+        url = f"{self.base_url}/v2/Conversations/{conversation_id}"
+        try:
+            async with self._get_client() as client:
+                response = await client.patch(url, json={"metadata": metadata})
+                response.raise_for_status()
+                return ConversationResponse(**response.json())
+        except httpx.HTTPError as e:
+            self.logger.error(f"Failed to update conversation metadata: {e}\nURL: {url}")
             raise
 
     async def clear_status_callbacks(

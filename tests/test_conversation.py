@@ -370,6 +370,15 @@ class TestConversationModels:
         assert response.created_at == "2019-08-24T14:15:22Z"
         assert response.updated_at == "2019-08-24T14:15:22Z"
 
+    def test_conversation_response_parses_metadata(self):
+        response = ConversationResponse(
+            **{"id": "CH1", "accountId": "AC1", "metadata": {"appointment_id": "apt_42"}}
+        )
+        assert response.metadata == {"appointment_id": "apt_42"}
+
+    def test_conversation_response_metadata_defaults_to_none(self):
+        assert ConversationResponse(**{"id": "CH1", "accountId": "AC1"}).metadata is None
+
 
 class TestConversationClient:
     """Test ConversationClient API interactions."""
@@ -1268,3 +1277,88 @@ class TestConversationClient:
         assert result.memory_store_id == "MGtest456"
         assert result.display_name == "Profile-Based Configuration"
         assert result.description == "Configuration using profile-based grouping"
+
+    @pytest.mark.asyncio
+    @patch("httpx.AsyncClient")
+    async def test_create_conversation_sends_metadata(self, mock_async_client_class):
+        mock_response = Mock()
+        mock_response.json.return_value = {"id": "CH1", "accountId": "AC1"}
+        mock_response.raise_for_status = Mock()
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=mock_response)
+        mock_async_client_class.return_value.__aenter__.return_value = mock_client
+        client = ConversationClient(
+            api_key="SK1", api_secret="secret", configuration_id="conv_configuration_test123"
+        )
+
+        await client.create_conversation(metadata={"direction": "outbound"})
+
+        mock_client.post.assert_called_once_with(
+            "https://conversations.twilio.com/v2/Conversations",
+            json={
+                "configurationId": "conv_configuration_test123",
+                "metadata": {"direction": "outbound"},
+            },
+        )
+
+    @pytest.mark.asyncio
+    async def test_create_or_reuse_passes_metadata_to_create(self):
+        client = ConversationClient(
+            api_key="SK1", api_secret="secret", configuration_id="conv_configuration_test123"
+        )
+        client.create_conversation = AsyncMock(
+            return_value=ConversationResponse(id="CH1", account_id="AC1")
+        )
+
+        await client.create_or_reuse_conversation(participants=[], metadata={"k": "v"})
+
+        client.create_conversation.assert_awaited_once_with(participants=[], metadata={"k": "v"})
+
+    @pytest.mark.asyncio
+    @patch("httpx.AsyncClient")
+    async def test_get_conversation(self, mock_async_client_class):
+        mock_response = Mock()
+        mock_response.json.return_value = {
+            "id": "CH1",
+            "accountId": "AC1",
+            "metadata": {"appointment_id": "apt_42"},
+        }
+        mock_response.raise_for_status = Mock()
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(return_value=mock_response)
+        mock_async_client_class.return_value.__aenter__.return_value = mock_client
+        client = ConversationClient(
+            api_key="SK1", api_secret="secret", configuration_id="conv_configuration_test123"
+        )
+
+        result = await client.get_conversation("CH1")
+
+        mock_client.get.assert_called_once_with(
+            "https://conversations.twilio.com/v2/Conversations/CH1"
+        )
+        assert result.metadata == {"appointment_id": "apt_42"}
+
+    @pytest.mark.asyncio
+    @patch("httpx.AsyncClient")
+    async def test_patch_conversation_metadata_sends_only_metadata(self, mock_async_client_class):
+        mock_response = Mock()
+        mock_response.json.return_value = {
+            "id": "CH1",
+            "accountId": "AC1",
+            "metadata": {"existing": "kept", "direction": "outbound"},
+        }
+        mock_response.raise_for_status = Mock()
+        mock_client = AsyncMock()
+        mock_client.patch = AsyncMock(return_value=mock_response)
+        mock_async_client_class.return_value.__aenter__.return_value = mock_client
+        client = ConversationClient(
+            api_key="SK1", api_secret="secret", configuration_id="conv_configuration_test123"
+        )
+
+        result = await client.patch_conversation_metadata("CH1", {"direction": "outbound"})
+
+        mock_client.patch.assert_called_once_with(
+            "https://conversations.twilio.com/v2/Conversations/CH1",
+            json={"metadata": {"direction": "outbound"}},
+        )
+        assert result.metadata == {"existing": "kept", "direction": "outbound"}
