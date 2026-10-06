@@ -31,8 +31,11 @@ Per inbound message, in steady state:
 | `"always"` | 4 | the above, plus the profile-trait fetch and `/Recall` |
 | `"always"` with `fetch_profile_traits=False` | 3 | drops the trait fetch |
 
-TAC's own outbound echo costs **zero** — the author address matches the
-configured agent address, so it's discarded before any call is made.
+TAC's own outbound echo costs **zero** — the author address is one of the
+channel's configured senders, so it's discarded before any call is made. With
+several senders per channel, each reply goes out from the one the customer
+messaged: the webhook's recipient, or, when the webhook doesn't name one, the
+sender the conversation's participants hold.
 
 `/Recall` never returns traits, so the trait fetch is a genuinely separate
 call. If your prompts don't use `build_profile_prompt()`, turn it off:
