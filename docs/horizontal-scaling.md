@@ -1,4 +1,4 @@
-# Deploying TAC at scale
+# Horizontal scaling
 
 TAC runs as N replicas behind an ordinary load balancer and **needs no shared
 datastore** — no Redis, no database, not even as an option.

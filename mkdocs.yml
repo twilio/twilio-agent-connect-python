@@ -72,7 +72,7 @@ markdown_extensions:
 
 nav:
   - Home: index.md
-  - Deploying at scale: deployment.md
+  - Horizontal scaling: horizontal-scaling.md
   - API Reference:
       - Core: api/core.md
       - Channels: api/channels.md
