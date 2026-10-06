@@ -289,11 +289,17 @@ class ConversationClient(BaseAPIClient):
             if e.response.status_code == 409:
                 self.logger.info(f"Conversation creation returned 409 (dedup): {e}\nURL: {url}")
             else:
+                # CO may echo an offending metadata value, so log only the status then.
+                response_detail = (
+                    f"Status: {e.response.status_code}"
+                    if metadata
+                    else f"Response: {e.response.text}"
+                )
                 self.logger.error(
                     f"Failed to create conversation: {e}\n"
                     f"URL: {url}\n"
                     f"Request body: {loggable_payload}\n"
-                    f"Response: {e.response.text}"
+                    f"{response_detail}"
                 )
             raise
         except httpx.HTTPError as e:

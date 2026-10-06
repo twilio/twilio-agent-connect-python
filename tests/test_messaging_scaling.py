@@ -460,6 +460,52 @@ class TestApiCallBudget:
 
         assert counter.calls == ["list_participants"]
 
+    @pytest.mark.asyncio
+    async def test_outbound_create_costs_the_creation_calls_only(self) -> None:
+        _tac, channel, counter = make_sms_channel()
+
+        await send_outbound(channel, {"appointment_id": "apt_42"})
+
+        assert counter.calls == [
+            "create_or_reuse_conversation",
+            "list_participants",
+            "create_action",
+        ]
+
+    @pytest.mark.asyncio
+    async def test_outbound_reuse_adds_one_metadata_patch(self) -> None:
+        tac, channel, counter = make_sms_channel()
+        counter._install(
+            tac.conversation_orchestrator_client,
+            "create_or_reuse_conversation",
+            lambda *a, **k: ("CH123", True),
+        )
+
+        await send_outbound(channel, {"appointment_id": "apt_42"})
+
+        assert counter.calls == [
+            "create_or_reuse_conversation",
+            "patch_conversation_metadata",
+            "list_participants",
+            "create_action",
+        ]
+
+    @pytest.mark.asyncio
+    async def test_reading_conversation_metadata_on_another_instance_adds_one_fetch(
+        self,
+    ) -> None:
+        tac, channel, counter = make_sms_channel()
+
+        async def on_message(msg: str, session: ConversationSession, mem: Any) -> str:
+            await session.conversation_metadata()
+            return "reply"
+
+        tac.on_message_ready(on_message)
+
+        await channel.process_webhook(inbound())
+
+        assert counter.calls == ["list_participants", "get_conversation", "create_action"]
+
 
 class TestConversationMetadata:
     """Outbound metadata survives to later turns: in session.metadata on the

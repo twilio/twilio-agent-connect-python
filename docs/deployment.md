@@ -86,11 +86,13 @@ async def on_message(text, session, memory):
     appointment_id = metadata.get("appointment_id")
 ```
 
-That costs one Conversation Orchestrator request on a replica that hasn't
-seen the conversation, and nothing otherwise. `session.metadata` still
-carries values between turns, including ones you write during a turn, but
-only on the replica that handled the conversation before. Treat it as a
-per-replica scratchpad. Entries that don't fit Conversation Orchestrator's
+That costs one Conversation Orchestrator request per turn that calls
+`conversation_metadata()`, except on the replica that initiated the
+conversation, which answers from what it wrote. Metadata changed later by
+another replica or tool isn't seen on the initiating replica.
+`session.metadata` still carries values between turns, including ones you
+write during a turn, but only on the replica that handled the conversation
+before. Treat it as a per-replica scratchpad. Entries that don't fit Conversation Orchestrator's
 limits stay only in `session.metadata`, with a warning.
 
 ## Voice is pinned to one process, deliberately

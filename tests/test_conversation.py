@@ -1326,6 +1326,37 @@ class TestConversationClient:
         )
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("metadata", "body_logged"), [({"secret": "value-x"}, False), (None, True)]
+    )
+    @patch("httpx.AsyncClient")
+    async def test_create_conversation_error_log_omits_body_when_metadata_sent(
+        self, mock_async_client_class, metadata, body_logged
+    ):
+        request = httpx.Request("POST", "https://conversations.twilio.com/v2/Conversations")
+        error_response = httpx.Response(400, text="bad value-x here", request=request)
+        mock_response = Mock()
+        mock_response.raise_for_status = Mock(
+            side_effect=httpx.HTTPStatusError("failed", request=request, response=error_response)
+        )
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=mock_response)
+        mock_async_client_class.return_value.__aenter__.return_value = mock_client
+        client = ConversationClient(
+            api_key="SK1", api_secret="secret", configuration_id="conv_configuration_test123"
+        )
+
+        with patch.object(client.logger, "error") as log_error:
+            with pytest.raises(httpx.HTTPStatusError):
+                await client.create_conversation(metadata=metadata)
+
+        logged = log_error.call_args.args[0]
+        assert ("bad value-x here" in logged) is body_logged
+        assert "value-x" not in logged or body_logged
+        if not body_logged:
+            assert "Status: 400" in logged
+
+    @pytest.mark.asyncio
     async def test_create_or_reuse_passes_metadata_to_create(self):
         client = ConversationClient(
             api_key="SK1", api_secret="secret", configuration_id="conv_configuration_test123"
