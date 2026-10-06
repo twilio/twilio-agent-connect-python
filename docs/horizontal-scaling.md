@@ -23,7 +23,8 @@ leak.
 
 ### The API-call budget
 
-Per inbound message, in steady state:
+Per inbound message that gets a reply, in steady state. A turn with no reply
+makes no `POST /Actions`, so it costs one call fewer.
 
 | `memory_mode` | Calls | Which |
 |---|---|---|
@@ -47,9 +48,11 @@ TACConfig(
 )
 ```
 
-The customer's `profile_id` is read straight off the participant list — no
-profile lookup, and more reliable than resolving it from the address (which
-guesses the identifier type and misses on CHAT and RCS).
+The customer's `profile_id` is read straight off the participant list once
+Conversation Orchestrator has resolved it, so there's no profile lookup.
+That's more reliable than resolving it from the address, which guesses the
+identifier type and misses on CHAT and RCS. Until a `profile_id` is set, a
+memory fetch falls back to that address lookup, at one extra call.
 
 ### Reply with the session, not the id
 
@@ -79,8 +82,8 @@ genuinely can't, route by `conversation_id` at the load balancer.
 ### Metadata across turns
 
 Metadata you pass to `initiate_outbound_conversation` is stored on the
-conversation in Conversation Orchestrator (keys of letters, digits, `.`, `_`
-or `-`; string values up to 512 characters; at most 8 keys including TAC's
+conversation in Conversation Orchestrator (keys of up to 128 letters, digits,
+`.`, `_` or `-`; string values up to 512 characters; at most 8 keys including TAC's
 `direction`), so a reply can find it on any replica:
 
 ```python
@@ -116,8 +119,8 @@ They are not interchangeable:
 
 | Hook | Fires | Instance | Carries |
 |---|---|---|---|
-| `VoiceChannel.on_call_ended` | WebSocket teardown, always | the one holding the call | the live session — transcript, `call_sid`, your `metadata` |
-| `TAC.on_conversation_ended` | when the *conversation* closes: Conversation Orchestrator's CLOSED webhook in orchestrated mode, at teardown in relay-only and Media Streams | any instance | the session, rebuilt from Conversation Orchestrator if the call ended elsewhere |
+| `VoiceChannel.on_call_ended` | WebSocket teardown, always | the one holding the call | the live session — `call_sid`, your `metadata`, and on Media Streams the transcript |
+| `TAC.on_conversation_ended` | when the *conversation* closes: Conversation Orchestrator's CLOSED webhook in orchestrated mode, at teardown in relay-only and Media Streams | orchestrated: any instance; otherwise the one holding the call | the session, rebuilt from Conversation Orchestrator if the call ended elsewhere |
 | `VoiceChannel.on_call_status` | Twilio's Calls-API `status_callback`, only if registered before the call was placed | any instance | a `CallStatusEvent` — no session |
 
 `on_call_ended` is the only place late-call in-memory state is still reachable:
@@ -195,8 +198,10 @@ reach the replica holding the call:
   the call runs with `default_session_config` (or fails if none is set), and
   TAC logs a warning naming `instance_public_domain`. With only
   `default_session_config`, nothing here needs affinity.
-- **Acting on a live call from outside it.** Speaking with `send_response`,
-  or reading the live transcript, only works on the replica holding the call.
+- **Acting on a live call from outside it.** Speaking with `send_response`
+  (ConversationRelay; Media Streams has no text `send_response`), or reading
+  the live transcript (Media Streams), only works on the replica holding the
+  call.
   Do it from the call's own callbacks (`on_message_ready`, tools), which always
   run there. Or set `instance_public_domain` so call events (status, AMD,
   recording) on calls TAC places land there too.

@@ -920,10 +920,14 @@ class VoiceChannel(BaseChannel):
         self,
         options: InitiateVoiceConversationOptions,
     ) -> InitiateVoiceConversationResult:
-        """Initiate an outbound voice conversation.
+        """Initiate an outbound voice conversation through the active provider.
 
-        Only ``ConversationRelayProvider`` supports outbound calls today —
-        raises ``NotImplementedError`` for any other provider.
+        `ConversationRelayProvider`, `OpenAIRealtimeProvider` and
+        `GPTLiveProvider` all place outbound calls. The Media Streams
+        providers also take a per-call `session_config`, via
+        `InitiateVoiceConversationOptionsOpenAIRealtime` or
+        `InitiateVoiceConversationOptionsGPTLive`. A provider without
+        outbound support raises `NotImplementedError`.
         """
         return await self._provider.initiate_outbound_conversation(options)
 
