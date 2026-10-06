@@ -1,8 +1,8 @@
 """Pydantic models for Twilio Conversation Orchestrator API."""
 
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from tac.models.pagination import PaginationMeta
 
@@ -223,6 +223,19 @@ class ConversationResponse(BaseModel):
     )
 
     model_config = {"populate_by_name": True}
+
+    @field_validator("metadata", mode="before")
+    @classmethod
+    def _keep_string_metadata(cls, value: Any) -> dict[str, str] | None:
+        """Keep only string entries of the conversation metadata.
+
+        Values Conversation Orchestrator stores are strings, but a conversation can carry
+        metadata written by other tools. Non-string entries are dropped rather than failing
+        the whole parse, and metadata that is not a mapping becomes `None`.
+        """
+        if not isinstance(value, dict):
+            return None
+        return {k: v for k, v in value.items() if isinstance(k, str) and isinstance(v, str)}
 
 
 class ParticipantRequest(BaseModel):

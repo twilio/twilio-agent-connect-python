@@ -28,6 +28,30 @@ from tac.models.conversation import (
 class TestConversationModels:
     """Test Pydantic models for conversation API."""
 
+    def test_response_metadata_drops_non_string_entries(self):
+        """Metadata written by other tools may hold non-strings; they are dropped."""
+        response = ConversationResponse.model_validate(
+            {"id": "CH1", "accountId": "AC1", "metadata": {"n": 1, "x": None, "ok": "yes"}}
+        )
+
+        assert response.metadata == {"ok": "yes"}
+
+    def test_response_metadata_keeps_string_entries_and_none(self):
+        with_strings = ConversationResponse.model_validate(
+            {"id": "CH1", "accountId": "AC1", "metadata": {"a": "1", "b": "2"}}
+        )
+        without = ConversationResponse.model_validate({"id": "CH1", "accountId": "AC1"})
+
+        assert with_strings.metadata == {"a": "1", "b": "2"}
+        assert without.metadata is None
+
+    def test_response_metadata_that_is_not_a_dict_becomes_none(self):
+        response = ConversationResponse.model_validate(
+            {"id": "CH1", "accountId": "AC1", "metadata": ["a", "b"]}
+        )
+
+        assert response.metadata is None
+
     def test_conversation_configuration_grouping_types(self):
         """Test ConversationConfiguration accepts all valid grouping types."""
         from tac.models.conversation import ConversationConfiguration

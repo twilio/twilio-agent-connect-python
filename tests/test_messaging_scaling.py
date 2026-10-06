@@ -685,3 +685,19 @@ class TestConversationMetadata:
         _tac, channel, _counter = make_sms_channel()
         assert channel._metadata_cache._ttl == 24 * 60 * 60
         assert channel._metadata_cache._max_entries == 10_000
+
+    @pytest.mark.asyncio
+    async def test_closed_with_non_string_metadata_values_still_ends_the_conversation(
+        self,
+    ) -> None:
+        tac, channel, _counter = make_sms_channel()
+        results: list[dict[str, str]] = []
+
+        async def on_ended(session: ConversationSession) -> None:
+            results.append(await session.conversation_metadata())
+
+        tac.on_conversation_ended(on_ended)
+
+        await channel.process_webhook(closed(metadata={"n": 1, "x": None, "ok": "yes"}))
+
+        assert results == [{"ok": "yes"}]
