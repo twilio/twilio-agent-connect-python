@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import uuid
 from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
@@ -19,6 +20,7 @@ from tac.core.config import TACConfig
 from tac.models.outbound import CallOptions
 from tac.models.voice import TwiMLRequest, VoiceTwiMLOptions, VoiceTwiMLOptionsMediaStreams
 from tac.tools import TACTool
+from tac.utils.expiring_dict import ExpiringDict
 
 if TYPE_CHECKING:
     from tac.channels.voice.channel import VoiceChannel
@@ -27,6 +29,13 @@ if TYPE_CHECKING:
 #: Identifies this SDK to OpenAI on every WebSocket connection, per OpenAI's
 #: requested User-Agent pattern: [Company/Library name]/[Language] [Version].
 OPENAI_USER_AGENT = f"twilio-agent-connect/Python {__version__}"
+
+#: Reserved <Stream> custom_parameters key correlating a call's session_config
+#: override to its WebSocket start event. CallSid can't be the key: outbound,
+#: calls.create() returning it doesn't happen-before Twilio connecting the
+#: stream; inbound, the TwiML request and the stream can reach different
+#: replicas, so the config has to travel on the TwiML.
+SESSION_CONFIG_TOKEN_PARAM = "_tac_session_config_token"
 
 TCallState = TypeVar("TCallState", bound=MediaStreamsOpenAICallState)
 
@@ -56,18 +65,21 @@ class MediaStreamsOpenAIProvider(VoiceProvider, Generic[TCallState]):
         self._tools_by_name: dict[str, TACTool] = {tool.name: tool for tool in config.tools}
         self._calls: dict[str, TCallState] = {}
         self._twiml = TwiMLBuilderMediaStreams(tac_config, config)
-        # Keyed by call_sid (inbound) or a token rekeyed to call_sid on
-        # connect (outbound); set in handle_incoming_call or
-        # initiate_outbound_conversation, popped in _connect_model.
-        self._call_session_configs: dict[str, dict[str, Any]] = {}
+        # Per-call session config, minted by one Twilio request and consumed
+        # when the call's WebSocket connects. Keyed by a token rekeyed to the
+        # call's id on connect; set in handle_incoming_call or
+        # initiate_outbound_conversation, popped in _connect_model. Bounded
+        # and expiring so a call that never connects doesn't leave its entry
+        # here forever.
+        self._call_session_configs: ExpiringDict[dict[str, Any]] = ExpiringDict()
 
     def get_transcript(self, conversation_id: str) -> list[dict[str, str]]:
         """Return the transcript captured so far for an in-progress call.
 
         Lives on ``ConversationSession.metadata["transcript"]``, so once the
-        call ends (and the session is popped from ``channel._conversations``)
-        it's no longer reachable here — read it from the session an
-        ``on_conversation_ended`` handler receives instead.
+        call ends (and the session is released at WebSocket teardown) it's no
+        longer reachable here — read it from the session a
+        ``VoiceChannel.on_call_ended`` handler receives instead.
         """
         session = self.channel._conversations.get(conversation_id)
         return list(session.metadata.get("transcript", [])) if session else []
@@ -115,17 +127,39 @@ class MediaStreamsOpenAIProvider(VoiceProvider, Generic[TCallState]):
                 )
             customized = result
 
-        if (
-            self.config.on_inbound_call_session_config is not None
-            and twiml_request is not None
-            and twiml_request.call_sid is not None
-        ):
+        session_config: dict[str, Any] | None = None
+        if self.config.on_inbound_call_session_config is not None and twiml_request is not None:
             session_config = await self.config.on_inbound_call_session_config(twiml_request)
-            if session_config is not None:
-                self._call_session_configs[twiml_request.call_sid] = session_config
+
+        if session_config is not None:
+            # Ride a token for the config out on the TwiML, as outbound does,
+            # so the config can be found when the call's stream connects
+            # instead of being keyed to a CallSid.
+            token = uuid.uuid4().hex
+            customized = self._with_session_config_token(host_twiml_options, customized, token)
+            self._call_session_configs[token] = session_config
 
         return self._twiml.build(
             "handle_incoming_call", host=host_twiml_options, per_call=customized
+        )
+
+    def _with_session_config_token(
+        self,
+        host: VoiceTwiMLOptionsMediaStreams | None,
+        per_call: VoiceTwiMLOptionsMediaStreams | None,
+        token: str,
+    ) -> VoiceTwiMLOptionsMediaStreams:
+        """Return ``per_call`` with the session-config token added to the
+        stream's custom parameters.
+
+        The builder replaces whole fields, so the token is added to the
+        parameters the call would otherwise get — from ``per_call``,
+        ``default_twiml_options`` or ``host``, by the builder's precedence —
+        rather than to ``per_call``'s alone, which would drop inherited ones.
+        """
+        effective = self._twiml._build_twiml_options(host, per_call).custom_parameters or {}
+        return (per_call or VoiceTwiMLOptionsMediaStreams()).model_copy(
+            update={"custom_parameters": {**effective, SESSION_CONFIG_TOKEN_PARAM: token}}
         )
 
     def _build_call_kwargs(self, call_options: CallOptions | None) -> dict[str, Any]:
@@ -137,6 +171,30 @@ class MediaStreamsOpenAIProvider(VoiceProvider, Generic[TCallState]):
         """
         call_kwargs = call_options.to_call_kwargs() if call_options else {}
         return self._apply_call_event_callbacks(call_kwargs)
+
+    def _claim_session_config(self, token: str | None, conv_id: str) -> None:
+        """Move the session config stashed under ``token`` to this call's id.
+
+        A token this instance doesn't hold means the config was stashed on
+        another instance — the TwiML webhook or ``initiate_outbound_conversation``
+        ran somewhere other than where the stream connected — or it expired.
+        The call then falls back to ``default_session_config``, so this warns:
+        with multiple instances, per-call session configs need
+        ``TACConfig.instance_public_domain``.
+        """
+        if token is None:
+            return
+        session_config = self._call_session_configs.pop(token, None)
+        if session_config is None:
+            self.logger.warning(
+                "Per-call session_config not found on this instance; using "
+                "default_session_config. With multiple instances, set "
+                "TACConfig.instance_public_domain so the stream connects to the "
+                "instance that stashed it.",
+                conversation_id=conv_id,
+            )
+            return
+        self._call_session_configs[conv_id] = session_config
 
     async def _handle_model_events(self, conv_id: str) -> None:
         """Read model events until the socket closes, dispatching each one.
@@ -175,6 +233,27 @@ class MediaStreamsOpenAIProvider(VoiceProvider, Generic[TCallState]):
         """Interpret one event received from the model. Protocol-specific — implemented
         by each subclass."""
         raise NotImplementedError
+
+    async def _cleanup_call(self, conv_id: str) -> None:
+        """Tear down one call: close the model socket, drop the call state and
+        any stashed session config, release the channel session. Implemented by
+        each subclass; must be idempotent."""
+        raise NotImplementedError
+
+    async def _force_close_call(self, conversation_id: str) -> None:
+        """Close the call's Twilio socket, then run the provider's full call
+        teardown (model socket, call state, stashed config, channel session)."""
+        call = self._calls.get(conversation_id)
+        if call is not None and call.twilio_ws is not None:
+            try:
+                await call.twilio_ws.close()
+            except Exception as e:
+                self.logger.debug(
+                    "Error closing Twilio WebSocket during shutdown",
+                    conversation_id=conversation_id,
+                    error=str(e),
+                )
+        await self._cleanup_call(conversation_id)
 
     async def _run_tool_call(
         self, conv_id: str, name: str | None, arguments_json: str | None

@@ -8,13 +8,23 @@ test_openai_realtime_provider.py's ``TestCallEventCallbackWiring`` docstring
 for the same reasoning applied to call-event wiring.
 """
 
+import re
+from typing import Any
+from unittest.mock import MagicMock, patch
+
 import pytest
 
 from tac import TAC
 from tac.channels.voice import VoiceChannel
+from tac.channels.voice.media_streams.gpt_live import GPTLiveProviderConfig
 from tac.channels.voice.media_streams.openai_realtime import OpenAIRealtimeProviderConfig
 from tac.channels.voice.media_streams.openai_realtime.provider import (
     TWILIO_AUDIO_FORMAT_FOR_REALTIME,
+)
+from tac.channels.voice.media_streams.shared.openai_provider import SESSION_CONFIG_TOKEN_PARAM
+from tac.models.outbound import (
+    InitiateVoiceConversationOptionsGPTLive,
+    InitiateVoiceConversationOptionsOpenAIRealtime,
 )
 from tac.models.voice import (
     TwiMLRequest,
@@ -109,3 +119,145 @@ class TestHandleIncomingCallTypeChecks:
 
         with pytest.raises(TypeError, match="on_inbound_call_twiml customizer"):
             await provider.handle_incoming_call(twiml_request=TwiMLRequest(call_sid="CA1"))
+
+
+def make_media_streams_provider(kind: str, **config_kwargs: Any) -> Any:
+    tac = TAC(get_test_tac_config())
+    config: Any
+    if kind == "gpt_live":
+        config = GPTLiveProviderConfig(
+            openai_api_key="sk-test",
+            default_session_config={"model": "gpt-live-1"},
+            **config_kwargs,
+        )
+    else:
+        config = OpenAIRealtimeProviderConfig(openai_api_key="sk-test", **config_kwargs)
+    return VoiceChannel(tac, config=config)._provider
+
+
+def stream_parameters(twiml: str) -> dict[str, str]:
+    """Every <Parameter name="..." value="..."> in generated TwiML."""
+    return dict(re.findall(r'<Parameter name="([^"]*)" value="([^"]*)"', twiml))
+
+
+def stream_start(token: str | None) -> dict[str, Any]:
+    params = {} if token is None else {SESSION_CONFIG_TOKEN_PARAM: token}
+    return {"callSid": "CA1", "streamSid": "MZ1", "customParameters": params}
+
+
+@pytest.mark.parametrize("kind", ["openai_realtime", "gpt_live"])
+class TestSessionConfigClaim:
+    """A per-call session config is stashed on the instance that served the
+    TwiML webhook or placed the call; the stream must claim it there."""
+
+    def test_claims_a_config_stashed_on_this_instance(self, kind: str) -> None:
+        provider = make_media_streams_provider(kind)
+        provider._call_session_configs["t1"] = {"model": "per-call"}
+
+        with patch.object(provider.logger, "warning") as warning:
+            provider._register_call(stream_start("t1"), MagicMock())
+
+        assert provider._call_session_configs.pop("CA1") == {"model": "per-call"}
+        assert "t1" not in provider._call_session_configs
+        warning.assert_not_called()
+
+    def test_warns_when_the_config_was_stashed_elsewhere(self, kind: str) -> None:
+        provider = make_media_streams_provider(kind)
+
+        with patch.object(provider.logger, "warning") as warning:
+            provider._register_call(stream_start("t_other_instance"), MagicMock())
+
+        warning.assert_called_once()
+        assert "instance_public_domain" in warning.call_args.args[0]
+        assert "CA1" not in provider._call_session_configs
+
+    def test_a_call_without_a_per_call_config_does_not_warn(self, kind: str) -> None:
+        provider = make_media_streams_provider(kind)
+
+        with patch.object(provider.logger, "warning") as warning:
+            provider._register_call(stream_start(None), MagicMock())
+
+        warning.assert_not_called()
+
+
+class TestSessionConfigTokenKeepsInheritedParameters:
+    """The token joins the stream's custom parameters; it must not replace
+    the ones inherited from ``host_twiml_options`` or ``default_twiml_options``."""
+
+    @pytest.mark.parametrize("layer", ["host", "default"])
+    @pytest.mark.asyncio
+    async def test_inbound_keeps_inherited_parameters(self, layer: str) -> None:
+        async def session_config(req: TwiMLRequest) -> dict[str, Any]:
+            return {"model": "per-call"}
+
+        inherited = VoiceTwiMLOptionsMediaStreams(custom_parameters={"tenant": "acme"})
+        provider = make_media_streams_provider(
+            "openai_realtime",
+            on_inbound_call_session_config=session_config,
+            **({"default_twiml_options": inherited} if layer == "default" else {}),
+        )
+
+        twiml = await provider.handle_incoming_call(
+            twiml_request=TwiMLRequest(call_sid="CA1"),
+            host_twiml_options=inherited if layer == "host" else None,
+        )
+
+        params = stream_parameters(twiml)
+        assert params["tenant"] == "acme"
+        assert provider._call_session_configs[params[SESSION_CONFIG_TOKEN_PARAM]] == {
+            "model": "per-call"
+        }
+
+    @pytest.mark.asyncio
+    async def test_inbound_customizer_parameters_still_win(self) -> None:
+        async def session_config(req: TwiMLRequest) -> dict[str, Any]:
+            return {"model": "per-call"}
+
+        async def customizer(req: TwiMLRequest) -> VoiceTwiMLOptionsMediaStreams:
+            return VoiceTwiMLOptionsMediaStreams(custom_parameters={"tenant": "per-call"})
+
+        provider = make_media_streams_provider(
+            "openai_realtime",
+            default_twiml_options=VoiceTwiMLOptionsMediaStreams(
+                custom_parameters={"tenant": "acme", "plan": "gold"}
+            ),
+            on_inbound_call_session_config=session_config,
+        )
+        provider.channel.on_inbound_call_twiml(customizer)
+
+        twiml = await provider.handle_incoming_call(twiml_request=TwiMLRequest(call_sid="CA1"))
+
+        params = stream_parameters(twiml)
+        # Same whole-field precedence as without a session config: the
+        # customizer's dictionary replaces the default's.
+        assert params["tenant"] == "per-call"
+        assert "plan" not in params
+        assert SESSION_CONFIG_TOKEN_PARAM in params
+
+    @pytest.mark.parametrize("kind", ["openai_realtime", "gpt_live"])
+    @pytest.mark.asyncio
+    async def test_outbound_keeps_default_parameters(self, kind: str) -> None:
+        provider = make_media_streams_provider(
+            kind,
+            default_twiml_options=VoiceTwiMLOptionsMediaStreams(
+                custom_parameters={"tenant": "acme"}
+            ),
+        )
+        options_type: Any = (
+            InitiateVoiceConversationOptionsGPTLive
+            if kind == "gpt_live"
+            else InitiateVoiceConversationOptionsOpenAIRealtime
+        )
+        mock_client = MagicMock()
+        mock_client.calls.create.return_value = MagicMock(sid="CA_OUT")
+
+        with patch.object(provider.channel, "_get_twilio_client", return_value=mock_client):
+            await provider.initiate_outbound_conversation(
+                options_type(to="+15559998888", session_config={"model": "per-call"})
+            )
+
+        params = stream_parameters(mock_client.calls.create.call_args.kwargs["twiml"])
+        assert params["tenant"] == "acme"
+        assert provider._call_session_configs[params[SESSION_CONFIG_TOKEN_PARAM]] == {
+            "model": "per-call"
+        }

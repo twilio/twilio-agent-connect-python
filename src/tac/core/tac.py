@@ -1,4 +1,5 @@
 import asyncio
+import functools
 import inspect
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -12,11 +13,18 @@ from tac.context.memory import MemoryClient
 from tac.core.config import TACConfig
 from tac.core.logging import get_logger, setup_logging
 from tac.intelligence.operator_result_processor import OperatorResultProcessor
+from tac.models.conversation import ParticipantResponse
 from tac.models.intelligence import OperatorProcessingResult
 from tac.models.memory import ProfileLookupResponse
 from tac.models.session import ConversationSession
 from tac.models.tac import TACMemoryResponse
+from tac.utils.expiring_dict import ExpiringDict
 from tac.utils.redaction import mask_address
+
+#: How long a participant lookup is shared between the channels handling one
+#: CO webhook. Long enough to span a fan-out and its retries, short enough
+#: that participants can't drift meaningfully.
+_SHARED_PARTICIPANTS_TTL_SECONDS = 60.0
 
 
 class TAC:
@@ -130,9 +138,66 @@ class TAC:
             | None
         ) = None
 
+        # In-flight or recent participant lookups, keyed by conversation id —
+        # see _list_participants_shared.
+        self._participant_lookups: ExpiringDict[asyncio.Future[list[ParticipantResponse]]] = (
+            ExpiringDict(ttl_seconds=_SHARED_PARTICIPANTS_TTL_SECONDS)
+        )
+
     def is_orchestrator_enabled(self) -> bool:
         """True if TAC is configured with Conversation Orchestrator (not relay-only mode)."""
         return self.conversation_orchestrator_client is not None
+
+    def _has_conversation_ended_callback(self) -> bool:
+        """Whether an ``on_conversation_ended`` handler is registered.
+
+        Channels check this before rebuilding a session from Conversation
+        Orchestrator: with no handler, there is nothing to hand it to.
+        """
+        return self._conversation_ended_callback is not None
+
+    async def _list_participants_shared(self, conversation_id: str) -> list[ParticipantResponse]:
+        """List a conversation's participants, shared across channels briefly.
+
+        A CO webhook is handed to every channel, and several may need the
+        same conversation's participants — to rebuild a closed conversation's
+        session, or to report it ended. Concurrent callers share one in-flight
+        request, and later callers reuse its result until a minute after the
+        request started. A failure isn't cached. Not for paths that need fresh
+        participants, like reconciliation or resolving a session by CallSid.
+
+        Raises:
+            RuntimeError: If Conversation Orchestrator isn't configured.
+            Exception: Whatever ``list_participants`` raises.
+        """
+        client = self.conversation_orchestrator_client
+        if client is None:
+            raise RuntimeError("Conversation Orchestrator is not configured")
+        try:
+            lookup = self._participant_lookups[conversation_id]
+        except KeyError:
+            lookup = asyncio.create_task(client.list_participants(conversation_id))
+            self._participant_lookups[conversation_id] = lookup
+            lookup.add_done_callback(functools.partial(self._evict_failed_lookup, conversation_id))
+        # Shielded so one caller being cancelled doesn't cancel the lookup
+        # the other channels are waiting on.
+        return await asyncio.shield(lookup)
+
+    def _evict_failed_lookup(
+        self, conversation_id: str, lookup: asyncio.Future[list[ParticipantResponse]]
+    ) -> None:
+        """Drop a lookup that failed or was cancelled, so it isn't served from the cache.
+
+        Runs as the lookup's done-callback, so it fires even when no caller is
+        left waiting; reading ``exception()`` also marks the error retrieved.
+        """
+        if not lookup.cancelled() and lookup.exception() is None:
+            return
+        try:
+            if self._participant_lookups[conversation_id] is lookup:
+                self._participant_lookups.pop(conversation_id)
+        except KeyError:
+            pass
 
     async def retrieve_memory(
         self,
@@ -197,7 +262,11 @@ class TAC:
                     )
                     raise ValueError("No profile_id or author_info available")
 
-            if conversation_context.profile_id and not conversation_context.profile:
+            if (
+                self.config.memory_config.fetch_profile_traits
+                and conversation_context.profile_id
+                and not conversation_context.profile
+            ):
                 try:
                     profile_response = await self.conversation_memory_client.get_profile(
                         profile_id=conversation_context.profile_id,

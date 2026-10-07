@@ -187,8 +187,7 @@ async def test_conversation_created_webhook(whatsapp_channel: WhatsAppChannel) -
     # CONVERSATION_CREATED events are ignored (no action needed)
     await whatsapp_channel.process_webhook(webhook)
 
-    # Conversations are not started until COMMUNICATION_CREATED
-    assert "conv_123" not in whatsapp_channel._conversations
+    # Nothing to assert on locally — the channel stores no sessions.
 
 
 @pytest.mark.asyncio
@@ -367,8 +366,6 @@ async def test_conversation_updated_closed(whatsapp_channel: WhatsAppChannel) ->
         mock_reconcile.return_value = (mock_agent, mock_customer)
         await whatsapp_channel.process_webhook(webhook)
 
-    assert conversation_id in whatsapp_channel._conversations
-
     # Mock the conversation ended callback
     callback_called = False
     callback_context = None
@@ -386,10 +383,15 @@ async def test_conversation_updated_closed(whatsapp_channel: WhatsAppChannel) ->
         timestamp="2025-01-15T10:20:30Z",
     )
 
-    await whatsapp_channel.process_webhook(close_webhook)
+    with patch.object(
+        whatsapp_channel.tac.conversation_orchestrator_client,
+        "list_participants",
+        new=AsyncMock(return_value=[mock_agent, mock_customer]),
+    ):
+        await whatsapp_channel.process_webhook(close_webhook)
 
-    # Verify conversation was ended
-    assert conversation_id not in whatsapp_channel._conversations
+    # The session handed to the callback is rebuilt from Conversation
+    # Orchestrator, so it fires on any instance — not just this one.
     assert callback_called
     assert callback_context.conversation_id == conversation_id
 
@@ -658,6 +660,9 @@ async def test_inbound_agent_address_derived_from_recipient() -> None:
         address="whatsapp:alt_agent", participant_id="comms_participant_agent2"
     )
     customer_p = _customer_participant()
+    tac.conversation_orchestrator_client.list_participants = AsyncMock(
+        return_value=[agent_p, customer_p]
+    )
     with patch.object(
         channel, "_reconcile_participants", new=AsyncMock(return_value=(agent_p, customer_p))
     ) as mock_reconcile:
@@ -667,12 +672,9 @@ async def test_inbound_agent_address_derived_from_recipient() -> None:
         webhook["data"]["recipients"][0]["address"] = "whatsapp:alt_agent"
         await channel.process_webhook(webhook)
 
-    passed = mock_reconcile.await_args
-    agent_address = (
-        passed.kwargs.get("agent_address") if "agent_address" in passed.kwargs else passed.args[1]
-    )
-    assert agent_address.address == "whatsapp:alt_agent"
-    assert agent_address.channel == "WHATSAPP"
+    session_arg = mock_reconcile.await_args.args[0]
+    assert session_arg.ai_agent_info is not None
+    assert session_arg.ai_agent_info.address == "whatsapp:alt_agent"
 
 
 @pytest.mark.asyncio
@@ -683,6 +685,8 @@ async def test_inbound_to_unconfigured_number_is_dropped() -> None:
 
     on_error = AsyncMock()
     tac.on_error(on_error)
+    lookup = AsyncMock(return_value=[])
+    tac.conversation_orchestrator_client.list_participants = lookup
 
     with patch.object(channel, "_reconcile_participants", new=AsyncMock()) as mock_reconcile:
         webhook = create_communication_created_webhook(
@@ -693,18 +697,23 @@ async def test_inbound_to_unconfigured_number_is_dropped() -> None:
 
     mock_reconcile.assert_not_awaited()
     on_error.assert_awaited()
-    assert "conv2" not in channel._conversations
+    lookup.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_inbound_without_channel_recipients_falls_back() -> None:
-    """No WhatsApp recipient in the webhook → reconcile called with agent_address=None
-    (fallback)."""
-    tac = TAC(get_test_config())
+    """No WhatsApp recipient in the webhook → the agent address is whichever
+    configured sender the conversation's participants hold, not blindly the default."""
+    cfg = get_test_config()
+    cfg["whatsapp_numbers"] = ["whatsapp:twilio_signal_test_agent", "whatsapp:alt_agent"]
+    tac = TAC(cfg)
     channel = WhatsAppChannel(tac)
 
-    agent_p = _agent_participant()
+    agent_p = _agent_participant(address="whatsapp:alt_agent")
     customer_p = _customer_participant()
+    tac.conversation_orchestrator_client.list_participants = AsyncMock(
+        return_value=[agent_p, customer_p]
+    )
     with patch.object(
         channel, "_reconcile_participants", new=AsyncMock(return_value=(agent_p, customer_p))
     ) as mock_reconcile:
@@ -714,6 +723,6 @@ async def test_inbound_without_channel_recipients_falls_back() -> None:
         webhook["data"]["recipients"] = []
         await channel.process_webhook(webhook)
 
-    passed = mock_reconcile.await_args
-    agent_address = passed.kwargs.get("agent_address") if "agent_address" in passed.kwargs else None
-    assert agent_address is None
+    session_arg = mock_reconcile.await_args.args[0]
+    assert session_arg.ai_agent_info is not None
+    assert session_arg.ai_agent_info.address == "whatsapp:alt_agent"

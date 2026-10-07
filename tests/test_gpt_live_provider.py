@@ -15,7 +15,7 @@ from tac.channels.voice.media_streams.gpt_live import (
     GPTLiveProviderConfig,
 )
 from tac.channels.voice.media_streams.gpt_live.models import _CallState
-from tac.channels.voice.media_streams.gpt_live.provider import _SESSION_CONFIG_TOKEN_PARAM
+from tac.channels.voice.media_streams.shared.openai_provider import SESSION_CONFIG_TOKEN_PARAM
 from tac.models.outbound import (
     InitiateVoiceConversationOptions,
     InitiateVoiceConversationOptionsGPTLive,
@@ -171,7 +171,7 @@ class TestOutboundCallSessionConfig:
         assert result.call_sid == "CA_OUT"
         assert "CA_OUT" not in provider._call_session_configs
         twiml = mock_client.calls.create.call_args.kwargs["twiml"]
-        token = _extract_custom_parameter(twiml, _SESSION_CONFIG_TOKEN_PARAM)
+        token = _extract_custom_parameter(twiml, SESSION_CONFIG_TOKEN_PARAM)
         assert provider._call_session_configs[token] == _VALID_SESSION_CONFIG
 
     @pytest.mark.asyncio
@@ -196,7 +196,7 @@ class TestOutboundCallSessionConfig:
             )
 
         twiml = mock_client.calls.create.call_args.kwargs["twiml"]
-        token = _extract_custom_parameter(twiml, _SESSION_CONFIG_TOKEN_PARAM)
+        token = _extract_custom_parameter(twiml, SESSION_CONFIG_TOKEN_PARAM)
 
         twilio_ws = FakeTwilioWebSocket(
             events=[
@@ -205,7 +205,7 @@ class TestOutboundCallSessionConfig:
                     "start": {
                         "callSid": "CA_OUT4",
                         "streamSid": "MZ_OUT4",
-                        "customParameters": {_SESSION_CONFIG_TOKEN_PARAM: token},
+                        "customParameters": {SESSION_CONFIG_TOKEN_PARAM: token},
                     },
                 }
             ]
@@ -220,7 +220,7 @@ class TestOutboundCallSessionConfig:
 
         sent_session = next(m for m in model_ws.sent if m["type"] == "session.start")
         assert sent_session["session"]["instructions"] == "outbound override"
-        assert provider._call_session_configs == {}
+        assert len(provider._call_session_configs) == 0
 
     @pytest.mark.asyncio
     async def test_session_config_token_cleaned_up_if_call_creation_fails(self) -> None:
@@ -239,7 +239,7 @@ class TestOutboundCallSessionConfig:
                     )
                 )
 
-        assert provider._call_session_configs == {}
+        assert len(provider._call_session_configs) == 0
 
     @pytest.mark.asyncio
     async def test_plain_options_type_ignored_falls_back_to_default(self) -> None:
@@ -255,7 +255,7 @@ class TestOutboundCallSessionConfig:
                 InitiateVoiceConversationOptions(to="+15551234567")
             )
 
-        assert provider._call_session_configs == {}
+        assert len(provider._call_session_configs) == 0
 
     @pytest.mark.asyncio
     async def test_outbound_only_config_with_no_default_connects_via_per_call_override(
@@ -279,7 +279,7 @@ class TestOutboundCallSessionConfig:
             )
 
         twiml = mock_client.calls.create.call_args.kwargs["twiml"]
-        token = _extract_custom_parameter(twiml, _SESSION_CONFIG_TOKEN_PARAM)
+        token = _extract_custom_parameter(twiml, SESSION_CONFIG_TOKEN_PARAM)
 
         twilio_ws = FakeTwilioWebSocket(
             events=[
@@ -288,7 +288,7 @@ class TestOutboundCallSessionConfig:
                     "start": {
                         "callSid": "CA_OUT3",
                         "streamSid": "MZ_OUT3",
-                        "customParameters": {_SESSION_CONFIG_TOKEN_PARAM: token},
+                        "customParameters": {SESSION_CONFIG_TOKEN_PARAM: token},
                     },
                 }
             ]
@@ -324,7 +324,33 @@ class TestOutboundCallSessionConfig:
                 )
             )
 
-        assert provider._call_session_configs == {}
+        assert len(provider._call_session_configs) == 0
+
+    @pytest.mark.asyncio
+    async def test_outbound_call_schedules_no_expiry_task(self) -> None:
+        """The shared ExpiringDict bounds unclaimed entries; GPT-Live no longer
+        runs its own per-token timer."""
+        channel = make_channel()
+        provider = channel._provider
+
+        mock_client = MagicMock()
+        mock_client.calls.create.return_value = MagicMock(sid="CA_OUT_NO_TIMER")
+
+        tasks_before = asyncio.all_tasks()
+        with patch.object(channel, "_get_twilio_client", return_value=mock_client):
+            await provider.initiate_outbound_conversation(
+                InitiateVoiceConversationOptionsGPTLive(
+                    to="+15551234567",
+                    session_config={
+                        "model": "gpt-live-1",
+                        "audio": {"format": TWILIO_AUDIO_FORMAT_FOR_GPT_LIVE},
+                    },
+                )
+            )
+
+        assert asyncio.all_tasks() - tasks_before == set()
+        assert not hasattr(provider, "_pending_token_expiries")
+        assert len(provider._call_session_configs) == 1
 
 
 class TestHandleWebSocketLifecycle:
@@ -453,13 +479,24 @@ class TestInboundCallSessionConfig:
         channel = make_channel(on_inbound_call_session_config=customizer)
         provider = channel._provider
 
-        await provider.handle_incoming_call(
+        twiml = await provider.handle_incoming_call(
             twiml_request=TwiMLRequest(call_sid="CA_MX", caller_country="MX")
         )
-        assert provider._call_session_configs["CA_MX"]["instructions"] == "Habla en español."
+        # The config is stashed under a token that rides out on the TwiML.
+        token = _extract_custom_parameter(twiml, SESSION_CONFIG_TOKEN_PARAM)
+        assert provider._call_session_configs[token]["instructions"] == "Habla en español."
 
         twilio_ws = FakeTwilioWebSocket(
-            events=[{"event": "start", "start": {"callSid": "CA_MX", "streamSid": "MZ_MX"}}]
+            events=[
+                {
+                    "event": "start",
+                    "start": {
+                        "callSid": "CA_MX",
+                        "streamSid": "MZ_MX",
+                        "customParameters": {SESSION_CONFIG_TOKEN_PARAM: token},
+                    },
+                }
+            ]
         )
         model_ws = FakeModelWebSocket(events=[], stay_open=False)
 
@@ -471,6 +508,7 @@ class TestInboundCallSessionConfig:
 
         sent_session = next(m for m in model_ws.sent if m["type"] == "session.start")
         assert sent_session["session"]["instructions"] == "Habla en español."
+        assert token not in provider._call_session_configs
         assert "CA_MX" not in provider._call_session_configs
 
 

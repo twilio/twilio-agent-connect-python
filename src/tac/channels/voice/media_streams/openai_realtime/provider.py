@@ -22,6 +22,7 @@ import websockets
 from tac.channels.voice.media_streams.openai_realtime.models import _CallState
 from tac.channels.voice.media_streams.shared.openai_provider import (
     OPENAI_USER_AGENT,
+    SESSION_CONFIG_TOKEN_PARAM,
     MediaStreamsOpenAIProvider,
 )
 from tac.channels.websocket_protocol import WebSocketDisconnectError, WebSocketProtocol
@@ -52,13 +53,6 @@ TWILIO_AUDIO_FORMAT_FOR_REALTIME: dict[str, Any] = {"type": "audio/pcmu"}
 #: non-configurable rate, so audio byte count converts to milliseconds by
 #: this constant alone, regardless of session_config.
 _PCMU_BYTES_PER_MS = 8
-
-#: Reserved <Stream> custom_parameters key used to correlate an outbound
-#: call's session_config override to its WebSocket start event. calls.create()
-#: returning call.sid doesn't happen-before Twilio connecting the stream, so
-#: call.sid can't be the correlation key — this token, embedded in the TwiML
-#: before the call is placed, can.
-_SESSION_CONFIG_TOKEN_PARAM = "_tac_session_config_token"
 
 
 class OpenAIRealtimeProvider(MediaStreamsOpenAIProvider[_CallState]):
@@ -123,14 +117,8 @@ class OpenAIRealtimeProvider(MediaStreamsOpenAIProvider[_CallState]):
         session_config_token: str | None = None
         if session_config is not None:
             session_config_token = uuid.uuid4().hex
-            existing_params = (twiml_options.custom_parameters or {}) if twiml_options else {}
-            twiml_options = (twiml_options or VoiceTwiMLOptionsMediaStreams()).model_copy(
-                update={
-                    "custom_parameters": {
-                        **existing_params,
-                        _SESSION_CONFIG_TOKEN_PARAM: session_config_token,
-                    }
-                }
+            twiml_options = self._with_session_config_token(
+                None, twiml_options, session_config_token
             )
 
         from_number = self._resolve_from_number(options.from_)
@@ -260,11 +248,9 @@ class OpenAIRealtimeProvider(MediaStreamsOpenAIProvider[_CallState]):
         message = StreamStartMessage(**start)
         conv_id = message.conversation_id
 
-        token = message.custom_parameters.get(_SESSION_CONFIG_TOKEN_PARAM)
-        if token is not None:
-            session_config = self._call_session_configs.pop(token, None)
-            if session_config is not None:
-                self._call_session_configs[conv_id] = session_config
+        self._claim_session_config(
+            message.custom_parameters.get(SESSION_CONFIG_TOKEN_PARAM), conv_id
+        )
 
         self._calls[conv_id] = _CallState(twilio_ws=websocket)
 
@@ -528,15 +514,22 @@ class OpenAIRealtimeProvider(MediaStreamsOpenAIProvider[_CallState]):
         await self._model_send(conv_id, {"type": "response.create"})
 
     async def _cleanup_call(self, conv_id: str) -> None:
+        if conv_id not in self._calls and conv_id not in self.channel._conversations:
+            # Already torn down (e.g. a shutdown force-close ran first).
+            self._call_session_configs.pop(conv_id, None)
+            return
         call = self._calls.pop(conv_id, None)
         if call is not None and call.model_ws is not None:
             try:
                 await call.model_ws.close()
             except Exception as e:
                 self.logger.debug(f"Error closing model socket: {e}", conversation_id=conv_id)
+        # Drop any session config that was stashed for this call but never
+        # consumed (_connect_model raised, or the stream stopped before it ran).
+        self._call_session_configs.pop(conv_id, None)
 
-        # Before the end below, so Websocket Disconnected always precedes the
-        # Conversation Ended it triggers.
+        # Before the release below, so Websocket Disconnected always precedes
+        # the Conversation Ended it triggers.
         track_event(
             "Websocket Disconnected",
             self.tac_config.account_sid,
@@ -546,4 +539,4 @@ class OpenAIRealtimeProvider(MediaStreamsOpenAIProvider[_CallState]):
             orchestrator_enabled=self.channel.tac.is_orchestrator_enabled(),
         )
 
-        await self.channel._end_conversation(conv_id)
+        await self.channel._release_session(conv_id)

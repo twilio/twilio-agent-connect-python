@@ -33,6 +33,13 @@ class TwiMLBuilderBase:
         )
 
     def _default_websocket_url(self) -> str | None:
-        if not self.tac_config.voice_public_domain:
+        """The WebSocket URL derived from config.
+
+        Uses `voice_callback_domain`, so a deployment that sets
+        `instance_public_domain` pins the call to this process from its very
+        first connection.
+        """
+        domain = self.tac_config.voice_callback_domain
+        if not domain:
             return None
-        return f"wss://{self.tac_config.voice_public_domain}{self.tac_config.voice_websocket_path}"
+        return f"wss://{domain}{self.tac_config.voice_websocket_path}"

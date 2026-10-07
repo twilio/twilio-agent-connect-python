@@ -28,6 +28,30 @@ from tac.models.conversation import (
 class TestConversationModels:
     """Test Pydantic models for conversation API."""
 
+    def test_response_metadata_drops_non_string_entries(self):
+        """Metadata written by other tools may hold non-strings; they are dropped."""
+        response = ConversationResponse.model_validate(
+            {"id": "CH1", "accountId": "AC1", "metadata": {"n": 1, "x": None, "ok": "yes"}}
+        )
+
+        assert response.metadata == {"ok": "yes"}
+
+    def test_response_metadata_keeps_string_entries_and_none(self):
+        with_strings = ConversationResponse.model_validate(
+            {"id": "CH1", "accountId": "AC1", "metadata": {"a": "1", "b": "2"}}
+        )
+        without = ConversationResponse.model_validate({"id": "CH1", "accountId": "AC1"})
+
+        assert with_strings.metadata == {"a": "1", "b": "2"}
+        assert without.metadata is None
+
+    def test_response_metadata_that_is_not_a_dict_becomes_none(self):
+        response = ConversationResponse.model_validate(
+            {"id": "CH1", "accountId": "AC1", "metadata": ["a", "b"]}
+        )
+
+        assert response.metadata is None
+
     def test_conversation_configuration_grouping_types(self):
         """Test ConversationConfiguration accepts all valid grouping types."""
         from tac.models.conversation import ConversationConfiguration
@@ -369,6 +393,15 @@ class TestConversationModels:
         assert len(response.recipients) == 1
         assert response.created_at == "2019-08-24T14:15:22Z"
         assert response.updated_at == "2019-08-24T14:15:22Z"
+
+    def test_conversation_response_parses_metadata(self):
+        response = ConversationResponse(
+            **{"id": "CH1", "accountId": "AC1", "metadata": {"appointment_id": "apt_42"}}
+        )
+        assert response.metadata == {"appointment_id": "apt_42"}
+
+    def test_conversation_response_metadata_defaults_to_none(self):
+        assert ConversationResponse(**{"id": "CH1", "accountId": "AC1"}).metadata is None
 
 
 class TestConversationClient:
@@ -1268,3 +1301,119 @@ class TestConversationClient:
         assert result.memory_store_id == "MGtest456"
         assert result.display_name == "Profile-Based Configuration"
         assert result.description == "Configuration using profile-based grouping"
+
+    @pytest.mark.asyncio
+    @patch("httpx.AsyncClient")
+    async def test_create_conversation_sends_metadata(self, mock_async_client_class):
+        mock_response = Mock()
+        mock_response.json.return_value = {"id": "CH1", "accountId": "AC1"}
+        mock_response.raise_for_status = Mock()
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=mock_response)
+        mock_async_client_class.return_value.__aenter__.return_value = mock_client
+        client = ConversationClient(
+            api_key="SK1", api_secret="secret", configuration_id="conv_configuration_test123"
+        )
+
+        await client.create_conversation(metadata={"direction": "outbound"})
+
+        mock_client.post.assert_called_once_with(
+            "https://conversations.twilio.com/v2/Conversations",
+            json={
+                "configurationId": "conv_configuration_test123",
+                "metadata": {"direction": "outbound"},
+            },
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("metadata", "body_logged"), [({"secret": "value-x"}, False), (None, True)]
+    )
+    @patch("httpx.AsyncClient")
+    async def test_create_conversation_error_log_omits_body_when_metadata_sent(
+        self, mock_async_client_class, metadata, body_logged
+    ):
+        request = httpx.Request("POST", "https://conversations.twilio.com/v2/Conversations")
+        error_response = httpx.Response(400, text="bad value-x here", request=request)
+        mock_response = Mock()
+        mock_response.raise_for_status = Mock(
+            side_effect=httpx.HTTPStatusError("failed", request=request, response=error_response)
+        )
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=mock_response)
+        mock_async_client_class.return_value.__aenter__.return_value = mock_client
+        client = ConversationClient(
+            api_key="SK1", api_secret="secret", configuration_id="conv_configuration_test123"
+        )
+
+        with patch.object(client.logger, "error") as log_error:
+            with pytest.raises(httpx.HTTPStatusError):
+                await client.create_conversation(metadata=metadata)
+
+        logged = log_error.call_args.args[0]
+        assert ("bad value-x here" in logged) is body_logged
+        assert "value-x" not in logged or body_logged
+        if not body_logged:
+            assert "Status: 400" in logged
+
+    @pytest.mark.asyncio
+    async def test_create_or_reuse_passes_metadata_to_create(self):
+        client = ConversationClient(
+            api_key="SK1", api_secret="secret", configuration_id="conv_configuration_test123"
+        )
+        client.create_conversation = AsyncMock(
+            return_value=ConversationResponse(id="CH1", account_id="AC1")
+        )
+
+        await client.create_or_reuse_conversation(participants=[], metadata={"k": "v"})
+
+        client.create_conversation.assert_awaited_once_with(participants=[], metadata={"k": "v"})
+
+    @pytest.mark.asyncio
+    @patch("httpx.AsyncClient")
+    async def test_get_conversation(self, mock_async_client_class):
+        mock_response = Mock()
+        mock_response.json.return_value = {
+            "id": "CH1",
+            "accountId": "AC1",
+            "metadata": {"appointment_id": "apt_42"},
+        }
+        mock_response.raise_for_status = Mock()
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(return_value=mock_response)
+        mock_async_client_class.return_value.__aenter__.return_value = mock_client
+        client = ConversationClient(
+            api_key="SK1", api_secret="secret", configuration_id="conv_configuration_test123"
+        )
+
+        result = await client.get_conversation("CH1")
+
+        mock_client.get.assert_called_once_with(
+            "https://conversations.twilio.com/v2/Conversations/CH1"
+        )
+        assert result.metadata == {"appointment_id": "apt_42"}
+
+    @pytest.mark.asyncio
+    @patch("httpx.AsyncClient")
+    async def test_patch_conversation_metadata_sends_only_metadata(self, mock_async_client_class):
+        mock_response = Mock()
+        mock_response.json.return_value = {
+            "id": "CH1",
+            "accountId": "AC1",
+            "metadata": {"existing": "kept", "direction": "outbound"},
+        }
+        mock_response.raise_for_status = Mock()
+        mock_client = AsyncMock()
+        mock_client.patch = AsyncMock(return_value=mock_response)
+        mock_async_client_class.return_value.__aenter__.return_value = mock_client
+        client = ConversationClient(
+            api_key="SK1", api_secret="secret", configuration_id="conv_configuration_test123"
+        )
+
+        result = await client.patch_conversation_metadata("CH1", {"direction": "outbound"})
+
+        mock_client.patch.assert_called_once_with(
+            "https://conversations.twilio.com/v2/Conversations/CH1",
+            json={"metadata": {"direction": "outbound"}},
+        )
+        assert result.metadata == {"existing": "kept", "direction": "outbound"}

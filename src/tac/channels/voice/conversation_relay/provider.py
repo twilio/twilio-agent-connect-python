@@ -92,6 +92,13 @@ class ConversationRelayProvider(VoiceProvider):
             orchestrator_enabled=self.channel.tac.is_orchestrator_enabled(),
         )
 
+    @property
+    def _conversation_closed_by_orchestrator(self) -> bool:
+        # ConversationRelay asks Conversation Orchestrator to create the
+        # conversation whenever TAC is orchestrated; in relay-only mode there
+        # is no CO conversation and nothing will ever close it for us.
+        return self.channel.tac.is_orchestrator_enabled()
+
     @staticmethod
     def _caller_address(setup_msg: SetupMessage) -> str | None:
         """Return the phone number of the remote caller/callee from the setup message."""
@@ -228,8 +235,9 @@ class ConversationRelayProvider(VoiceProvider):
         )
 
         if payload.call_status == "completed" and not self.channel.tac.is_orchestrator_enabled():
-            if payload.call_sid in self.channel._conversations:
-                await self.channel._end_conversation(payload.call_sid)
+            # Relay-only: conv_id == call_sid. No-ops when the WebSocket
+            # teardown already released the session, which is the usual case.
+            await self.channel._release_session(payload.call_sid)
 
     async def _initialize_conversation(
         self,
@@ -273,8 +281,14 @@ class ConversationRelayProvider(VoiceProvider):
 
         participants = await conversation_orchestrator_client.list_participants(conv_id)
 
+        # A conversation grouped across channels may list another channel's
+        # customer first; the caller is the CUSTOMER on VOICE.
         customer_participant = next(
-            (p for p in participants if p.type == "CUSTOMER"),
+            (
+                p
+                for p in participants
+                if p.type == "CUSTOMER" and any(a.channel == "VOICE" for a in p.addresses)
+            ),
             None,
         )
         customer_address = (
@@ -912,18 +926,45 @@ class ConversationRelayProvider(VoiceProvider):
                 f"Received interrupt for unknown conversation {conv_id}, skipping callback"
             )
 
+    async def _force_close_call(self, conversation_id: str) -> None:
+        """Close the call's WebSocket, then run the full connection teardown:
+        unregister the socket, cancel the stream task, drop session-manager
+        state and release the channel session."""
+        websocket = self._websocket_manager.get_websocket(conversation_id)
+        if websocket is not None:
+            try:
+                await websocket.close()
+            except Exception as e:
+                self.logger.debug(
+                    "Error closing WebSocket during shutdown",
+                    conversation_id=conversation_id,
+                    error=str(e),
+                )
+        await self._cleanup_connection(conversation_id)
+
     async def _cleanup_connection(self, conv_id: str) -> None:
         """
-        Clean up WebSocket and session resources when connection closes.
+        Clean up WebSocket and session resources when the connection closes.
 
-        In orchestrated mode, the conversation remains tracked in
-        self.channel._conversations until the CONVERSATION_UPDATED/CLOSED webhook
-        arrives from Conversation Orchestrator. In relay-only mode there is no such webhook,
-        so we also end the conversation here.
+        Runs unconditionally — the call is over in every mode once its socket
+        is gone, so nothing local is kept waiting for a Conversation
+        Orchestrator webhook that may land on a different instance.
+        ``_release_session`` fires ``on_call_ended`` here and defers
+        ``on_conversation_ended`` to CO's CLOSED webhook when orchestrated.
+
+        Idempotent: a second run for a call already torn down (say, by a
+        shutdown force-close before its handler finished) does nothing.
 
         Args:
             conv_id: Conversation ID
         """
+        if (
+            not self._websocket_manager.has_websocket(conv_id)
+            and not (self.session_manager is not None and self.session_manager.has_session(conv_id))
+            and conv_id not in self.channel._conversations
+        ):
+            return
+
         # Remove WebSocket from manager
         if self._websocket_manager.has_websocket(conv_id):
             self._websocket_manager.remove_websocket(conv_id)
@@ -935,8 +976,8 @@ class ConversationRelayProvider(VoiceProvider):
             await session_state.cancel_stream_task()
             self.session_manager.remove_session(conv_id)
 
-        # Before the relay-only end below, so Websocket Disconnected always
-        # precedes the Conversation Ended it can trigger.
+        # Before the release below, so Websocket Disconnected always
+        # precedes any Conversation Ended that teardown reports (relay-only).
         track_event(
             "Websocket Disconnected",
             self.channel.tac.config.account_sid,
@@ -946,11 +987,7 @@ class ConversationRelayProvider(VoiceProvider):
             orchestrator_enabled=self.channel.tac.is_orchestrator_enabled(),
         )
 
-        if (
-            not self.channel.tac.is_orchestrator_enabled()
-            and conv_id in self.channel._conversations
-        ):
-            await self.channel._end_conversation(conv_id)
+        await self.channel._release_session(conv_id)
 
         self.logger.debug(
             "Cleaned up WebSocket and session resources",

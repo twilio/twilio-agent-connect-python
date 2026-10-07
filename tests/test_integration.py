@@ -251,7 +251,6 @@ class TestTACIntegration:
         ):
             await channel.process_webhook(message_webhook)
 
-        assert "CH999999" in channel._conversations
         assert callback_invoked
 
     @pytest.mark.asyncio
@@ -293,20 +292,24 @@ class TestTACIntegration:
         assert not callback_invoked
 
     @pytest.mark.asyncio
-    async def test_sms_channel_conversation_cleanup(self) -> None:
-        """CONVERSATION_UPDATED closed event cleans up local session."""
+    async def test_sms_channel_conversation_closed(self) -> None:
+        """CLOSED fires on_conversation_ended with a session rebuilt from
+        Conversation Orchestrator, whichever instance the webhook lands on."""
         tac = TAC(get_test_config())
         channel = SMSChannel(tac)
+        ended: list[ConversationSession] = []
+        tac.on_conversation_ended(lambda ctx: ended.append(ctx))
 
-        channel._conversations["CH222"] = ConversationSession(
-            conversation_id="CH222", channel="SMS"
-        )
+        with patch.object(
+            tac.conversation_orchestrator_client,
+            "list_participants",
+            return_value=make_sms_participants(conv_id="CH222"),
+        ):
+            await channel.process_webhook(
+                create_conversation_updated_webhook("CH222", "CLOSED", "2025-11-18T00:10:00.000Z")
+            )
 
-        await channel.process_webhook(
-            create_conversation_updated_webhook("CH222", "CLOSED", "2025-11-18T00:10:00.000Z")
-        )
-
-        assert "CH222" not in channel._conversations
+        assert [s.conversation_id for s in ended] == ["CH222"]
 
     @pytest.mark.asyncio
     async def test_sms_channel_multiple_concurrent_conversations(self) -> None:

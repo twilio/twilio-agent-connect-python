@@ -116,6 +116,45 @@ def _customer_participant() -> ParticipantResponse:
     )
 
 
+def participant(
+    pid: str,
+    ptype: str,
+    address: str,
+    conv_id: str = "CH123456",
+    profile_id: str | None = None,
+) -> ParticipantResponse:
+    return ParticipantResponse(
+        id=pid,
+        conversation_id=conv_id,
+        account_id="ACtest123",
+        name=address,
+        type=ptype,  # type: ignore[arg-type]
+        profile_id=profile_id,
+        addresses=[ParticipantAddress(channel="SMS", address=address)],
+    )
+
+
+def sms_participants(
+    conv_id: str = "CH123456", profile_id: str | None = None
+) -> list[ParticipantResponse]:
+    """The agent + customer pair Conversation Orchestrator holds for a healthy conversation."""
+    return [
+        participant("PA_AGENT", "AI_AGENT", "+15551234567", conv_id),
+        participant("PA_CUSTOMER", "CUSTOMER", "+12345678901", conv_id, profile_id),
+    ]
+
+
+def reconciled_session(conv_id: str = "CH123456", **kwargs: Any) -> ConversationSession:
+    """A session shaped the way an inbound webhook leaves it."""
+    return ConversationSession(
+        conversation_id=conv_id,
+        channel="SMS",
+        author_info=AuthorInfo(address="+12345678901", participant_id="PA_CUSTOMER"),
+        ai_agent_info=AuthorInfo(address="+15551234567", participant_id="PA_AGENT"),
+        **kwargs,
+    )
+
+
 def get_test_config(with_memory: bool = True) -> dict[str, Any]:
     """Get a valid test configuration."""
     config: dict[str, Any] = {
@@ -206,6 +245,11 @@ async def test_inbound_agent_address_derived_from_recipient() -> None:
 
     agent_p = _agent_participant()
     customer_p = _customer_participant()
+    tac.conversation_orchestrator_client.list_participants = AsyncMock(
+        return_value=[agent_p, customer_p]
+    )
+    seen: list[ConversationSession] = []
+    tac.on_message_ready(lambda msg, s, mem: seen.append(s))
     with patch.object(
         channel, "_reconcile_participants", new=AsyncMock(return_value=(agent_p, customer_p))
     ) as mock_reconcile:
@@ -214,12 +258,9 @@ async def test_inbound_agent_address_derived_from_recipient() -> None:
         )
         await channel.process_webhook(webhook)
 
-    passed = mock_reconcile.await_args
-    agent_address = (
-        passed.kwargs.get("agent_address") if "agent_address" in passed.kwargs else passed.args[1]
-    )
-    assert agent_address.address == "+15551234567"
-    assert agent_address.channel == "SMS"
+    session_arg = mock_reconcile.await_args.args[0]
+    assert session_arg.ai_agent_info is not None
+    assert session_arg.ai_agent_info.address == "+15551234567"
 
 
 @pytest.mark.asyncio
@@ -230,6 +271,8 @@ async def test_inbound_to_unconfigured_number_is_dropped() -> None:
 
     on_error = AsyncMock()
     tac.on_error(on_error)
+    lookup = AsyncMock(return_value=[])
+    tac.conversation_orchestrator_client.list_participants = lookup
 
     with patch.object(channel, "_reconcile_participants", new=AsyncMock()) as mock_reconcile:
         webhook = create_communication_created_webhook(
@@ -240,7 +283,7 @@ async def test_inbound_to_unconfigured_number_is_dropped() -> None:
 
     mock_reconcile.assert_not_awaited()
     on_error.assert_awaited()
-    assert "conv2" not in channel._conversations
+    lookup.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -254,6 +297,11 @@ async def test_inbound_second_number_sets_agent_info_address() -> None:
 
     agent_p = _agent_participant(address="+14440000000", participant_id="comms_participant_agent2")
     customer_p = _customer_participant()
+    tac.conversation_orchestrator_client.list_participants = AsyncMock(
+        return_value=[agent_p, customer_p]
+    )
+    seen: list[ConversationSession] = []
+    tac.on_message_ready(lambda msg, s, mem: seen.append(s))
     with patch.object(
         channel, "_reconcile_participants", new=AsyncMock(return_value=(agent_p, customer_p))
     ) as mock_reconcile:
@@ -263,13 +311,11 @@ async def test_inbound_second_number_sets_agent_info_address() -> None:
         webhook["data"]["recipients"][0]["address"] = "+14440000000"
         await channel.process_webhook(webhook)
 
-    passed = mock_reconcile.await_args
-    agent_address = (
-        passed.kwargs.get("agent_address") if "agent_address" in passed.kwargs else passed.args[1]
-    )
-    assert agent_address.address == "+14440000000"
+    session_arg = mock_reconcile.await_args.args[0]
+    assert session_arg.ai_agent_info is not None
+    assert session_arg.ai_agent_info.address == "+14440000000"
 
-    session = channel._conversations["conv_second_number"]
+    session = seen[0]
     assert session.ai_agent_info is not None
     assert session.ai_agent_info.address == "+14440000000"
     assert session.ai_agent_info.participant_id == "comms_participant_agent2"
@@ -300,6 +346,11 @@ async def test_inbound_recipient_wins_over_participant_first_address() -> None:
         ],
     )
     customer_p = _customer_participant()
+    tac.conversation_orchestrator_client.list_participants = AsyncMock(
+        return_value=[agent_p, customer_p]
+    )
+    seen: list[ConversationSession] = []
+    tac.on_message_ready(lambda msg, s, mem: seen.append(s))
     with patch.object(
         channel, "_reconcile_participants", new=AsyncMock(return_value=(agent_p, customer_p))
     ):
@@ -309,7 +360,7 @@ async def test_inbound_recipient_wins_over_participant_first_address() -> None:
         webhook["data"]["recipients"][0]["address"] = "+14440000000"  # the second number
         await channel.process_webhook(webhook)
 
-    session = channel._conversations["conv_multi_addr"]
+    session = seen[0]
     assert session.ai_agent_info is not None
     # The number the customer contacted, not the participant's first-listed address.
     assert session.ai_agent_info.address == "+14440000000"
@@ -318,12 +369,18 @@ async def test_inbound_recipient_wins_over_participant_first_address() -> None:
 
 @pytest.mark.asyncio
 async def test_inbound_without_channel_recipients_falls_back() -> None:
-    """No SMS recipient in the webhook → reconcile called with agent_address=None (fallback)."""
-    tac = TAC(get_test_config())
+    """No SMS recipient in the webhook → the agent address is whichever configured
+    number the conversation's participants hold, not blindly the default."""
+    cfg = get_test_config()
+    cfg["phone_numbers"] = ["+15551234567", "+14440000000"]
+    tac = TAC(cfg)
     channel = SMSChannel(tac)
 
-    agent_p = _agent_participant()
+    agent_p = _agent_participant(address="+14440000000")
     customer_p = _customer_participant()
+    tac.conversation_orchestrator_client.list_participants = AsyncMock(
+        return_value=[agent_p, customer_p]
+    )
     with patch.object(
         channel, "_reconcile_participants", new=AsyncMock(return_value=(agent_p, customer_p))
     ) as mock_reconcile:
@@ -333,9 +390,9 @@ async def test_inbound_without_channel_recipients_falls_back() -> None:
         webhook["data"]["recipients"] = []
         await channel.process_webhook(webhook)
 
-    passed = mock_reconcile.await_args
-    agent_address = passed.kwargs.get("agent_address") if "agent_address" in passed.kwargs else None
-    assert agent_address is None
+    session_arg = mock_reconcile.await_args.args[0]
+    assert session_arg.ai_agent_info is not None
+    assert session_arg.ai_agent_info.address == "+14440000000"
 
 
 class TestSMSChannel:
@@ -552,23 +609,20 @@ class TestSMSChannel:
 
     @pytest.mark.asyncio
     async def test_process_conversation_ended(self) -> None:
-        """Test processing onConversationRemoved event."""
+        """CLOSED with no handler registered is a no-op — and costs no API call."""
         tac = TAC(get_test_config())
         channel = SMSChannel(tac)
 
-        channel._conversations["CH123456"] = ConversationSession(
-            conversation_id="CH123456",
-            channel="SMS",
-            profile_id="profile_test_123",
-        )
-
-        # End conversation (status changed to CLOSED)
         end_webhook = create_conversation_updated_webhook(
             "CH123456", "CLOSED", "2025-11-18T00:10:00.000Z"
         )
 
-        # Should not raise
-        await channel.process_webhook(end_webhook)
+        with patch.object(
+            tac.conversation_orchestrator_client, "list_participants", new=AsyncMock()
+        ) as mock_list:
+            await channel.process_webhook(end_webhook)
+
+        mock_list.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_send_response_with_active_conversation(self) -> None:
@@ -576,18 +630,12 @@ class TestSMSChannel:
         tac = TAC(get_test_config())
         channel = SMSChannel(tac)
 
-        # Session is pre-populated as if reconcile (or outbound initiation) ran.
-        channel._conversations["CH123456"] = ConversationSession(
-            conversation_id="CH123456",
-            channel="SMS",
-            author_info=AuthorInfo(address="+12345678901", participant_id="PA_CUSTOMER"),
-            ai_agent_info=AuthorInfo(address="+15551234567", participant_id="PA_AGENT"),
-        )
+        session = reconciled_session()
 
         with patch.object(
             tac.conversation_orchestrator_client, "create_action"
         ) as mock_create_action:
-            await channel.send_response("CH123456", "Test response")
+            await channel.send_response(session, "Test response")
 
             # Verify create_action was called
             mock_create_action.assert_called_once()
@@ -615,20 +663,12 @@ class TestSMSChannel:
         tac = TAC(get_test_config())
         channel = SMSChannel(tac)
 
-        # Seed a session with participant ids + channel_id in metadata
-        # (as inbound ingestion + reconcile would).
-        channel._conversations["CH_WITH_CH_ID"] = ConversationSession(
-            conversation_id="CH_WITH_CH_ID",
-            channel="SMS",
-            author_info=AuthorInfo(address="+12345678901", participant_id="PA_CUSTOMER"),
-            ai_agent_info=AuthorInfo(address="+15551234567", participant_id="PA_AGENT"),
-            metadata={"channel_id": "SMabcdef"},
-        )
+        session = reconciled_session("CH_WITH_CH_ID", metadata={"channel_id": "SMabcdef"})
 
         with patch.object(
             tac.conversation_orchestrator_client, "create_action"
         ) as mock_create_action:
-            await channel.send_response("CH_WITH_CH_ID", "Test response")
+            await channel.send_response(session, "Test response")
 
             mock_create_action.assert_called_once()
             request = mock_create_action.call_args[0][1]
@@ -636,30 +676,23 @@ class TestSMSChannel:
             assert request.payload.channel_settings.channel_id == "SMabcdef"
 
     @pytest.mark.asyncio
-    async def test_multiple_concurrent_conversations(self) -> None:
-        """Test handling multiple concurrent conversations."""
+    async def test_closing_one_conversation_does_not_affect_another(self) -> None:
+        """Nothing is shared between conversations, because nothing is stored."""
         tac = TAC(get_test_config())
         channel = SMSChannel(tac)
+        ended: list[str] = []
+        tac.on_conversation_ended(lambda ctx: ended.append(ctx.conversation_id))
 
-        channel._conversations["CH111"] = ConversationSession(
-            conversation_id="CH111", channel="SMS", profile_id="PR111"
-        )
-        channel._conversations["CH222"] = ConversationSession(
-            conversation_id="CH222", channel="SMS", profile_id="PR222"
-        )
+        with patch.object(
+            tac.conversation_orchestrator_client,
+            "list_participants",
+            new=AsyncMock(side_effect=lambda conv_id: sms_participants(conv_id)),
+        ):
+            await channel.process_webhook(
+                create_conversation_updated_webhook("CH111", "CLOSED", "2025-11-18T00:10:00.000Z")
+            )
 
-        # Verify both conversations tracked.
-        assert "CH111" in channel._conversations
-        assert "CH222" in channel._conversations
-
-        # End first conversation (should not raise)
-        await channel.process_webhook(
-            create_conversation_updated_webhook("CH111", "CLOSED", "2025-11-18T00:10:00.000Z")
-        )
-
-        # Verify first conversation was removed
-        assert "CH111" not in channel._conversations
-        assert "CH222" in channel._conversations
+        assert ended == ["CH111"]
 
     @pytest.mark.asyncio
     async def test_ignores_unsupported_event_types(self) -> None:
@@ -688,23 +721,25 @@ class TestSMSChannel:
 
         tac.on_conversation_ended(handler)
 
-        channel._conversations["CH_CB1"] = ConversationSession(
-            conversation_id="CH_CB1", channel="SMS", profile_id="prof_cb1"
-        )
-
-        # Close conversation
-        await channel.process_webhook(
-            create_conversation_updated_webhook("CH_CB1", "CLOSED", "2025-11-18T00:10:00.000Z")
-        )
+        with patch.object(
+            tac.conversation_orchestrator_client,
+            "list_participants",
+            new=AsyncMock(return_value=sms_participants("CH_CB1", profile_id="prof_cb1")),
+        ):
+            await channel.process_webhook(
+                create_conversation_updated_webhook("CH_CB1", "CLOSED", "2025-11-18T00:10:00.000Z")
+            )
 
         assert len(captured) == 1
         assert captured[0].conversation_id == "CH_CB1"
         assert captured[0].profile_id == "prof_cb1"
         assert captured[0].channel == "SMS"
+        assert captured[0].author_info is not None
+        assert captured[0].author_info.address == "+12345678901"
 
     @pytest.mark.asyncio
-    async def test_conversation_ended_callback_error_does_not_prevent_cleanup(self) -> None:
-        """If on_conversation_ended callback raises, the session is still cleaned up."""
+    async def test_conversation_ended_callback_error_does_not_fail_the_webhook(self) -> None:
+        """A raising handler is logged, not propagated into the webhook response."""
         tac = TAC(get_test_config())
         channel = SMSChannel(tac)
 
@@ -713,15 +748,14 @@ class TestSMSChannel:
 
         tac.on_conversation_ended(bad_handler)
 
-        channel._conversations["CH_CB2"] = ConversationSession(
-            conversation_id="CH_CB2", channel="SMS", profile_id="prof_cb2"
-        )
-        await channel.process_webhook(
-            create_conversation_updated_webhook("CH_CB2", "CLOSED", "2025-11-18T00:10:00.000Z")
-        )
-
-        # Session should still be cleaned up despite the error
-        assert "CH_CB2" not in channel._conversations
+        with patch.object(
+            tac.conversation_orchestrator_client,
+            "list_participants",
+            new=AsyncMock(return_value=sms_participants("CH_CB2")),
+        ):
+            await channel.process_webhook(
+                create_conversation_updated_webhook("CH_CB2", "CLOSED", "2025-11-18T00:10:00.000Z")
+            )
 
     @pytest.mark.asyncio
     async def test_conversation_ended_async_callback(self) -> None:
@@ -735,12 +769,16 @@ class TestSMSChannel:
 
         tac.on_conversation_ended(async_handler)
 
-        channel._conversations["CH_ASYNC1"] = ConversationSession(
-            conversation_id="CH_ASYNC1", channel="SMS", profile_id="prof_async1"
-        )
-        await channel.process_webhook(
-            create_conversation_updated_webhook("CH_ASYNC1", "CLOSED", "2025-11-18T00:10:00.000Z")
-        )
+        with patch.object(
+            tac.conversation_orchestrator_client,
+            "list_participants",
+            new=AsyncMock(return_value=sms_participants("CH_ASYNC1")),
+        ):
+            await channel.process_webhook(
+                create_conversation_updated_webhook(
+                    "CH_ASYNC1", "CLOSED", "2025-11-18T00:10:00.000Z"
+                )
+            )
 
         assert len(captured) == 1
         assert captured[0].conversation_id == "CH_ASYNC1"
@@ -748,36 +786,33 @@ class TestSMSChannel:
 
     @pytest.mark.asyncio
     async def test_conversation_ended_no_callback_registered(self) -> None:
-        """Closing a conversation without a registered callback cleans up silently."""
+        """No handler → fast exit, no rebuild, no API call."""
         tac = TAC(get_test_config())
         channel = SMSChannel(tac)
 
-        # No callback registered — should not raise
-        channel._conversations["CH_NOCB"] = ConversationSession(
-            conversation_id="CH_NOCB", channel="SMS", profile_id="prof_nocb"
-        )
-        await channel.process_webhook(
-            create_conversation_updated_webhook("CH_NOCB", "CLOSED", "2025-11-18T00:10:00.000Z")
-        )
+        with patch.object(
+            tac.conversation_orchestrator_client, "list_participants", new=AsyncMock()
+        ) as mock_list:
+            await channel.process_webhook(
+                create_conversation_updated_webhook("CH_NOCB", "CLOSED", "2025-11-18T00:10:00.000Z")
+            )
 
-        assert "CH_NOCB" not in channel._conversations
+        mock_list.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_send_response_raises_when_no_customer_on_sms(self) -> None:
-        """If the session has no author_info, send_response raises — reconcile
-        (or outbound initiation) must stash both participant ids first."""
+        """A session with no recipient can't be replied to — say so, don't guess."""
         tac = TAC(get_test_config())
         channel = SMSChannel(tac)
 
-        # ai_agent_info is set, but author_info is missing — misuse.
-        channel._conversations["CH123456"] = ConversationSession(
+        session = ConversationSession(
             conversation_id="CH123456",
             channel="SMS",
             ai_agent_info=AuthorInfo(address="+15551234567", participant_id="PA_AGENT"),
         )
 
-        with pytest.raises(RuntimeError, match="without a reconciled session"):
-            await channel.send_response("CH123456", "Reply")
+        with pytest.raises(RuntimeError, match="no recipient resolved"):
+            await channel.send_response(session, "Reply")
 
     @pytest.mark.asyncio
     async def test_ignores_chat_messages(self) -> None:
