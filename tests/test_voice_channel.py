@@ -2877,7 +2877,7 @@ class TestEndCall:
         with patch.object(channel, "_get_twilio_client", return_value=mock_client):
             await channel.end_call("CA1")
 
-        channel._release_session.assert_awaited_once_with("conv_abc")
+        channel._release_session.assert_awaited_once_with("conv_abc", end_conversation=True)
 
     @pytest.mark.asyncio
     async def test_hangup_failure_returns_false_without_raising(self) -> None:
@@ -2903,7 +2903,7 @@ class TestEndCall:
         with patch.object(channel, "_get_twilio_client", return_value=mock_client):
             assert await channel.end_call("CA1") is False
 
-        channel._release_session.assert_awaited_once_with("conv_abc")
+        channel._release_session.assert_awaited_once_with("conv_abc", end_conversation=True)
 
     @pytest.mark.asyncio
     async def test_hangup_works_without_tracked_session(self) -> None:

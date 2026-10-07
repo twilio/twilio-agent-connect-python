@@ -1,9 +1,13 @@
 """The voice teardown invariant, as one assertion.
 
 However a call ends — normal hangup, abrupt disconnect, an exception during
-setup, cancellation — the process must hold nothing for it afterwards. Every
-voice test that opens a socket asserts this, so a new teardown path can't
+setup, cancellation — the process must hold nothing live for it afterwards.
+Every voice test that opens a socket asserts this, so a new teardown path can't
 quietly start leaking.
+
+The one deliberate exception: an orchestrated call's ended session waits in
+`VoiceChannel._ended_sessions` for its conversation's CLOSED webhook. That
+store is bounded and expiring, and CLOSED drops the entry, so it can't leak.
 """
 
 from __future__ import annotations
@@ -21,6 +25,7 @@ def assert_no_residual_state(channel: VoiceChannel, conv_id: str) -> None:
     stashed per-call session config.
     """
     assert conv_id not in channel._conversations, f"session for {conv_id} was not released"
+    assert conv_id not in channel._closed_while_live, f"mid-call close of {conv_id} was kept"
 
     provider: Any = channel._provider
 

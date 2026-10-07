@@ -120,12 +120,17 @@ They are not interchangeable:
 | Hook | Fires | Instance | Carries |
 |---|---|---|---|
 | `VoiceChannel.on_call_ended` | WebSocket teardown, always | the one holding the call | the live session — `call_sid`, your `metadata`, and on Media Streams the transcript |
-| `TAC.on_conversation_ended` | when the *conversation* closes: Conversation Orchestrator's CLOSED webhook in orchestrated mode, at teardown in relay-only and Media Streams | orchestrated: any instance; otherwise the one holding the call | the session, rebuilt from Conversation Orchestrator if the call ended elsewhere |
+| `TAC.on_conversation_ended` | when the *conversation* closes: Conversation Orchestrator's CLOSED webhook in orchestrated mode (or `end_call()`), at teardown in relay-only and Media Streams | orchestrated: any instance; otherwise the one holding the call | on the instance that held the call, its session as it ended; elsewhere, one rebuilt from Conversation Orchestrator |
 | `VoiceChannel.on_call_status` | Twilio's Calls-API `status_callback`, only if registered before the call was placed | any instance | a `CallStatusEvent` — no session |
 
-`on_call_ended` is the only place late-call in-memory state is still reachable:
-a rebuild from Conversation Orchestrator restores identity — conversation id,
-`call_sid`, profile, both participants — but not a transcript.
+`on_call_ended` is the one hook guaranteed to see the live session: it fires
+on the instance holding the call, every time. In orchestrated mode, that
+instance keeps the ended session (for up to a day, bounded) so a CLOSED
+reaching it hands `on_conversation_ended` the same session, `metadata`
+included. A CLOSED reaching any other replica gets a session rebuilt from
+Conversation Orchestrator, which restores identity — conversation id,
+`call_sid`, profile, both participants — but not your `metadata`. With more
+than one replica, read call state in `on_call_ended`.
 
 If Conversation Orchestrator closes a conversation while its call is still
 live — a non-null voice closed timeout expiring during a long silent hold,

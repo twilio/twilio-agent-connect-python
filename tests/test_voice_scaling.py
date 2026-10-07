@@ -991,7 +991,9 @@ class TestServerDrainWiring:
 
 class TestEndCallDoesNotDoubleFire:
     @pytest.mark.asyncio
-    async def test_orchestrated_end_call_leaves_conversation_ended_to_the_webhook(self) -> None:
+    async def test_orchestrated_end_call_fires_now_and_closed_does_not_refire(self) -> None:
+        """As on `main`: `end_call()` fires `on_conversation_ended` with the
+        live session right away, and the CLOSED that follows doesn't again."""
         tac = TAC(get_test_config())
         channel = VoiceChannel(tac)
         conversation_ended: list[ConversationSession] = []
@@ -999,18 +1001,107 @@ class TestEndCallDoesNotDoubleFire:
 
         session = channel._start_conversation("conv_end", None)
         session.call_sid = "CA_end"
+        session.metadata["order_id"] = "ord_1"
 
         with patch.object(channel, "_get_twilio_client", return_value=MagicMock()):
             await channel.end_call("CA_end")
 
-        assert conversation_ended == []
+        assert conversation_ended == [session]
+        assert conversation_ended[0].metadata["order_id"] == "ord_1"
 
-        tac.conversation_orchestrator_client.list_participants = AsyncMock(
-            return_value=voice_participants("conv_end")
-        )
+        list_participants = AsyncMock(return_value=voice_participants("conv_end"))
+        tac.conversation_orchestrator_client.list_participants = list_participants
         await channel.process_webhook(closed_webhook("conv_end"))
 
         assert len(conversation_ended) == 1
+        list_participants.assert_not_awaited()
+        assert "conv_end" not in channel._ended_sessions
+
+
+class TestClosedAfterTeardown:
+    """Orchestrated ConversationRelay: the instance that held a call keeps its
+    session for the conversation's CLOSED, so the hook gets what it got on
+    `main` — the full session, `metadata` included."""
+
+    @pytest.mark.asyncio
+    async def test_closed_on_the_same_instance_gets_the_full_session(self) -> None:
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+        ended: list[ConversationSession] = []
+        tac.on_conversation_ended(lambda s: ended.append(s))
+        list_participants = AsyncMock(return_value=voice_participants("conv_kept"))
+        tac.conversation_orchestrator_client.list_participants = list_participants
+
+        session = channel._start_conversation("conv_kept", "profile_caller")
+        session.call_sid = "CA_kept"
+        session.metadata["order_id"] = "ord_1"
+        await channel._provider._cleanup_connection("conv_kept")
+        assert ended == []
+
+        await channel.process_webhook(closed_webhook("conv_kept"))
+
+        assert ended == [session]
+        assert ended[0].metadata["order_id"] == "ord_1"
+        list_participants.assert_not_awaited()
+        assert "conv_kept" not in channel._ended_sessions
+
+    @pytest.mark.asyncio
+    async def test_a_duplicate_closed_falls_back_to_a_rebuild(self) -> None:
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+        ended: list[ConversationSession] = []
+        tac.on_conversation_ended(lambda s: ended.append(s))
+        tac.conversation_orchestrator_client.list_participants = AsyncMock(
+            return_value=voice_participants("conv_dup", call_sid="CA_dup")
+        )
+        channel._start_conversation("conv_dup", None).metadata["k"] = "v"
+        await channel._provider._cleanup_connection("conv_dup")
+
+        await channel.process_webhook(closed_webhook("conv_dup"))
+        await channel.process_webhook(closed_webhook("conv_dup"))
+
+        assert len(ended) == 2
+        assert ended[0].metadata == {"k": "v"}
+        assert ended[1].metadata == {}
+        assert ended[1].call_sid == "CA_dup"
+
+    @pytest.mark.asyncio
+    async def test_a_mid_call_close_is_not_kept_or_refired_at_teardown(self) -> None:
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+        ended: list[ConversationSession] = []
+        tac.on_conversation_ended(lambda s: ended.append(s))
+
+        live = channel._start_conversation("conv_mid", None)
+        live.call_sid = "CA_mid"
+        await channel.process_webhook(closed_webhook("conv_mid"))
+        assert len(ended) == 1
+
+        with patch.object(channel, "_get_twilio_client", return_value=MagicMock()):
+            await channel.end_call("CA_mid")
+
+        assert len(ended) == 1
+        assert "conv_mid" not in channel._ended_sessions
+        assert_no_residual_state(channel, "conv_mid")
+
+    @pytest.mark.asyncio
+    async def test_relay_only_still_fires_at_teardown_and_keeps_nothing(self) -> None:
+        tac = TAC(get_test_config(conversation_configuration_id=None))
+        channel = VoiceChannel(tac)
+        ended: list[ConversationSession] = []
+        tac.on_conversation_ended(lambda s: ended.append(s))
+
+        channel._start_conversation("CA_relay", None)
+        await channel._provider._cleanup_connection("CA_relay")
+
+        assert len(ended) == 1
+        assert "CA_relay" not in channel._ended_sessions
+
+    def test_the_kept_sessions_are_bounded(self) -> None:
+        channel = VoiceChannel(TAC(get_test_config()))
+
+        assert channel._ended_sessions._ttl == 24 * 60 * 60
+        assert channel._ended_sessions._max_entries == 10_000
 
 
 class TestInstanceAffinity:
