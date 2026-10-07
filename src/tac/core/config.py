@@ -334,11 +334,13 @@ class TACConfig(BaseModel):
     instance_public_domain: str | None = Field(
         default=None,
         description="Directly-routable host for *this process* (e.g. a Kubernetes pod's own "
-        "address). When set, every URL TAC hands Twilio for a live call — WebSocket, action "
-        "callback, status/AMD/recording — points here instead of at `voice_public_domain`, so "
-        "a call's out-of-band webhooks return to the process holding its socket. Requires "
-        "per-pod addressability; without it, leave this unset and route by `CallSid` at the "
-        "load balancer. Schemes and trailing slashes are stripped, same as "
+        "address). When set, the URLs TAC hands Twilio for a call point here instead of at "
+        "`voice_public_domain`: the WebSocket and action callback always, and the "
+        "status/AMD/recording callbacks on calls TAC places. So those webhooks return to the "
+        "process holding the call's socket. An inbound call's status/AMD/recording webhooks "
+        "come from the phone number's own configuration and still reach `voice_public_domain`. "
+        "Requires per-pod addressability; without it, leave this unset and route by `CallSid` "
+        "at the load balancer. Schemes and trailing slashes are stripped, same as "
         "`voice_public_domain`.",
     )
 
