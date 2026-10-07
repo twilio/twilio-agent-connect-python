@@ -337,7 +337,7 @@ class MessagingChannel(BaseChannel):
 
     async def send_response(
         self,
-        conversation: str | ConversationSession,
+        conversation_id: str | ConversationSession,
         response: str | AsyncGenerator[str | dict[str, Any], None],
         role: str | None = None,
     ) -> None:
@@ -350,16 +350,13 @@ class MessagingChannel(BaseChannel):
         it spends a `list_participants` call rebuilding one.
 
         Args:
-            conversation: The `ConversationSession` to reply within
-                (preferred), or the conversation id.
+            conversation_id: The `ConversationSession` to reply within
+                (preferred), or the conversation id. Named for the id it took
+                before sessions were accepted, so existing keyword calls work.
             response: Message content. Must be ``str`` — messaging channels send a
                 single complete message via the Conversation Orchestrator Send API
                 and do not support streaming (unlike the Voice channel).
             role: Optional message role (unused by messaging channels)
-
-        !!! warning "Breaking change"
-            The first parameter was named `conversation_id`. Positional calls
-            are unaffected; a call passing `conversation_id=` needs updating.
 
         Raises:
             TypeError: If response is not a string (e.g. an async generator is
@@ -370,24 +367,24 @@ class MessagingChannel(BaseChannel):
         if not isinstance(response, str):
             raise TypeError(f"{channel_name} channel only supports string responses")
 
-        if isinstance(conversation, ConversationSession):
-            session: ConversationSession | None = conversation
-            conversation_id = conversation.conversation_id
+        if isinstance(conversation_id, ConversationSession):
+            session: ConversationSession | None = conversation_id
+            conv_id = conversation_id.conversation_id
         else:
-            conversation_id = conversation
-            participants = await self._list_participants(conversation_id)
+            conv_id = conversation_id
+            participants = await self._list_participants(conv_id)
             if participants is None:
                 raise RuntimeError(
                     f"Unable to send {channel_name} message: could not read participants for "
-                    f"conversation {conversation_id}. Pass the ConversationSession from "
+                    f"conversation {conv_id}. Pass the ConversationSession from "
                     "on_message_ready or initiate_outbound_conversation to avoid this lookup."
                 )
-            session = self._session_from_participants(conversation_id, participants)
+            session = self._session_from_participants(conv_id, participants)
 
         if session is None or session.author_info is None:
             raise RuntimeError(
                 f"Unable to send {channel_name} message: no recipient resolved for "
-                f"conversation {conversation_id}. Pass the ConversationSession you were "
+                f"conversation {conv_id}. Pass the ConversationSession you were "
                 "handed by on_message_ready or initiate_outbound_conversation."
             )
 
@@ -396,7 +393,7 @@ class MessagingChannel(BaseChannel):
             if session.ai_agent_info
             else self._agent_address(session).address
         )
-        channel_settings = self._build_channel_settings(conversation_id, session)
+        channel_settings = self._build_channel_settings(conv_id, session)
 
         try:
             action_request = SendMessageActionRequest(
@@ -416,13 +413,11 @@ class MessagingChannel(BaseChannel):
                 ),
             )
 
-            await self.conversation_orchestrator_client.create_action(
-                conversation_id, action_request
-            )
+            await self.conversation_orchestrator_client.create_action(conv_id, action_request)
 
             self.logger.info(
                 f"Sent {channel_name} response via Actions API",
-                conversation_id=conversation_id,
+                conversation_id=conv_id,
                 to_address=mask_address(session.author_info.address),
                 channel_id=channel_settings.channel_id if channel_settings else None,
             )
@@ -434,13 +429,13 @@ class MessagingChannel(BaseChannel):
                 "Response Sent",
                 self.tac.config.account_sid,
                 channel=self._telemetry_channel,
-                conversation_id=conversation_id,
+                conversation_id=conv_id,
                 response_type="full",
             )
         except Exception as e:
             self.logger.error(
                 "Failed to create action",
-                conversation_id=conversation_id,
+                conversation_id=conv_id,
                 error=str(e),
                 exc_info=True,
             )

@@ -302,6 +302,21 @@ class TestTwoInstances:
 
         assert counter.calls == ["create_action"]
 
+    @pytest.mark.asyncio
+    async def test_send_response_keeps_its_conversation_id_keyword(self) -> None:
+        """`main` named the parameter `conversation_id`; keyword calls still
+        work, with an id or with the session."""
+        tac, channel, counter = make_sms_channel()
+        sessions: list[ConversationSession] = []
+        tac.on_message_ready(lambda msg, ctx, mem: sessions.append(ctx))
+        await channel.process_webhook(inbound())
+        counter.calls.clear()
+
+        await channel.send_response(conversation_id="CH123", response="by id")
+        await channel.send_response(conversation_id=sessions[0], response="by session")
+
+        assert counter.calls == ["list_participants", "create_action", "create_action"]
+
 
 class RecordingSMSChannel(SMSChannel):
     """A custom channel overriding `get_agent_address` the way `main` defined it."""
