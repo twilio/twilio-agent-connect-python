@@ -16,7 +16,9 @@ import pytest
 
 from tac import TAC
 from tac.channels.chat import ChatChannel
+from tac.channels.rcs import RCSChannel
 from tac.channels.sms import SMSChannel
+from tac.channels.whatsapp import WhatsAppChannel
 from tac.context.memory import MemoryClient
 from tac.models.conversation import ConversationResponse, ParticipantAddress, ParticipantResponse
 from tac.models.memory import (
@@ -299,6 +301,93 @@ class TestTwoInstances:
         await channel.send_response(sessions[0], "hi back")
 
         assert counter.calls == ["create_action"]
+
+
+class RecordingSMSChannel(SMSChannel):
+    """A custom channel overriding `get_agent_address` the way `main` defined it."""
+
+    def __init__(self, tac: TAC) -> None:
+        super().__init__(tac)
+        self.requested: list[object] = []
+
+    def get_agent_address(self, conversation_id: str) -> ParticipantAddress:
+        self.requested.append(conversation_id)
+        return ParticipantAddress(channel="SMS", address=AGENT_NUMBER)
+
+
+class TestGetAgentAddressCompatibility:
+    """`get_agent_address(conversation_id)` keeps `main`'s signature, for both
+    callers and subclasses that override it."""
+
+    @pytest.mark.asyncio
+    async def test_an_override_of_the_old_signature_gets_conversation_ids(self) -> None:
+        tac = TAC(get_test_config())
+        channel = RecordingSMSChannel(tac)
+        tac.on_message_ready(lambda msg, ctx, mem: "reply")
+        co = tac.conversation_orchestrator_client
+        assert co is not None
+
+        # Customer-only: reconciliation needs the agent address to add TAC.
+        with (
+            patch.object(
+                co,
+                "list_participants",
+                new=AsyncMock(
+                    return_value=[participant("PA_CUSTOMER", "CUSTOMER", CUSTOMER_NUMBER)]
+                ),
+            ),
+            patch.object(
+                co,
+                "add_participant",
+                new=AsyncMock(return_value=participant("PA_AGENT", "AI_AGENT", AGENT_NUMBER)),
+            ),
+            patch.object(co, "create_action", new=AsyncMock()) as create_action,
+        ):
+            await channel.process_webhook(inbound())
+
+        assert channel.requested
+        assert all(r == "CH123" for r in channel.requested)
+        create_action.assert_awaited_once()
+
+    @pytest.mark.parametrize(
+        ("channel_type", "expected"),
+        [
+            (SMSChannel, ParticipantAddress(channel="SMS", address=AGENT_NUMBER)),
+            (RCSChannel, ParticipantAddress(channel="RCS", address="rcs_sender")),
+            (WhatsAppChannel, ParticipantAddress(channel="WHATSAPP", address="+15559876543")),
+            (ChatChannel, ParticipantAddress(channel="CHAT", address="ai-assistant")),
+        ],
+    )
+    def test_built_in_channels_answer_by_conversation_id(
+        self, channel_type: type[Any], expected: ParticipantAddress
+    ) -> None:
+        tac = TAC(get_test_config(rcs_sender_id="rcs_sender", whatsapp_number="+15559876543"))
+
+        assert channel_type(tac).get_agent_address("CH123") == expected
+
+    @pytest.mark.asyncio
+    async def test_chat_by_id_carries_the_channel_id_this_instance_saw(self) -> None:
+        tac = TAC(get_test_config())
+        channel = ChatChannel(tac)
+        tac.on_message_ready(lambda msg, ctx, mem: None)
+        event = inbound(author_address="user@example.com", author_participant_id="PA_USER")
+        event["data"]["author"]["channel"] = "CHAT"
+        event["data"]["channelId"] = "CH_CHAT_SID"
+
+        with patch.object(
+            tac.conversation_orchestrator_client,
+            "list_participants",
+            new=AsyncMock(
+                return_value=[
+                    participant("PA_AGENT", "AI_AGENT", "ai-assistant", channel="CHAT"),
+                    participant("PA_USER", "CUSTOMER", "user@example.com", channel="CHAT"),
+                ]
+            ),
+        ):
+            await channel.process_webhook(event)
+
+        assert channel.get_agent_address("CH123").channel_id == "CH_CHAT_SID"
+        assert ChatChannel(tac).get_agent_address("CH123").channel_id is None
 
 
 class TestReplyRecipient:

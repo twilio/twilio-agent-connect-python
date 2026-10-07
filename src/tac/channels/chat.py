@@ -64,10 +64,20 @@ class ChatChannel(MessagingChannel):
     def is_default_agent_address(self, author_address: str) -> bool:
         return author_address == self.agent_address
 
-    def get_agent_address(self, session: ConversationSession) -> ParticipantAddress:
-        # channelId is per-conversation, so it comes off the session rather
-        # than config — the inbound webhook puts it there.
-        channel_id = session.metadata.get("channel_id")
+    def get_agent_address(self, conversation_id: str) -> ParticipantAddress:
+        # channelId is per-conversation: read it from what this instance
+        # remembers of the conversation, if anything.
+        try:
+            metadata = self._metadata_cache[conversation_id].metadata
+        except KeyError:
+            metadata = {}
+        return self._chat_address(metadata.get("channel_id"))
+
+    def _agent_address(self, session: ConversationSession) -> ParticipantAddress:
+        # channelId comes off the session; the inbound webhook puts it there.
+        return self._chat_address(session.metadata.get("channel_id"))
+
+    def _chat_address(self, channel_id: object) -> ParticipantAddress:
         return ParticipantAddress(
             channel="CHAT",
             address=self.agent_address,

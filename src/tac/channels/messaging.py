@@ -107,7 +107,7 @@ class MessagingChannel(BaseChannel):
     Subclasses must implement:
 
     - `is_default_agent_address()`: Fast-path check for the channel's default agent address
-    - `get_agent_address(session)`: Return the agent's `ParticipantAddress` for a session
+    - `get_agent_address(conversation_id)`: Return the agent's `ParticipantAddress`
     - `get_channel_name()`: Return channel name (`"SMS"`, `"RCS"`, `"WHATSAPP"`, `"CHAT"`)
 
     `send_response()` is provided here as a shared implementation. Subclasses may
@@ -230,19 +230,23 @@ class MessagingChannel(BaseChannel):
             return None
 
     @abstractmethod
-    def get_agent_address(self, session: ConversationSession) -> ParticipantAddress:
-        """Return the agent-side ParticipantAddress for this session.
+    def get_agent_address(self, conversation_id: str) -> ParticipantAddress:
+        """Return the agent-side ParticipantAddress for this conversation.
 
         Identifies which participant represents the agent, and supplies the
-        `from` address for outbound sends. Reads the session where the address
-        isn't pure config — chat's per-conversation `channelId`, for instance.
-
-        !!! warning "Breaking change"
-            Was `get_agent_address(conversation_id: str)`. It takes the session
-            now because the channel no longer holds one to look up. Subclasses
-            outside TAC must update their override.
+        `from` address for outbound sends. May read state this instance keeps
+        for the conversation (e.g. chat's per-conversation `channelId`).
         """
         pass
+
+    def _agent_address(self, session: ConversationSession) -> ParticipantAddress:
+        """The agent-side address for `session`; what TAC's own paths call.
+
+        Defaults to `get_agent_address(session.conversation_id)`, so a subclass
+        overriding only that keeps working. TAC's channels override this to
+        read the session directly.
+        """
+        return self.get_agent_address(session.conversation_id)
 
     def _build_channel_settings(
         self, conversation_id: str, session: ConversationSession
@@ -294,7 +298,7 @@ class MessagingChannel(BaseChannel):
         agent_address = (
             ParticipantAddress(channel=channel_name, address=owned)
             if owned is not None
-            else self.get_agent_address(session)
+            else self._agent_address(session)
         )
 
         def _matches_channel(p: ParticipantResponse) -> bool:
@@ -390,7 +394,7 @@ class MessagingChannel(BaseChannel):
         agent_address = (
             session.ai_agent_info.address
             if session.ai_agent_info
-            else self.get_agent_address(session).address
+            else self._agent_address(session).address
         )
         channel_settings = self._build_channel_settings(conversation_id, session)
 
@@ -551,11 +555,11 @@ class MessagingChannel(BaseChannel):
             address=communication.author.address,
             participant_id=communication.author.participant_id,
         )
-        # Set before get_agent_address: chat's agent address carries channelId.
+        # Set before _agent_address: chat's agent address carries channelId.
         if communication.channel_id:
             session.metadata["channel_id"] = communication.channel_id
         session.ai_agent_info = AuthorInfo(
-            address=agent_address or self.get_agent_address(session).address
+            address=agent_address or self._agent_address(session).address
         )
         self._bind_session_metadata(session, self._cached_conversation(conv_id))
         return session
@@ -980,7 +984,7 @@ class MessagingChannel(BaseChannel):
         agent_address = (
             ParticipantAddress(channel=channel, address=session.ai_agent_info.address)
             if session.ai_agent_info is not None
-            else self.get_agent_address(session)
+            else self._agent_address(session)
         )
 
         def _owns_agent_address(p: ParticipantResponse) -> bool:
@@ -1102,7 +1106,7 @@ class MessagingChannel(BaseChannel):
             conversation_id=session.conversation_id,
             channel=channel,
         )
-        return self.get_agent_address(session)
+        return self._agent_address(session)
 
     async def _resolve_customer_profile(
         self,

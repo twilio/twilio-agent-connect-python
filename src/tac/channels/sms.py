@@ -11,7 +11,6 @@ from tac.models.outbound import (
     InitiateConversationResult,
     InitiateMessagingConversationOptions,
 )
-from tac.models.session import ConversationSession
 
 
 class SMSChannelConfig(MessagingChannelConfig):
@@ -63,7 +62,7 @@ class SMSChannel(MessagingChannel):
     def is_default_agent_address(self, author_address: str) -> bool:
         return author_address in self.tac.config.phone_numbers
 
-    def get_agent_address(self, session: ConversationSession) -> ParticipantAddress:
+    def get_agent_address(self, conversation_id: str) -> ParticipantAddress:
         if self.tac.config.phone_number is None:
             raise RuntimeError("phone_number is required for SMS channel.")
         return ParticipantAddress(channel="SMS", address=self.tac.config.phone_number)
