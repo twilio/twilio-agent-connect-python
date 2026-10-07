@@ -101,6 +101,20 @@ write during a turn, but only on the replica that handled the conversation
 before. Treat it as a per-replica scratchpad. Entries that don't fit Conversation Orchestrator's
 limits stay only in `session.metadata`, with a warning.
 
+### When a conversation closes
+
+`on_conversation_ended` fires on whichever replica receives Conversation
+Orchestrator's CLOSED webhook, for every closed conversation in your
+conversation configuration that has a participant on that channel. That
+includes conversations this process never handled, for example after a
+restart. Don't assume an earlier `on_message_ready` ran on the same replica.
+
+The session is built from the conversation's participants: the same
+`profile_id`, customer and agent as during the conversation. Its `metadata`
+is Conversation Orchestrator's, plus anything this replica kept from earlier
+turns. It carries no profile traits (`session.profile`) or cached memory, and
+its `started_at` is when it was rebuilt.
+
 ## Voice is pinned to one process, deliberately
 
 A live WebSocket ties a call to the process that accepted it for the call's
