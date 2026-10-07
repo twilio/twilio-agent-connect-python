@@ -43,13 +43,27 @@ _METADATA_CACHE_MAX_ENTRIES = 10_000
 
 
 @dataclass
+class _CachedIdentity:
+    """Both sides of a conversation as last reconciled on this instance.
+
+    Stand-ins for when the participant lookup fails: `main` kept them on its
+    in-memory session and answered later turns without a lookup.
+    """
+
+    author: AuthorInfo
+    agent: AuthorInfo
+    profile_id: str | None
+
+
+@dataclass
 class _CachedConversation:
     """What this instance remembers about a conversation between webhooks.
 
     Best-effort: another instance, a restart or an eviction starts empty, and
     nothing relies on it for correctness. It gives `session.metadata` its
-    per-instance persistence across turns, and answers
-    `conversation_metadata()` without a lookup when the CO metadata is known.
+    per-instance persistence across turns, answers `conversation_metadata()`
+    without a lookup when the CO metadata is known, and keeps the last
+    reconciled participants (`identity`) for a turn whose lookup fails.
 
     `co_metadata` is only metadata **this instance wrote itself** (at outbound
     initiation), so a later change made on another instance is not seen here.
@@ -58,6 +72,7 @@ class _CachedConversation:
 
     metadata: dict[str, Any]
     co_metadata: dict[str, str] | None = None
+    identity: _CachedIdentity | None = None
 
 
 class MessagingChannelConfig(BaseModel):
@@ -612,56 +627,26 @@ class MessagingChannel(BaseChannel):
         session = self._resolve_session(conv_id, communication_data, inbound_agent_address)
 
         # One participant fetch per message, shared by the self-message check,
-        # reconciliation, and profile resolution. All three need it, and none
-        # can proceed without it.
+        # reconciliation, and profile resolution. All three need it. If it
+        # fails, fall back to the participants this instance last reconciled,
+        # as main did; with none, the message can't be answered.
         participants = await self._list_participants(conv_id)
         if participants is None:
-            await self._drop_inbound(
-                conv_id, channel, "Could not read participants; inbound message dropped"
+            if not self._restore_identity(session, inbound_agent_address):
+                await self._drop_inbound(
+                    conv_id, channel, "Could not read participants; inbound message dropped"
+                )
+                return
+            self.logger.warning(
+                "Could not read participants; answering with this instance's "
+                "last-known participants",
+                conversation_id=conv_id,
+                channel=channel,
             )
+        elif not await self._resolve_participants(
+            session, communication_data, participants, inbound_agent_address
+        ):
             return
-
-        if self._is_own_message(communication_data.author.participant_id, participants, conv_id):
-            return
-
-        if inbound_agent_address is None and self.derive_inbound_agent_from_recipients:
-            # The webhook didn't say which of TAC's senders was messaged: find
-            # one the conversation's participants own, else the default.
-            assert session.ai_agent_info is not None  # set by _resolve_session
-            session.ai_agent_info.address = self._fallback_agent_address(
-                session, participants, channel
-            ).address
-
-        # Reconcile participant types pre-LLM so v1-bridge's UNKNOWN gets
-        # promoted to CUSTOMER (with a Conversation Memory profile attached when
-        # possible) and to resolve both participant ids for the reply. If it
-        # can't identify both sides, any eventual reply would fail too — skip
-        # the callback rather than waste an LLM turn on an un-replyable
-        # conversation. Running it every message is free: it reuses the list
-        # above, and the happy-path row issues no writes.
-        resolved = await self._reconcile_participants(session, participants)
-        if resolved is None:
-            await self._drop_inbound(
-                conv_id, channel, "Participant reconciliation failed; inbound message dropped"
-            )
-            return
-
-        agent_participant, customer_participant = resolved
-        assert session.ai_agent_info is not None  # set by _resolve_session
-        session.ai_agent_info.participant_id = agent_participant.id
-        # When reconcile resolved a customer (chat disables customer
-        # reconciliation and keeps the webhook author), its participant id is
-        # the authoritative reply recipient — the author of an inbound message
-        # is not necessarily the customer.
-        if customer_participant is not None and session.author_info is not None:
-            session.author_info.participant_id = customer_participant.id
-            if customer_participant.profile_id:
-                session.profile_id = customer_participant.profile_id
-
-        if session.profile_id is None and self.memory_mode != "never":
-            # Free, and more reliable than Memory's address-based lookup, which
-            # infers the identifier type and misses on CHAT and RCS.
-            session.profile_id = self._profile_id_from_participants(session, participants)
 
         memory_response = await self._retrieve_memory_if_enabled(session, message_text, conv_id)
 
@@ -687,6 +672,102 @@ class MessagingChannel(BaseChannel):
                 error=str(e),
                 exc_info=True,
             )
+
+    async def _resolve_participants(
+        self,
+        session: ConversationSession,
+        communication_data: Communication,
+        participants: list[ParticipantResponse],
+        inbound_agent_address: str | None,
+    ) -> bool:
+        """Resolve both sides of this turn from the participant list.
+
+        Returns False when the message must not be answered: it's TAC's own,
+        or reconciliation failed (dropped). On success the identity is kept
+        for the next turn on this instance (see `_restore_identity`).
+        """
+        conv_id = session.conversation_id
+        channel = self.get_channel_name()
+
+        if self._is_own_message(communication_data.author.participant_id, participants, conv_id):
+            return False
+
+        if inbound_agent_address is None and self.derive_inbound_agent_from_recipients:
+            # The webhook didn't say which of TAC's senders was messaged: find
+            # one the conversation's participants own, else the default.
+            assert session.ai_agent_info is not None  # set by _resolve_session
+            session.ai_agent_info.address = self._fallback_agent_address(
+                session, participants, channel
+            ).address
+
+        # Reconcile participant types pre-LLM so v1-bridge's UNKNOWN gets
+        # promoted to CUSTOMER (with a Conversation Memory profile attached when
+        # possible) and to resolve both participant ids for the reply. If it
+        # can't identify both sides, any eventual reply would fail too — skip
+        # the callback rather than waste an LLM turn on an un-replyable
+        # conversation. Running it every message is free: it reuses the list
+        # above, and the happy-path row issues no writes.
+        resolved = await self._reconcile_participants(session, participants)
+        if resolved is None:
+            await self._drop_inbound(
+                conv_id, channel, "Participant reconciliation failed; inbound message dropped"
+            )
+            return False
+
+        agent_participant, customer_participant = resolved
+        assert session.ai_agent_info is not None  # set by _resolve_session
+        session.ai_agent_info.participant_id = agent_participant.id
+        # When reconcile resolved a customer (chat disables customer
+        # reconciliation and keeps the webhook author), its participant id is
+        # the authoritative reply recipient — the author of an inbound message
+        # is not necessarily the customer.
+        if customer_participant is not None and session.author_info is not None:
+            session.author_info.participant_id = customer_participant.id
+            if customer_participant.profile_id:
+                session.profile_id = customer_participant.profile_id
+
+        if session.profile_id is None and self.memory_mode != "never":
+            # Free, and more reliable than Memory's address-based lookup, which
+            # infers the identifier type and misses on CHAT and RCS.
+            session.profile_id = self._profile_id_from_participants(session, participants)
+
+        self._remember_identity(session)
+        return True
+
+    def _remember_identity(self, session: ConversationSession) -> None:
+        """Keep this turn's reconciled participants in the conversation's cache entry."""
+        try:
+            entry = self._metadata_cache[session.conversation_id]
+        except KeyError:
+            return
+        if session.author_info is None or session.ai_agent_info is None:
+            return
+        entry.identity = _CachedIdentity(
+            author=session.author_info.model_copy(),
+            agent=session.ai_agent_info.model_copy(),
+            profile_id=session.profile_id,
+        )
+
+    def _restore_identity(
+        self, session: ConversationSession, inbound_agent_address: str | None
+    ) -> bool:
+        """Fill `session` from the participants this instance last reconciled.
+
+        False when there are none, or when the webhook names a different
+        sender than the one cached (the cached agent participant isn't it).
+        """
+        try:
+            identity = self._metadata_cache[session.conversation_id].identity
+        except KeyError:
+            return False
+        if identity is None:
+            return False
+        if inbound_agent_address is not None and inbound_agent_address != identity.agent.address:
+            return False
+        session.author_info = identity.author.model_copy()
+        session.ai_agent_info = identity.agent.model_copy()
+        session.profile_id = identity.profile_id
+        return True
 
     def _profile_id_from_participants(
         self, session: ConversationSession, participants: list[ParticipantResponse]

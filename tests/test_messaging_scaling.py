@@ -405,6 +405,89 @@ class TestGetAgentAddressCompatibility:
         assert ChatChannel(tac).get_agent_address("CH123").channel_id is None
 
 
+def recipient(address: str) -> dict[str, Any]:
+    return {
+        "address": address,
+        "channel": "SMS",
+        "participantId": "PA_AGENT",
+        "deliveryStatus": "DELIVERED",
+    }
+
+
+class TestParticipantLookupFailure:
+    """A failed participant lookup on a later turn is answered from what this
+    instance last reconciled, as `main` did from its in-memory session."""
+
+    @staticmethod
+    def failing_lookup(counter: CallCounter, tac: TAC) -> None:
+        async def fail(conv_id: str) -> Any:
+            counter.calls.append("list_participants")
+            raise RuntimeError("CO unavailable")
+
+        co = tac.conversation_orchestrator_client
+        assert co is not None
+        co.list_participants = fail  # type: ignore[method-assign]
+
+    @pytest.mark.asyncio
+    async def test_a_later_turn_on_the_same_instance_is_answered(self) -> None:
+        tac, channel, counter = make_sms_channel(profile_id="profile_1")
+        sessions: list[ConversationSession] = []
+        errors: list[dict[str, Any]] = []
+        tac.on_message_ready(lambda msg, ctx, mem: sessions.append(ctx) or "reply")
+        tac.on_error(lambda e, ctx: errors.append(ctx))
+        await channel.process_webhook(inbound(comm_id="comms_1"))
+
+        self.failing_lookup(counter, tac)
+        counter.calls.clear()
+        with patch.object(channel.logger, "warning") as warning:
+            await channel.process_webhook(inbound(comm_id="comms_2"))
+
+        assert len(sessions) == 2
+        second = sessions[1]
+        assert second.author_info is not None
+        assert second.author_info.participant_id == "PA_CUSTOMER"
+        assert second.ai_agent_info is not None
+        assert second.ai_agent_info.participant_id == "PA_AGENT"
+        assert second.profile_id == "profile_1"
+        assert counter.calls == ["list_participants", "create_action"]
+        assert errors == []
+        assert "last-known participants" in warning.call_args.args[0]
+
+    @pytest.mark.asyncio
+    async def test_a_turn_this_instance_never_reconciled_is_dropped(self) -> None:
+        tac, channel, counter = make_sms_channel()
+        handled: list[str] = []
+        errors: list[dict[str, Any]] = []
+        tac.on_message_ready(lambda msg, ctx, mem: handled.append(msg))
+        tac.on_error(lambda e, ctx: errors.append(ctx))
+        self.failing_lookup(counter, tac)
+
+        await channel.process_webhook(inbound())
+
+        assert handled == []
+        assert len(errors) == 1
+        assert errors[0]["dropped_inbound"] is True
+
+    @pytest.mark.asyncio
+    async def test_a_message_to_a_different_sender_is_not_answered_from_cache(self) -> None:
+        tac = TAC(get_test_config(phone_numbers=[AGENT_NUMBER, "+15550009999"]))
+        channel = SMSChannel(tac)
+        counter = CallCounter(tac)
+        handled: list[str] = []
+        tac.on_message_ready(lambda msg, ctx, mem: handled.append(msg))
+        tac.on_error(lambda e, ctx: None)
+        first = inbound(comm_id="comms_1")
+        first["data"]["recipients"] = [recipient(AGENT_NUMBER)]
+        await channel.process_webhook(first)
+
+        self.failing_lookup(counter, tac)
+        second = inbound(comm_id="comms_2")
+        second["data"]["recipients"] = [recipient("+15550009999")]
+        await channel.process_webhook(second)
+
+        assert handled == ["hello"]
+
+
 class TestReplyRecipient:
     @pytest.mark.asyncio
     async def test_reply_goes_to_the_reconciled_customer_not_the_author(self) -> None:
