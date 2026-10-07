@@ -994,7 +994,20 @@ class MessagingChannel(BaseChannel):
             self._bind_session_metadata(session, entry)
             return InitiateConversationResult(conversation_id=conversation_id, session=session)
 
-        except Exception:
+        except Exception as e:
+            if (
+                conversation_id is None
+                and isinstance(e, httpx.HTTPStatusError)
+                and 400 <= e.response.status_code < 500
+            ):
+                # TAC sends metadata at creation (main didn't), and the client
+                # logs no body when it does: name it as a possible cause.
+                self.logger.warning(
+                    "Conversation Orchestrator rejected creating the conversation; the "
+                    "request included conversation metadata, which may be the cause",
+                    status=e.response.status_code,
+                    metadata_keys=sorted(co_metadata),
+                )
             if conversation_id and not reused:
                 try:
                     await self.conversation_orchestrator_client.update_conversation(

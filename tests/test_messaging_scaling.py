@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
+import httpx
 import pytest
 
 from tac import TAC
@@ -727,6 +728,27 @@ class TestConversationMetadata:
         assert create.await_args.kwargs["metadata"] == {"direction": "outbound", "ok": "yes"}
         assert result.session.metadata["count"] == 3
         warning.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_a_rejected_creation_names_the_metadata_as_a_possible_cause(self) -> None:
+        tac, channel, counter = make_sms_channel()
+        request = httpx.Request("POST", "https://conversations.twilio.com/v2/Conversations")
+        rejection = httpx.HTTPStatusError(
+            "400", request=request, response=httpx.Response(400, request=request)
+        )
+        co = tac.conversation_orchestrator_client
+        assert co is not None
+        co.create_or_reuse_conversation = AsyncMock(side_effect=rejection)  # type: ignore[method-assign]
+
+        with (
+            patch.object(channel.logger, "warning") as warning,
+            pytest.raises(httpx.HTTPStatusError),
+        ):
+            await send_outbound(channel, metadata={"appointment_id": "apt_secret"})
+
+        assert "metadata" in warning.call_args.args[0]
+        assert warning.call_args.kwargs["metadata_keys"] == ["appointment_id", "direction"]
+        assert "apt_secret" not in str(warning.call_args)
 
     @pytest.mark.asyncio
     async def test_a_reused_conversation_gets_the_metadata_patched_in(self) -> None:
