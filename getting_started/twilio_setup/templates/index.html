@@ -95,7 +95,7 @@
                                     Memory Store
                                 </h3>
                                 <div class="flex items-center gap-2">
-                                    <button type="button" onclick="loadMemoryStores()" id="refreshMemoryStoresBtn"
+                                    <button type="button" onclick="refreshAll()" id="refreshMemoryStoresBtn"
                                         class="text-xs text-blue-600 hover:text-blue-700 font-medium flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed">
                                         <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
@@ -114,25 +114,26 @@
                                     class="w-full px-2.5 py-1.5 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
                                     <option value="">-- Select a memory store or create new --</option>
                                 </select>
-                                <p class="text-xs text-slate-500 mt-1">Click Refresh to load your existing memory stores</p>
+                                <p class="text-xs text-slate-500 mt-1">Click Refresh to load your existing Memory Stores and Conversation Configurations</p>
                             </div>
                         </div>
 
-                        <!-- Conversation Orchestrator -->
+                        <!-- Conversation Configuration -->
                         <div id="conversationConfigSection" class="mb-3 pt-3 border-t border-slate-100 opacity-50 pointer-events-none">
                             <h3 class="text-xs font-semibold text-slate-700 uppercase tracking-wide mb-2 flex items-center gap-2">
                                 <span class="w-1 h-3 bg-blue-500 rounded"></span>
-                                Conversation Orchestrator
+                                Conversation Configuration
                             </h3>
+                            <p id="conversationConfigHint" class="text-xs text-slate-500 mb-2">Select a Memory Store above to continue</p>
                             <div class="grid grid-cols-2 gap-3">
                                 <div>
                                     <label class="block text-xs font-medium text-slate-700 mb-1" for="configuration_display_name">
                                         Display Name
                                     </label>
                                     <input type="text" id="configuration_display_name" name="configuration_display_name" placeholder="my-conversation-config" maxlength="32" required
-                                        pattern="^[A-Za-z0-9._~-]+$" title="URL-safe characters only: letters, numbers, dot, underscore, tilde, hyphen (max 32 chars)"
+                                        pattern="^[A-Za-z0-9_-]+$" title="Letters, numbers, underscores and hyphens only (max 32 chars)"
                                         class="w-full px-2.5 py-1.5 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
-                                    <p class="mt-0.5 text-xs text-slate-500">URL-safe: letters, numbers, . _ ~ - (no spaces)</p>
+                                    <p class="mt-0.5 text-xs text-slate-500">Letters, numbers, _ and - (no spaces)</p>
                                 </div>
                                 <div>
                                     <label class="block text-xs font-medium text-slate-700 mb-1" for="configuration_description">
@@ -230,7 +231,7 @@
                                     </div>
                                 </div>
 
-                                <!-- Step 3: Conversation Orchestrator -->
+                                <!-- Step 3: Conversation Configuration -->
                                 <div id="step-configuration" class="flex-1">
                                     <div class="flex items-center">
                                         <div class="h-0.5 flex-1 bg-slate-200 mr-2"></div>
@@ -239,7 +240,7 @@
                                         </div>
                                     </div>
                                     <div class="mt-1.5 text-right">
-                                        <div class="text-xs font-medium text-slate-800">Orchestrator</div>
+                                        <div class="text-xs font-medium text-slate-800">Conversation Configuration</div>
                                         <div id="step-configuration-status" class="text-xs text-slate-500 mt-0.5">Waiting...</div>
                                     </div>
                                 </div>
@@ -249,7 +250,7 @@
                             <div id="errorLogSection" class="hidden mt-4 bg-red-50 border border-red-200 rounded-lg p-3 overflow-hidden">
                                 <div class="flex items-start justify-between gap-2 mb-2">
                                     <h4 class="text-xs font-semibold text-red-800 uppercase tracking-wide">Error Details</h4>
-                                    <button onclick="document.getElementById('errorLogSection').classList.add('hidden')"
+                                    <button type="button" onclick="document.getElementById('errorLogSection').classList.add('hidden')"
                                         class="text-xs text-red-600 hover:text-red-800 flex-shrink-0"
                                         aria-label="Close error details">
                                         ✕
@@ -286,10 +287,10 @@
                         </div>
                     </div>
 
-                    <!-- Existing Orchestrators (33% height, scrollable) -->
+                    <!-- Existing Conversation Configurations (33% height, scrollable) -->
                     <div id="orchestratorsPanelSection" class="flex-1 flex flex-col min-h-0 border-t border-slate-200 p-6 py-3 basis-0 opacity-50 pointer-events-none">
                         <div class="flex items-center justify-between mb-3 flex-shrink-0">
-                            <h3 class="text-xs font-semibold text-slate-600 uppercase tracking-wide">Existing Orchestrators</h3>
+                            <h3 class="text-xs font-semibold text-slate-600 uppercase tracking-wide">Existing Conversation Configurations</h3>
                             <button onclick="loadConversationConfigurations()" id="refreshConfigsBtn"
                                 class="text-xs text-blue-600 hover:text-blue-700 font-medium flex items-center gap-1">
                                 <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -392,6 +393,15 @@
         let memoryStoreName = null;
         let profileId = null;
         let conversationConfigurationId = null;
+        // True while a setup run is in flight. The run reads memoryStoreId and profileId
+        // across several awaited requests, so neither may change until it finishes.
+        let setupInProgress = false;
+
+        function setMemoryStoreControlsLocked(locked) {
+            ['memory_store_select', 'refreshMemoryStoresBtn', 'createNewMemoryStoreBtn'].forEach(id => {
+                document.getElementById(id).disabled = locked;
+            });
+        }
 
         // Toast notification system
         let toastTimeout = null;
@@ -470,12 +480,16 @@
         }
 
         function checkMemoryStoreSelected() {
+            // A refresh or delete during a run re-renders the dropdown; keep the run's store.
+            if (setupInProgress) return;
+
             const selectedStore = document.getElementById('memory_store_select').value;
             const conversationConfigSection = document.getElementById('conversationConfigSection');
             const submitBtn = document.getElementById('submitBtn');
 
             if (selectedStore) {
                 conversationConfigSection.classList.remove('opacity-50', 'pointer-events-none');
+                document.getElementById('conversationConfigHint').classList.add('hidden');
                 submitBtn.disabled = false;
                 memoryStoreId = selectedStore;
                 // Save to localStorage
@@ -486,6 +500,7 @@
                 }
             } else {
                 conversationConfigSection.classList.add('opacity-50', 'pointer-events-none');
+                document.getElementById('conversationConfigHint').classList.remove('hidden');
                 submitBtn.disabled = true;
                 memoryStoreId = null;
                 // Remove from localStorage
@@ -513,6 +528,14 @@
         function hideCreateMemoryStoreModal() {
             document.getElementById('createMemoryStoreModal').classList.add('hidden');
             document.getElementById('createMemoryStoreForm').reset();
+        }
+
+        // One Refresh loads everything the same credentials can see, so the dropdown and
+        // both right-hand panels stay in sync.
+        function refreshAll() {
+            loadMemoryStores();
+            loadMemoryStoresPanel();
+            loadConversationConfigurations();
         }
 
         // Load Memory Stores
@@ -620,6 +643,10 @@
             const success = await createMemoryStore(credentials);
 
             if (success) {
+                // Capture before refreshing: the refresh restores the previously saved
+                // selection from localStorage, which would overwrite memoryStoreId.
+                const createdStoreId = memoryStoreId;
+
                 // Close modal
                 hideCreateMemoryStoreModal();
 
@@ -629,8 +656,8 @@
 
                 // Auto-select the newly created store
                 const memoryStoreSelect = document.getElementById('memory_store_select');
-                if (memoryStoreId) {
-                    memoryStoreSelect.value = memoryStoreId;
+                if (createdStoreId) {
+                    memoryStoreSelect.value = createdStoreId;
                     checkMemoryStoreSelected();
                 }
             }
@@ -2212,57 +2239,68 @@ OPENAI_API_KEY=${credentials.openai_api_key || 'sk-proj-xxxxxxxxxxxxxxxxxxxxxxxx
                 return;
             }
 
+            if (setupInProgress) {
+                return;
+            }
+            setupInProgress = true;
+            setMemoryStoreControlsLocked(true);
+
             submitBtn.disabled = true;
             submitBtn.textContent = 'Setting up...';
 
-            // Reset env content to default state
-            showResults(false);
+            try {
 
-            // Clear error log
-            document.getElementById('errorLogSection').classList.add('hidden');
-            document.getElementById('errorLogContent').innerHTML = '';
+                // Reset env content to default state
+                showResults(false);
 
-            // Reset steps - memory store already selected, so mark as success
-            updateStep('step-memory', 'success', 'Selected');
-            updateStep('step-profile', 'pending', 'Waiting...');
-            updateStep('step-configuration', 'pending', 'Waiting...');
+                // Clear error log
+                document.getElementById('errorLogSection').classList.add('hidden');
+                document.getElementById('errorLogContent').innerHTML = '';
 
-            // Strip protocol from ngrok domain before collecting credentials
-            const ngrokInput = document.getElementById('ngrok_domain');
-            ngrokInput.value = stripProtocol(ngrokInput.value);
+                // Reset steps - memory store already selected, so mark as success
+                updateStep('step-memory', 'success', 'Selected');
+                updateStep('step-profile', 'pending', 'Waiting...');
+                updateStep('step-configuration', 'pending', 'Waiting...');
 
-            const credentials = {
-                account_sid: document.getElementById('account_sid').value,
-                auth_token: document.getElementById('auth_token').value,
-                api_key: document.getElementById('api_key').value,
-                api_secret: document.getElementById('api_secret').value,
-                email: document.getElementById('email').value,
-                phone: document.getElementById('phone').value,
-                first_name: document.getElementById('first_name').value || null,
-                twilio_phone: document.getElementById('twilio_phone').value,
-                ngrok_domain: ngrokInput.value,
-                openai_api_key: document.getElementById('openai_api_key').value || null
-            };
+                // Strip protocol from ngrok domain before collecting credentials
+                const ngrokInput = document.getElementById('ngrok_domain');
+                ngrokInput.value = stripProtocol(ngrokInput.value);
 
-            saveValues();
+                const credentials = {
+                    account_sid: document.getElementById('account_sid').value,
+                    auth_token: document.getElementById('auth_token').value,
+                    api_key: document.getElementById('api_key').value,
+                    api_secret: document.getElementById('api_secret').value,
+                    email: document.getElementById('email').value,
+                    phone: document.getElementById('phone').value,
+                    first_name: document.getElementById('first_name').value || null,
+                    twilio_phone: document.getElementById('twilio_phone').value,
+                    ngrok_domain: ngrokInput.value,
+                    openai_api_key: document.getElementById('openai_api_key').value || null
+                };
 
-            // Get selected memory store display name for the final env output
-            const memoryStoreSelect = document.getElementById('memory_store_select');
-            const selectedOption = memoryStoreSelect.options[memoryStoreSelect.selectedIndex];
-            memoryStoreName = selectedOption.dataset.displayName || memoryStoreId;
+                saveValues();
 
-            // Skip memory store creation - user has already selected one
-            const profileSuccess = await createProfile(credentials);
+                // Get selected memory store display name for the final env output
+                const memoryStoreSelect = document.getElementById('memory_store_select');
+                const selectedOption = memoryStoreSelect.options[memoryStoreSelect.selectedIndex];
+                memoryStoreName = selectedOption.dataset.displayName || memoryStoreId;
 
-            if (profileSuccess) {
-                const configurationSuccess = await createConversationConfiguration(credentials);
-                showResults(profileSuccess && configurationSuccess, credentials);
-            } else {
-                showResults(false, credentials);
+                // Skip memory store creation - user has already selected one
+                const profileSuccess = await createProfile(credentials);
+
+                if (profileSuccess) {
+                    const configurationSuccess = await createConversationConfiguration(credentials);
+                    showResults(profileSuccess && configurationSuccess, credentials);
+                } else {
+                    showResults(false, credentials);
+                }
+            } finally {
+                setupInProgress = false;
+                setMemoryStoreControlsLocked(false);
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Set Up Services';
             }
-
-            submitBtn.disabled = false;
-            submitBtn.textContent = 'Set Up Services';
         });
     </script>
 </body>
