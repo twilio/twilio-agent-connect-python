@@ -46,7 +46,7 @@ Seamlessly integrate with Twilio Conversation Memory and Conversation Orchestrat
 - **Memory Management**: Automatic integration with Twilio Conversation Memory for persistent user context
 - **Conversation Lifecycle**: Automatic tracking of conversation sessions and state
 - **Human Handoff**: Built-in tool to route conversations to human agents via Twilio Studio Flows (including Flex)
-- **Horizontal Scaling**: Run N replicas behind a load balancer with no shared datastore; for voice, set `TWILIO_INSTANCE_PUBLIC_DOMAIN` to each replica's own public hostname. See the [multi-replica guide](https://github.com/twilio/twilio-agent-connect-python/blob/main/getting_started/horizontal_scaling.md)
+- **Horizontal Scaling**: Run N replicas behind a load balancer with no shared datastore; for voice, set `TWILIO_INSTANCE_PUBLIC_DOMAIN` to each replica's own public hostname
 
 ## Installation
 
@@ -191,7 +191,6 @@ TAC_ANALYTICS_DISABLED=true
 
 **Examples & Guides:**
 - **[Getting Started Guide](https://github.com/twilio/twilio-agent-connect-python/tree/main/getting_started/)** - Setup wizard, examples, and comprehensive documentation
-- **[Run TAC on Multiple Replicas](https://github.com/twilio/twilio-agent-connect-python/blob/main/getting_started/horizontal_scaling.md)** - Load balancing, state between turns, per-replica voice hostnames, and shutdown without dropping calls
 - **[Partner SDK Examples](https://github.com/twilio/twilio-agent-connect-python/tree/main/getting_started/examples/partners/)** - Integration examples for OpenAI, AWS Bedrock Agent, AWS Bedrock AgentCore, and AWS Strands
 - **Speech-to-Speech Voice** - Twilio Media Streams bridged to [OpenAI GPT-Live](https://github.com/twilio/twilio-agent-connect-python/blob/main/getting_started/examples/partners/openai_gpt_live.py) or the [OpenAI Realtime API](https://github.com/twilio/twilio-agent-connect-python/blob/main/getting_started/examples/partners/openai_realtime.py)
 - **[ConversationRelay-Only Mode](https://github.com/twilio/twilio-agent-connect-python/blob/main/getting_started/examples/features/relay_only.py)** - Get started with voice using just ConversationRelay
