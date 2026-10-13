@@ -9,7 +9,7 @@ datastore** — no Redis, no database, not even as an option.
 |---|---|---|
 | Where state lives | nowhere — derived per request | in the process holding the call's WebSocket |
 | Load balancer | any replica, no stickiness | any replica for the WebSocket; see [instance affinity](#instance-affinity-for-voice) for the rest |
-| Shutdown | nothing to drain | call `aclose()` — [drain](#draining-on-shutdown) |
+| Shutdown | nothing to drain | live calls end on SIGTERM; [let them finish](#shutting-down-without-dropping-calls) at the platform |
 | Extra API calls vs. a single instance | none by default | none |
 
 ## Messaging is stateless
@@ -231,39 +231,41 @@ reach the replica holding the call:
   reaches another replica doesn't refresh a live call's cached memory, so the
   call keeps the memory it fetched at the start.
 
-### Draining on shutdown
+### Shutting down without dropping calls
 
-Without a drain, a scale-in or redeploy drops live calls with no callback at
-all: the socket dies with the process and nothing fires.
+Keeping live calls through a scale-in or redeploy is a platform job: TAC can't
+keep a call alive once its process is told to stop. On SIGTERM, uvicorn (which
+`TACFastAPIServer` runs on) closes every open WebSocket at once with code 1012,
+and TAC's [teardown](#teardown-is-guaranteed) fires `on_call_ended` for each
+call. Nothing leaks, but the calls are cut.
 
-`TACFastAPIServer` wires this up for you — it registers
-`VoiceChannel.aclose()` on the app's shutdown event, with the grace period from
-`TACServerConfig.shutdown_grace_period` (30s by default).
+To let calls finish instead, don't send SIGTERM while they're running:
 
-```python
-server = TACFastAPIServer(tac=tac, voice_channel=voice_channel)
-server.start()  # aclose() runs on shutdown
+1. **Stop new calls reaching the replica.** Fail its readiness probe, or
+   deregister it from the load balancer, first.
+2. **Wait before stopping the process.** Delay SIGTERM long enough for the
+   calls you want to protect to end, for example with a `preStop` hook.
+3. **Give the platform room for that wait.** The orchestrator's termination
+   grace period must cover the delay plus the time `on_call_ended` handlers
+   need, or the process is killed mid-call.
+
+On Kubernetes:
+
+```yaml
+spec:
+  terminationGracePeriodSeconds: 330   # the preStop wait, plus time for teardown
+  containers:
+    - name: tac
+      readinessProbe: { ... }          # fail this when draining
+      lifecycle:
+        preStop:
+          exec:
+            command: ["sleep", "300"]  # the longest call you want to keep
 ```
 
-Two cases need you to do it yourself:
-
-- **You passed a FastAPI app with its own `lifespan=`.** Starlette ignores
-  event handlers on such an app, so `await server.aclose()` in your lifespan's
-  shutdown half.
-- **You're not using `TACFastAPIServer`.** Call
-  `await voice_channel.aclose()` from your framework's shutdown hook.
-
-Draining refuses new WebSocket connections and waits up to the grace period for
-calls to end naturally. That includes calls still being set up, which have no
-session yet, and end-of-call hooks that are still running. After the grace
-period it cancels calls still running, giving their teardown up to 5 seconds to
-fire the hooks. Any call still held after that is force-closed: its WebSocket
-(and model connection, for Media Streams) is closed and the provider's full
-teardown runs before the session is released, so no sockets, tasks or provider
-state survive the drain.
-Fail your readiness probe *before* it runs so the balancer stops routing here,
-and keep the grace period, plus those 5 seconds, below your orchestrator's
-termination grace period or the process is killed mid-drain.
+On a server other than uvicorn, check that it closes WebSocket connections on
+shutdown. A process that exits with sockets still open runs no teardown, so no
+`on_call_ended` fires for those calls.
 
 ## What TAC does not do
 

@@ -240,21 +240,6 @@ class MediaStreamsOpenAIProvider(VoiceProvider, Generic[TCallState]):
         each subclass; must be idempotent."""
         raise NotImplementedError
 
-    async def _force_close_call(self, conversation_id: str) -> None:
-        """Close the call's Twilio socket, then run the provider's full call
-        teardown (model socket, call state, stashed config, channel session)."""
-        call = self._calls.get(conversation_id)
-        if call is not None and call.twilio_ws is not None:
-            try:
-                await call.twilio_ws.close()
-            except Exception as e:
-                self.logger.debug(
-                    "Error closing Twilio WebSocket during shutdown",
-                    conversation_id=conversation_id,
-                    error=str(e),
-                )
-        await self._cleanup_call(conversation_id)
-
     async def _run_tool_call(
         self, conv_id: str, name: str | None, arguments_json: str | None
     ) -> object:

@@ -131,20 +131,6 @@ class TACFastAPIServer:
 
         self.app: FastAPI = app if app is not None else FastAPI(title="TAC Server")
         self._register_routes(self.app)
-        # Via the router: FastAPI doesn't re-export Starlette's
-        # add_event_handler in its own type surface.
-        self.app.router.add_event_handler("shutdown", self.aclose)
-
-    async def aclose(self) -> None:
-        """Drain live voice calls so shutdown doesn't drop them silently.
-
-        Registered on the app's ``shutdown`` event, so uvicorn runs it for
-        you. Starlette ignores event handlers on an app constructed with its
-        own ``lifespan=`` — if you passed one via ``app=``, await this in your
-        lifespan's shutdown half. See :meth:`VoiceChannel.aclose`.
-        """
-        if self.voice_channel is not None:
-            await self.voice_channel.aclose(grace_period=self.config.shutdown_grace_period)
 
     def _validate_voice_url_config(self) -> None:
         """Fail fast at server construction on voice URL misconfiguration.
