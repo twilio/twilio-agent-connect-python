@@ -186,6 +186,8 @@ TACConfig(
 )
 ```
 
+`TACConfig.from_env()` reads it from `TWILIO_INSTANCE_PUBLIC_DOMAIN`.
+
 The WebSocket URL and the action URL then point at this process, and so does
 every status, AMD and recording callback on calls TAC places. On inbound
 calls those callbacks come from the phone number's own configuration, which
