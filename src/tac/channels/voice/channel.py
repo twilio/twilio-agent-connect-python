@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import copy
 from collections.abc import AsyncGenerator, Awaitable, Callable
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
@@ -27,7 +26,6 @@ from tac.models.voice import (
     TwiMLRequest,
     VoiceTwiMLOptions,
 )
-from tac.utils.expiring_dict import ExpiringDict
 from tac.utils.timestamps import elapsed_ms, parse_iso8601
 
 from .conversation_relay import ConversationRelayProviderConfig
@@ -42,24 +40,6 @@ CallEndedHandler = Callable[[ConversationSession], Awaitable[None]]
 #: Channel name Conversation Orchestrator uses for voice participants. Not
 #: ``get_channel_name()``, which is provider-specific.
 CO_VOICE_CHANNEL = "VOICE"
-
-#: How long, and how many, ended orchestrated calls' sessions are kept for
-#: their conversation's CLOSED webhook. Best effort: past either limit, CLOSED
-#: falls back to a session rebuilt from Conversation Orchestrator.
-_ENDED_SESSION_TTL_SECONDS = 24 * 60 * 60.0
-_ENDED_SESSION_MAX_ENTRIES = 10_000
-
-
-@dataclass
-class _EndedCall:
-    """An orchestrated call's session, kept after teardown for its CLOSED.
-
-    `notified` means `on_conversation_ended` already fired for it (from
-    `end_call()`), so CLOSED on this instance only reports analytics.
-    """
-
-    session: ConversationSession
-    notified: bool = False
 
 
 def _created_at_key(conversation: ConversationResponse) -> datetime:
@@ -133,16 +113,8 @@ class VoiceChannel(BaseChannel):
         self._on_recording: RecordingHandler | None = None
         self._on_call_ended: CallEndedHandler | None = None
         self._twilio_client: Client | None = None
-        # Orchestrated calls end in two steps: the WebSocket closes, then CO's
-        # CLOSED arrives. Between them the session is kept here, so CLOSED on
-        # this instance hands `on_conversation_ended` the full session (with the
-        # app's `metadata`), as when sessions stayed live until CLOSED.
-        self._ended_sessions: ExpiringDict[_EndedCall] = ExpiringDict(
-            ttl_seconds=_ENDED_SESSION_TTL_SECONDS, max_entries=_ENDED_SESSION_MAX_ENTRIES
-        )
         # Live calls whose conversation CO already closed mid-call: their
-        # `on_conversation_ended` has fired, so teardown neither keeps them for
-        # a CLOSED that won't come again nor fires it a second time.
+        # `on_conversation_ended` has fired, so teardown doesn't fire it again.
         self._closed_while_live: set[str] = set()
 
     def on_inbound_call_twiml(self, callback: InboundCallTwiMLHandler) -> None:
@@ -240,7 +212,8 @@ class VoiceChannel(BaseChannel):
         anything you put on `metadata` — is still reachable.
 
         Not the same as `on_conversation_ended` (fires when the *conversation*
-        closes, on any instance, from a session that may be rebuilt) or
+        closes, on any instance; on an orchestrated call, from a session
+        rebuilt from Conversation Orchestrator, identity only) or
         `on_call_status` (a Twilio Calls-API webhook, no session). Handler
         exceptions are logged and swallowed.
 
@@ -397,6 +370,11 @@ class VoiceChannel(BaseChannel):
         hangs up while AMD is still resolving), and handlers shouldn't have to
         guard against it.
 
+        The session is released as on any hangup: `on_call_ended` fires now.
+        On an orchestrated call `on_conversation_ended` fires later, when
+        Conversation Orchestrator's CLOSED webhook arrives; otherwise it fires
+        now too.
+
         Args:
             call_sid: Twilio Call SID (from a call event, the outbound result, or
                 ``ConversationSession.call_sid``).
@@ -420,7 +398,7 @@ class VoiceChannel(BaseChannel):
 
         session = self.get_conversation_session_by_call_sid(call_sid)
         if session is not None:
-            await self._release_session(session.conversation_id, end_conversation=True)
+            await self._release_session(session.conversation_id)
         return hung_up
 
     def _start_conversation(
@@ -465,27 +443,23 @@ class VoiceChannel(BaseChannel):
 
         return self._conversations[conv_id]
 
-    async def _release_session(
-        self, conv_id: str, *, end_conversation: bool = False
-    ) -> ConversationSession | None:
+    async def _release_session(self, conv_id: str) -> ConversationSession | None:
         """Free a finished call's session and fire the end-of-call hooks.
 
         Called from every teardown path and idempotent, so a second call is a
         no-op returning ``None``. Always fires ``on_call_ended``. Also fires
         ``on_conversation_ended`` unless a Conversation Orchestrator CLOSED
         webhook will do that later (see
-        ``VoiceProvider._conversation_closed_by_orchestrator``); the session is
-        then kept for that CLOSED. ``end_conversation`` (from ``end_call()``)
-        fires it now regardless, and the later CLOSED on this instance doesn't.
+        ``VoiceProvider._conversation_closed_by_orchestrator``). Nothing is kept
+        for that CLOSED: it gets a session rebuilt from Conversation
+        Orchestrator.
         """
         session = self._conversations.pop(conv_id, None)
         if session is None:
             return None
-        return await self._run_release(conv_id, session, end_conversation=end_conversation)
+        return await self._run_release(conv_id, session)
 
-    async def _run_release(
-        self, conv_id: str, session: ConversationSession, *, end_conversation: bool
-    ) -> ConversationSession:
+    async def _run_release(self, conv_id: str, session: ConversationSession) -> ConversationSession:
         """The end-of-call work for a session `_release_session` just popped."""
         # Measured before the callbacks below, which are application-owned:
         # they are awaited and may do network I/O or mutate the session, and
@@ -505,13 +479,9 @@ class VoiceChannel(BaseChannel):
 
         if not self._provider._conversation_closed_by_orchestrator:
             await self._trigger_conversation_ended(session)
-        elif conv_id in self._closed_while_live:
-            # CO closed this conversation mid-call and its hook already fired.
-            self._closed_while_live.discard(conv_id)
         else:
-            self._ended_sessions[conv_id] = _EndedCall(session, notified=end_conversation)
-            if end_conversation:
-                await self._trigger_conversation_ended(session)
+            # CO closed this conversation mid-call, if at all; its hook fired then.
+            self._closed_while_live.discard(conv_id)
 
         # Only when no CO conversation sits behind the call (relay-only, Media
         # Streams): otherwise CO's CLOSED reports the end, with CO's duration.
@@ -537,11 +507,11 @@ class VoiceChannel(BaseChannel):
         """Fire ``on_conversation_ended`` for a CLOSED webhook.
 
         The call has normally ended by now (the socket closed when the caller
-        hung up). On the instance that held it, its session was kept for this
-        webhook, so the hook gets the full session, `metadata` included. On any
-        other instance, or once that session has expired, it gets one rebuilt
-        from Conversation Orchestrator — which is what lets the hook fire on
-        whichever instance received the webhook.
+        hung up, or `end_call()` hung it up), and its session went with it. The
+        hook gets a session rebuilt from Conversation Orchestrator, identity
+        only, which is what lets it fire on whichever instance received the
+        webhook. The call's live state (transcript, `metadata`) reached
+        `on_call_ended` at teardown.
 
         If this instance still holds the session, the call is live: CO closed
         the conversation mid-call (a closed timeout during a long hold, or the
@@ -572,13 +542,6 @@ class VoiceChannel(BaseChannel):
             self._closed_while_live.add(conv_id)
             self._track_conversation_ended(conv_id, duration_ms)
             await self._trigger_conversation_ended(self._detached_snapshot(live))
-            return
-
-        ended = self._ended_sessions.pop(conv_id, None)
-        if ended is not None:
-            self._track_conversation_ended(conv_id, duration_ms)
-            if not ended.notified:
-                await self._trigger_conversation_ended(ended.session)
             return
 
         notify = self.tac._has_conversation_ended_callback()
@@ -636,8 +599,7 @@ class VoiceChannel(BaseChannel):
 
         Carries identity only — conversation id, call_sid, profile, both
         participants. Live in-memory state (transcript, metadata) isn't
-        available here; it reaches ``on_call_ended``, and a CLOSED on the
-        instance that held the call. ``call_sid`` defaults to a VOICE
+        available here; it reaches ``on_call_ended``. ``call_sid`` defaults to a VOICE
         participant address's ``channelId`` — the customer's if present, else
         the agent's, else any other participant's. Returns ``None`` if no
         participant is on the voice channel, which is how another channel's

@@ -747,12 +747,14 @@ class TestTeardownInvariant:
 
 class TestEndCallDoesNotDoubleFire:
     @pytest.mark.asyncio
-    async def test_orchestrated_end_call_fires_now_and_closed_does_not_refire(self) -> None:
-        """As on `main`: `end_call()` fires `on_conversation_ended` with the
-        live session right away, and the CLOSED that follows doesn't again."""
+    async def test_orchestrated_end_call_leaves_conversation_ended_to_closed(self) -> None:
+        """`end_call()` releases the call like any hangup: `on_call_ended` gets
+        the live session now, and `on_conversation_ended` fires once, on CLOSED."""
         tac = TAC(get_test_config())
         channel = VoiceChannel(tac)
+        call_ended: list[ConversationSession] = []
         conversation_ended: list[ConversationSession] = []
+        channel.on_call_ended(collect(call_ended))
         tac.on_conversation_ended(lambda s: conversation_ended.append(s))
 
         session = channel._start_conversation("conv_end", None)
@@ -762,67 +764,51 @@ class TestEndCallDoesNotDoubleFire:
         with patch.object(channel, "_get_twilio_client", return_value=MagicMock()):
             await channel.end_call("CA_end")
 
-        assert conversation_ended == [session]
-        assert conversation_ended[0].metadata["order_id"] == "ord_1"
+        assert call_ended == [session]
+        assert call_ended[0].metadata["order_id"] == "ord_1"
+        assert conversation_ended == []
+        assert_no_residual_state(channel, "conv_end")
 
-        list_participants = AsyncMock(return_value=voice_participants("conv_end"))
-        tac.conversation_orchestrator_client.list_participants = list_participants
+        tac.conversation_orchestrator_client.list_participants = AsyncMock(
+            return_value=voice_participants("conv_end", call_sid="CA_end")
+        )
         await channel.process_webhook(closed_webhook("conv_end"))
 
         assert len(conversation_ended) == 1
-        list_participants.assert_not_awaited()
-        assert "conv_end" not in channel._ended_sessions
+        assert conversation_ended[0].call_sid == "CA_end"
 
 
 class TestClosedAfterTeardown:
-    """Orchestrated ConversationRelay: the instance that held a call keeps its
-    session for the conversation's CLOSED, so the hook gets what it got on
-    `main` — the full session, `metadata` included."""
+    """Orchestrated ConversationRelay: nothing is kept after teardown, so
+    CLOSED gets a session rebuilt from CO on every instance, the one that held
+    the call included."""
 
     @pytest.mark.asyncio
-    async def test_closed_on_the_same_instance_gets_the_full_session(self) -> None:
+    async def test_closed_on_the_same_instance_gets_a_rebuilt_session(self) -> None:
         tac = TAC(get_test_config())
         channel = VoiceChannel(tac)
         ended: list[ConversationSession] = []
         tac.on_conversation_ended(lambda s: ended.append(s))
-        list_participants = AsyncMock(return_value=voice_participants("conv_kept"))
-        tac.conversation_orchestrator_client.list_participants = list_participants
+        tac.conversation_orchestrator_client.list_participants = AsyncMock(
+            return_value=voice_participants("conv_kept", call_sid="CA_kept")
+        )
 
         session = channel._start_conversation("conv_kept", "profile_caller")
         session.call_sid = "CA_kept"
         session.metadata["order_id"] = "ord_1"
         await channel._provider._cleanup_connection("conv_kept")
         assert ended == []
+        assert_no_residual_state(channel, "conv_kept")
 
         await channel.process_webhook(closed_webhook("conv_kept"))
 
-        assert ended == [session]
-        assert ended[0].metadata["order_id"] == "ord_1"
-        list_participants.assert_not_awaited()
-        assert "conv_kept" not in channel._ended_sessions
+        assert len(ended) == 1
+        assert ended[0] is not session
+        assert ended[0].metadata == {}
+        assert ended[0].call_sid == "CA_kept"
 
     @pytest.mark.asyncio
-    async def test_a_duplicate_closed_falls_back_to_a_rebuild(self) -> None:
-        tac = TAC(get_test_config())
-        channel = VoiceChannel(tac)
-        ended: list[ConversationSession] = []
-        tac.on_conversation_ended(lambda s: ended.append(s))
-        tac.conversation_orchestrator_client.list_participants = AsyncMock(
-            return_value=voice_participants("conv_dup", call_sid="CA_dup")
-        )
-        channel._start_conversation("conv_dup", None).metadata["k"] = "v"
-        await channel._provider._cleanup_connection("conv_dup")
-
-        await channel.process_webhook(closed_webhook("conv_dup"))
-        await channel.process_webhook(closed_webhook("conv_dup"))
-
-        assert len(ended) == 2
-        assert ended[0].metadata == {"k": "v"}
-        assert ended[1].metadata == {}
-        assert ended[1].call_sid == "CA_dup"
-
-    @pytest.mark.asyncio
-    async def test_a_mid_call_close_is_not_kept_or_refired_at_teardown(self) -> None:
+    async def test_a_mid_call_close_is_not_refired_at_teardown(self) -> None:
         tac = TAC(get_test_config())
         channel = VoiceChannel(tac)
         ended: list[ConversationSession] = []
@@ -837,11 +823,10 @@ class TestClosedAfterTeardown:
             await channel.end_call("CA_mid")
 
         assert len(ended) == 1
-        assert "conv_mid" not in channel._ended_sessions
         assert_no_residual_state(channel, "conv_mid")
 
     @pytest.mark.asyncio
-    async def test_relay_only_still_fires_at_teardown_and_keeps_nothing(self) -> None:
+    async def test_relay_only_still_fires_at_teardown(self) -> None:
         tac = TAC(get_test_config(conversation_configuration_id=None))
         channel = VoiceChannel(tac)
         ended: list[ConversationSession] = []
@@ -851,13 +836,7 @@ class TestClosedAfterTeardown:
         await channel._provider._cleanup_connection("CA_relay")
 
         assert len(ended) == 1
-        assert "CA_relay" not in channel._ended_sessions
-
-    def test_the_kept_sessions_are_bounded(self) -> None:
-        channel = VoiceChannel(TAC(get_test_config()))
-
-        assert channel._ended_sessions._ttl == 24 * 60 * 60
-        assert channel._ended_sessions._max_entries == 10_000
+        assert_no_residual_state(channel, "CA_relay")
 
 
 class TestInstanceAffinity:

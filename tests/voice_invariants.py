@@ -4,10 +4,6 @@ However a call ends — normal hangup, abrupt disconnect, an exception during
 setup, cancellation — the process must hold nothing live for it afterwards.
 Every voice test that opens a socket asserts this, so a new teardown path can't
 quietly start leaking.
-
-The one deliberate exception: an orchestrated call's ended session waits in
-`VoiceChannel._ended_sessions` for its conversation's CLOSED webhook. That
-store is bounded and expiring, and CLOSED drops the entry, so it can't leak.
 """
 
 from __future__ import annotations
