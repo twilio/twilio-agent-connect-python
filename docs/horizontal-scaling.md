@@ -19,7 +19,13 @@ builds its own `ConversationSession` from three things it has anyway: the
 webhook payload, your channel configuration, and one `list_participants` call
 the self-message check and reconciliation already needed. Nothing a session
 holds is unrecoverable, so there is nothing to route stickily and nothing to
-leak.
+leak. If that `list_participants` call fails, the message can't be answered: it
+is dropped and `on_error` fires with `dropped_inbound`.
+
+A session lasts one turn: from the webhook until `on_message_ready` returns.
+`session.metadata` doesn't carry over to the next message, on this replica or
+any other. To keep state between turns, store it yourself, keyed by
+`session.conversation_id`.
 
 ### The API-call budget
 
@@ -79,7 +85,7 @@ replica — the common case, and free. It cannot catch one landing elsewhere.
 Tolerating that in the handler is cheaper than a distributed lock. If you
 genuinely can't, route by `conversation_id` at the load balancer.
 
-### Metadata across turns
+### Outbound metadata across turns
 
 Metadata you pass to `initiate_outbound_conversation` is stored on the
 conversation in Conversation Orchestrator (keys of up to 128 letters, digits,
@@ -93,13 +99,9 @@ async def on_message(text, session, memory):
 ```
 
 That costs one Conversation Orchestrator request per turn that calls
-`conversation_metadata()`, except on the replica that initiated the
-conversation, which answers from what it wrote. Metadata changed later by
-another replica or tool isn't seen on the initiating replica.
-`session.metadata` still carries values between turns, including ones you
-write during a turn, but only on the replica that handled the conversation
-before. Treat it as a per-replica scratchpad. Entries that don't fit Conversation Orchestrator's
-limits stay only in `session.metadata`, with a warning.
+`conversation_metadata()`, kept for the rest of that turn. Entries that don't
+fit Conversation Orchestrator's limits are only on the session
+`initiate_outbound_conversation` returns, with a warning.
 
 ### When a conversation closes
 
@@ -110,10 +112,11 @@ includes conversations this process never handled, for example after a
 restart. Don't assume an earlier `on_message_ready` ran on the same replica.
 
 The session is built from the conversation's participants: the same
-`profile_id`, customer and agent as during the conversation. Its `metadata`
-is Conversation Orchestrator's, plus anything this replica kept from earlier
-turns. It carries no profile traits (`session.profile`) or cached memory, and
-its `started_at` is when it was rebuilt.
+`profile_id`, customer and agent as during the conversation. Read the
+conversation's metadata with `await session.conversation_metadata()`, which
+uses the webhook's own copy when it carries one; `session.metadata` holds
+nothing from earlier turns. It carries no profile traits (`session.profile`) or
+cached memory, and its `started_at` is when it was rebuilt.
 
 ## Voice is pinned to one process, deliberately
 

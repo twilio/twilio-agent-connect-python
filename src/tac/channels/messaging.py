@@ -3,7 +3,6 @@
 import warnings
 from abc import abstractmethod
 from collections.abc import AsyncGenerator, Awaitable, Callable
-from dataclasses import dataclass
 from typing import Any
 
 import httpx
@@ -30,49 +29,10 @@ from tac.models.memory import MemoryMode
 from tac.models.outbound import InitiateConversationResult, InitiateMessagingConversationOptions
 from tac.models.session import AuthorInfo, ConversationSession
 from tac.utils.conversation_metadata import fit_conversation_metadata
-from tac.utils.expiring_dict import ExpiringDict
 from tac.utils.redaction import mask_address
 from tac.utils.timestamps import elapsed_ms
 
 logger = get_logger(__name__)
-
-#: Lifetime and size of a channel's per-instance conversation-metadata cache.
-#: The TTL slides: each turn refreshes it.
-_METADATA_CACHE_TTL_SECONDS = 24 * 60 * 60
-_METADATA_CACHE_MAX_ENTRIES = 10_000
-
-
-@dataclass
-class _CachedIdentity:
-    """Both sides of a conversation as last reconciled on this instance.
-
-    Stand-ins for when the participant lookup fails: `main` kept them on its
-    in-memory session and answered later turns without a lookup.
-    """
-
-    author: AuthorInfo
-    agent: AuthorInfo
-    profile_id: str | None
-
-
-@dataclass
-class _CachedConversation:
-    """What this instance remembers about a conversation between webhooks.
-
-    Best-effort: another instance, a restart or an eviction starts empty, and
-    nothing relies on it for correctness. It gives `session.metadata` its
-    per-instance persistence across turns, answers `conversation_metadata()`
-    without a lookup when the CO metadata is known, and keeps the last
-    reconciled participants (`identity`) for a turn whose lookup fails.
-
-    `co_metadata` is only metadata **this instance wrote itself** (at outbound
-    initiation), so a later change made on another instance is not seen here.
-    Metadata fetched from CO is kept per turn on the session, not in this cache.
-    """
-
-    metadata: dict[str, Any]
-    co_metadata: dict[str, str] | None = None
-    identity: _CachedIdentity | None = None
 
 
 class MessagingChannelConfig(BaseModel):
@@ -114,10 +74,10 @@ class MessagingChannel(BaseChannel):
     webhooks: each request derives its own `ConversationSession` from the
     payload, config, and one `list_participants` call it needs anyway. So any
     replica can serve any webhook — no sticky sessions, no shared datastore.
-    A bounded, best-effort cache keeps each conversation's `session.metadata`
-    on the instance that handled it, so `main`'s per-instance behavior holds.
-    `ConversationSession.conversation_metadata()` reads the metadata stored on
-    Conversation Orchestrator from any instance.
+    A session lasts one turn, so `session.metadata` doesn't carry over to the
+    next message; keep state across turns in your own store, keyed by
+    `conversation_id`. `ConversationSession.conversation_metadata()` reads the
+    metadata stored on Conversation Orchestrator from any instance.
 
     Subclasses must implement:
 
@@ -178,10 +138,6 @@ class MessagingChannel(BaseChannel):
             tac.conversation_orchestrator_client
         )
         super().__init__(tac, memory_mode=memory_mode, dedup_capacity=dedup_capacity)
-        # Best-effort, per-instance; see _CachedConversation.
-        self._metadata_cache: ExpiringDict[_CachedConversation] = ExpiringDict(
-            ttl_seconds=_METADATA_CACHE_TTL_SECONDS, max_entries=_METADATA_CACHE_MAX_ENTRIES
-        )
 
     @abstractmethod
     def is_default_agent_address(self, author_address: str) -> bool:
@@ -249,8 +205,7 @@ class MessagingChannel(BaseChannel):
         """Return the agent-side ParticipantAddress for this conversation.
 
         Identifies which participant represents the agent, and supplies the
-        `from` address for outbound sends. May read state this instance keeps
-        for the conversation (e.g. chat's per-conversation `channelId`).
+        `from` address for outbound sends.
         """
         pass
 
@@ -296,7 +251,7 @@ class MessagingChannel(BaseChannel):
     def _session_from_participants(
         self, conversation_id: str, participants: list[ParticipantResponse]
     ) -> ConversationSession | None:
-        """Rebuild a session for a conversation this process never handled.
+        """Build a session for a conversation from its participants.
 
         Returns ``None`` when no participant is on this channel, which is how
         another channel's conversation is filtered out.
@@ -500,33 +455,10 @@ class MessagingChannel(BaseChannel):
         elif event_type == "PARTICIPANT_ADDED":
             self._track_conversation_started(event_data)
 
-    def _cached_conversation(self, conv_id: str) -> _CachedConversation:
-        """This instance's cache entry for a conversation, created if missing.
-
-        Re-inserting refreshes the entry's TTL, so an active conversation stays.
-        """
-        try:
-            entry = self._metadata_cache[conv_id]
-        except KeyError:
-            entry = _CachedConversation(metadata={})
-        self._metadata_cache[conv_id] = entry
-        return entry
-
-    def _bind_session_metadata(
-        self, session: ConversationSession, entry: _CachedConversation
-    ) -> None:
-        """Share the entry's metadata dict with the session and wire
-        `conversation_metadata()` to the entry, falling back to CO."""
-        entry.metadata.update(session.metadata)
-        session.metadata = entry.metadata
-        session._co_metadata = entry.co_metadata
-        session._co_metadata_loader = self._co_metadata_loader(session.conversation_id)
-
     def _co_metadata_loader(self, conv_id: str) -> Callable[[], Awaitable[dict[str, str] | None]]:
         """A loader that fetches a conversation's CO metadata.
 
-        The result is kept by the session for its turn only, never in the
-        cache: another instance may change it between turns.
+        The result is kept by the session, so for its turn only.
         """
 
         async def load() -> dict[str, str] | None:
@@ -571,7 +503,7 @@ class MessagingChannel(BaseChannel):
         session.ai_agent_info = AuthorInfo(
             address=agent_address or self._agent_address(session).address
         )
-        self._bind_session_metadata(session, self._cached_conversation(conv_id))
+        session._co_metadata_loader = self._co_metadata_loader(conv_id)
         return session
 
     async def _handle_communication_created(self, event_data: Any) -> None:
@@ -627,23 +559,15 @@ class MessagingChannel(BaseChannel):
         session = self._resolve_session(conv_id, communication_data, inbound_agent_address)
 
         # One participant fetch per message, shared by the self-message check,
-        # reconciliation, and profile resolution. All three need it. If it
-        # fails, fall back to the participants this instance last reconciled,
-        # as main did; with none, the message can't be answered.
+        # reconciliation, and profile resolution. All three need it, so
+        # without it the message can't be answered.
         participants = await self._list_participants(conv_id)
         if participants is None:
-            if not self._restore_identity(session, inbound_agent_address):
-                await self._drop_inbound(
-                    conv_id, channel, "Could not read participants; inbound message dropped"
-                )
-                return
-            self.logger.warning(
-                "Could not read participants; answering with this instance's "
-                "last-known participants",
-                conversation_id=conv_id,
-                channel=channel,
+            await self._drop_inbound(
+                conv_id, channel, "Could not read participants; inbound message dropped"
             )
-        elif not await self._resolve_participants(
+            return
+        if not await self._resolve_participants(
             session, communication_data, participants, inbound_agent_address
         ):
             return
@@ -683,8 +607,7 @@ class MessagingChannel(BaseChannel):
         """Resolve both sides of this turn from the participant list.
 
         Returns False when the message must not be answered: it's TAC's own,
-        or reconciliation failed (dropped). On success the identity is kept
-        for the next turn on this instance (see `_restore_identity`).
+        or reconciliation failed (dropped).
         """
         conv_id = session.conversation_id
         channel = self.get_channel_name()
@@ -731,42 +654,6 @@ class MessagingChannel(BaseChannel):
             # infers the identifier type and misses on CHAT and RCS.
             session.profile_id = self._profile_id_from_participants(session, participants)
 
-        self._remember_identity(session)
-        return True
-
-    def _remember_identity(self, session: ConversationSession) -> None:
-        """Keep this turn's reconciled participants in the conversation's cache entry."""
-        try:
-            entry = self._metadata_cache[session.conversation_id]
-        except KeyError:
-            return
-        if session.author_info is None or session.ai_agent_info is None:
-            return
-        entry.identity = _CachedIdentity(
-            author=session.author_info.model_copy(),
-            agent=session.ai_agent_info.model_copy(),
-            profile_id=session.profile_id,
-        )
-
-    def _restore_identity(
-        self, session: ConversationSession, inbound_agent_address: str | None
-    ) -> bool:
-        """Fill `session` from the participants this instance last reconciled.
-
-        False when there are none, or when the webhook names a different
-        sender than the one cached (the cached agent participant isn't it).
-        """
-        try:
-            identity = self._metadata_cache[session.conversation_id].identity
-        except KeyError:
-            return False
-        if identity is None:
-            return False
-        if inbound_agent_address is not None and inbound_agent_address != identity.agent.address:
-            return False
-        session.author_info = identity.author.model_copy()
-        session.ai_agent_info = identity.agent.model_copy()
-        session.profile_id = identity.profile_id
         return True
 
     def _profile_id_from_participants(
@@ -797,15 +684,9 @@ class MessagingChannel(BaseChannel):
         conversation is on this channel (a CHAT close must not fire on SMS)
         and lets this work on whichever replica Twilio picked.
 
-        CLOSED also evicts this instance's metadata cache entry. The rebuilt
-        session's `metadata` is built the same way on every replica: the
-        payload's metadata when present, with this instance's local entries
-        (if it had any) layered over it, then the session's own fields. Keys
-        held locally, including outbound metadata this instance wrote, win
-        over the payload, so they can be older than CO's values; use
-        `conversation_metadata()` for those. There the payload's metadata
-        wins; without it, what this instance wrote itself; without either, a
-        fetch on demand.
+        The session is rebuilt the same way on every replica. The conversation's
+        CO metadata is read through `conversation_metadata()`: answered from the
+        payload when it carries metadata, otherwise fetched on demand.
         """
         conversation_data = ConversationResponse.model_validate(event_data)
         conv_id = conversation_data.id
@@ -814,8 +695,6 @@ class MessagingChannel(BaseChannel):
             return
         if conversation_data.status != "CLOSED":
             return
-        # The conversation is over: drop what this instance remembered of it.
-        entry = self._metadata_cache.pop(conv_id, None)
         notify = self.tac._has_conversation_ended_callback()
         report = analytics_enabled()
         if not (notify or report):
@@ -833,23 +712,9 @@ class MessagingChannel(BaseChannel):
         session = self._session_from_participants(conv_id, participants)
         if session is None:
             return
-        # Built the same way on every replica: the payload's metadata (when
-        # present), then this instance's local entries over it (they win, even
-        # when CO has since changed a key), then what the rebuilt session carries.
-        payload_metadata = dict(conversation_data.metadata or {})
-        closed_metadata: dict[str, Any] = dict(payload_metadata)
-        if entry is not None:
-            closed_metadata.update(entry.metadata)
-        closed_metadata.update(session.metadata)
-        session.metadata = closed_metadata
         if conversation_data.metadata is not None:
-            session._co_metadata = payload_metadata
-        elif entry is not None and entry.co_metadata is not None:
-            # A payload without metadata says nothing; this instance wrote it itself.
-            session._co_metadata = dict(entry.co_metadata)
+            session._co_metadata = dict(conversation_data.metadata)
         else:
-            # Nothing known: fetch on demand.
-            session._co_metadata = None
             session._co_metadata_loader = self._co_metadata_loader(conv_id)
         if report:
             self._track_conversation_ended(
@@ -991,9 +856,8 @@ class MessagingChannel(BaseChannel):
                 conversation_id=conversation_id,
                 to=mask_address(options.to),
             )
-            entry = self._cached_conversation(conversation_id)
-            entry.co_metadata = known_co_metadata
-            self._bind_session_metadata(session, entry)
+            session._co_metadata = known_co_metadata
+            session._co_metadata_loader = self._co_metadata_loader(conversation_id)
             return InitiateConversationResult(conversation_id=conversation_id, session=session)
 
         except Exception as e:

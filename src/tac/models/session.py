@@ -63,7 +63,10 @@ class ConversationSession(BaseModel):
         "there is no Conversation Orchestrator participant to resolve.",
     )
     metadata: dict = Field(
-        default_factory=dict, description="Generic metadata storage for session-specific data"
+        default_factory=dict,
+        description="Generic metadata storage for session-specific data. On messaging "
+        "channels a session lasts one turn, so nothing here carries over to the next "
+        "message; keep cross-turn state in your own store, keyed by `conversation_id`.",
     )
     pending_handoff_data: PendingHandoffData | None = Field(
         default=None,
@@ -143,15 +146,14 @@ class ConversationSession(BaseModel):
     async def conversation_metadata(self) -> dict[str, str]:
         """The metadata stored on this conversation in Conversation Orchestrator.
 
-        `metadata` is this process's own data for the conversation, which
-        another replica doesn't see. This reads what's stored on the
-        conversation itself — for example the `metadata` passed to
-        `initiate_outbound_conversation` — so it works on whichever replica
-        handles the turn. It's answered locally when this process already
-        knows it; otherwise it costs one Conversation Orchestrator request,
-        kept for the rest of this turn. When it's answered from what this
-        process wrote itself, a later change made elsewhere (another replica,
-        or another tool) isn't seen until a turn on an instance that fetches it.
+        `metadata` is this session's own data, which another replica doesn't
+        see. This reads what's stored on the conversation itself — for example
+        the `metadata` passed to `initiate_outbound_conversation` — so it works
+        on whichever replica handles the turn. It costs one Conversation
+        Orchestrator request, kept for the rest of this turn, unless the session
+        already knows it: the session `initiate_outbound_conversation` returns
+        holds what it wrote, and a CLOSED webhook's session holds the payload's
+        copy.
 
         Returns a copy, so editing it changes nothing. Returns `{}` when the
         conversation has no metadata or the lookup fails; a failed lookup is
