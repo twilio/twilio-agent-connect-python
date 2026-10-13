@@ -69,7 +69,10 @@ async def on_message(message: str, session: ConversationSession, memory) -> None
 ```
 
 `send_response` still accepts a bare conversation id, but with no session to
-consult it spends a `list_participants` call rebuilding one.
+consult it spends a `list_participants` call rebuilding one. On Chat, the
+rebuilt session takes the required `channelId` from the customer's or agent's
+CHAT participant address; when neither carries one, the send raises, so pass
+the session there.
 
 ### Handlers must be idempotent
 

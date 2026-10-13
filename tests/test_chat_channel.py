@@ -7,6 +7,7 @@ import pytest
 
 from tac import TAC
 from tac.channels.chat import ChatChannel, ChatChannelConfig
+from tac.models.conversation import ParticipantAddress, ParticipantResponse
 from tac.models.memory import MemoryRetrievalMeta, MemoryRetrievalResponse
 from tac.models.outbound import InitiateChatConversationOptions
 from tac.models.session import AuthorInfo, ConversationSession
@@ -80,6 +81,19 @@ def get_test_config() -> dict[str, Any]:
         "conversation_configuration_id": "conv_configuration_test123",
         "phone_number": "+15551234567",
     }
+
+
+def chat_participant(
+    participant_id: str, kind: str, address: str, channel_id: str | None = None
+) -> ParticipantResponse:
+    return ParticipantResponse(
+        id=participant_id,
+        account_id="ACtest123",
+        conversation_id="CH999",
+        name=address,
+        type=kind,
+        addresses=[ParticipantAddress(channel="CHAT", address=address, channel_id=channel_id)],
+    )
 
 
 class TestChatChannel:
@@ -367,33 +381,76 @@ class TestChatChannel:
             assert request.payload.channel_settings.channel_id == "CH_CHAT_SID_123"
 
     @pytest.mark.asyncio
-    async def test_send_response_by_id_rebuilds_from_participants(self) -> None:
-        """The bare-id form works, at the cost of one participant lookup."""
-        from tac.models.conversation import ParticipantAddress, ParticipantResponse
-
+    async def test_send_response_by_id_takes_channel_id_from_participants(self) -> None:
+        """The bare-id form works, at the cost of one participant lookup: the
+        channelId comes off the participants' CHAT addresses."""
         tac = TAC(get_test_config())
         channel = ChatChannel(tac)
 
-        customer = ParticipantResponse(
-            id="PA_USER",
-            account_id="ACtest123",
-            conversation_id="CH999",
-            name="user@example.com",
-            type="CUSTOMER",
-            addresses=[ParticipantAddress(channel="CHAT", address="user@example.com")],
-        )
         with (
             patch.object(
                 tac.conversation_orchestrator_client,
                 "list_participants",
-                new=AsyncMock(return_value=[customer]),
+                new=AsyncMock(
+                    return_value=[
+                        chat_participant("PA_AGENT", "AI_AGENT", "ai-assistant", "CH_CHAT_SID"),
+                        chat_participant("PA_USER", "CUSTOMER", "user@example.com", "CH_CHAT_SID"),
+                    ]
+                ),
             ),
             patch.object(tac.conversation_orchestrator_client, "create_action") as mock_send,
         ):
-            # CHAT still needs channelId, which only a session carries.
-            with pytest.raises(RuntimeError, match=r"channel_id"):
-                await channel.send_response("CH999", "Hello!")
-            mock_send.assert_not_called()
+            await channel.send_response("CH999", "Hello!")
+
+        request = mock_send.call_args[0][1]
+        assert request.payload.from_.participant_id == "PA_AGENT"
+        assert request.payload.to[0].participant_id == "PA_USER"
+        assert request.payload.channel_settings is not None
+        assert request.payload.channel_settings.channel_id == "CH_CHAT_SID"
+
+    @pytest.mark.asyncio
+    async def test_send_response_by_id_ignores_other_participants_channel_ids(self) -> None:
+        """Only the customer's or agent's CHAT address supplies the channelId."""
+        tac = TAC(get_test_config())
+        channel = ChatChannel(tac)
+
+        with (
+            patch.object(
+                tac.conversation_orchestrator_client,
+                "list_participants",
+                new=AsyncMock(
+                    return_value=[
+                        chat_participant("PA_USER", "CUSTOMER", "user@example.com"),
+                        chat_participant("PA_OTHER", "HUMAN_AGENT", "someone", "CH_OTHER"),
+                    ]
+                ),
+            ),
+            patch.object(tac.conversation_orchestrator_client, "create_action") as mock_send,
+            pytest.raises(RuntimeError, match="Pass the ConversationSession"),
+        ):
+            await channel.send_response("CH999", "Hello!")
+        mock_send.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_send_response_by_id_without_a_channel_id_says_to_pass_the_session(
+        self,
+    ) -> None:
+        tac = TAC(get_test_config())
+        channel = ChatChannel(tac)
+
+        with (
+            patch.object(
+                tac.conversation_orchestrator_client,
+                "list_participants",
+                new=AsyncMock(
+                    return_value=[chat_participant("PA_USER", "CUSTOMER", "user@example.com")]
+                ),
+            ),
+            patch.object(tac.conversation_orchestrator_client, "create_action") as mock_send,
+            pytest.raises(RuntimeError, match="Pass the ConversationSession"),
+        ):
+            await channel.send_response("CH999", "Hello!")
+        mock_send.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_send_response_no_recipient(self) -> None:
