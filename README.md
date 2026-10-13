@@ -46,6 +46,7 @@ Seamlessly integrate with Twilio Conversation Memory and Conversation Orchestrat
 - **Memory Management**: Automatic integration with Twilio Conversation Memory for persistent user context
 - **Conversation Lifecycle**: Automatic tracking of conversation sessions and state
 - **Human Handoff**: Built-in tool to route conversations to human agents via Twilio Studio Flows (including Flex)
+- **Horizontal Scaling**: Run N replicas behind a load balancer with no shared datastore; for voice, set `TWILIO_INSTANCE_PUBLIC_DOMAIN` to each replica's own public hostname
 
 ## Installation
 

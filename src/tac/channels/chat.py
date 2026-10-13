@@ -6,7 +6,11 @@ from pydantic import Field
 
 from tac import TAC
 from tac.channels.messaging import MessagingChannel, MessagingChannelConfig
-from tac.models.conversation import ActionChannelSettings, ParticipantAddress
+from tac.models.conversation import (
+    ActionChannelSettings,
+    ParticipantAddress,
+    ParticipantResponse,
+)
 from tac.models.outbound import (
     InitiateChatConversationOptions,
     InitiateConversationResult,
@@ -65,27 +69,66 @@ class ChatChannel(MessagingChannel):
         return author_address == self.agent_address
 
     def get_agent_address(self, conversation_id: str) -> ParticipantAddress:
-        session = self._conversations.get(conversation_id)
-        channel_id = session.metadata.get("channel_id") if session else None
+        # channelId is per-conversation and arrives on each turn's session,
+        # so a lookup by id alone can't supply it.
+        return self._chat_address(None)
+
+    def _agent_address(self, session: ConversationSession) -> ParticipantAddress:
+        # channelId comes off the session; the inbound webhook puts it there.
+        return self._chat_address(session.metadata.get("channel_id"))
+
+    def _chat_address(self, channel_id: object) -> ParticipantAddress:
         return ParticipantAddress(
             channel="CHAT",
             address=self.agent_address,
             channel_id=channel_id if isinstance(channel_id, str) else None,
         )
 
+    def _session_from_participants(
+        self, conversation_id: str, participants: list[ParticipantResponse]
+    ) -> ConversationSession | None:
+        """Rebuild the session, recovering `channel_id` from the participants.
+
+        A session rebuilt from a bare conversation id has no webhook to take
+        `channelId` from, so it's read off the customer's or agent's CHAT
+        address instead, where Conversation Orchestrator records it.
+        """
+        session = super()._session_from_participants(conversation_id, participants)
+        if session is None or session.metadata.get("channel_id"):
+            return session
+        own_ids = {
+            info.participant_id
+            for info in (session.author_info, session.ai_agent_info)
+            if info is not None and info.participant_id
+        }
+        channel_id = next(
+            (
+                a.channel_id
+                for p in participants
+                if p.id in own_ids
+                for a in p.addresses
+                if a.channel == "CHAT" and a.channel_id
+            ),
+            None,
+        )
+        if channel_id:
+            session.metadata["channel_id"] = channel_id
+        return session
+
     def _build_channel_settings(
         self, conversation_id: str, session: ConversationSession
     ) -> ActionChannelSettings:
         # channelId (Chat Channel SID) is required for CHAT delivery — the V1
         # Chat backend uses it to pick the destination thread. Inbound webhooks
-        # always populate it, so a missing value here is a misuse.
+        # always populate it; a session rebuilt from a bare id has it only when
+        # the conversation's participants carry it.
         channel_id = session.metadata.get("channel_id")
         if not channel_id or not isinstance(channel_id, str):
             raise RuntimeError(
-                "Missing required session.metadata['channel_id'] for chat send_response; "
-                "this is normally populated by an inbound webhook. Ensure an inbound "
-                "message has been processed before calling send_response, or set "
-                "session.metadata['channel_id'] explicitly in advanced usage."
+                "Missing required session.metadata['channel_id'] for chat send_response. "
+                "Pass the ConversationSession from on_message_ready or "
+                "initiate_outbound_conversation: a bare conversation id works only when "
+                "the conversation's CHAT participants carry a channelId."
             )
         return ActionChannelSettings(channel_id=channel_id)
 

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 from collections.abc import AsyncGenerator, Awaitable, Callable
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -9,13 +11,14 @@ if TYPE_CHECKING:
 
 from tac.channels.base import BaseChannel
 from tac.channels.websocket_protocol import WebSocketProtocol
-from tac.core.analytics import track_event
+from tac.core.analytics import analytics_enabled, track_event
 from tac.core.tac import TAC
+from tac.models.conversation import ConversationResponse
 from tac.models.outbound import (
     InitiateVoiceConversationOptions,
     InitiateVoiceConversationResult,
 )
-from tac.models.session import ConversationSession
+from tac.models.session import AuthorInfo, ConversationSession
 from tac.models.voice import (
     AmdEvent,
     CallStatusEvent,
@@ -23,6 +26,7 @@ from tac.models.voice import (
     TwiMLRequest,
     VoiceTwiMLOptions,
 )
+from tac.utils.timestamps import elapsed_ms, parse_iso8601
 
 from .conversation_relay import ConversationRelayProviderConfig
 from .provider import VoiceProviderConfig
@@ -31,6 +35,21 @@ InboundCallTwiMLHandler = Callable[[TwiMLRequest], Awaitable[VoiceTwiMLOptions]]
 CallStatusHandler = Callable[[CallStatusEvent], Awaitable[None]]
 AmdHandler = Callable[[AmdEvent], Awaitable[None]]
 RecordingHandler = Callable[[RecordingEvent], Awaitable[None]]
+CallEndedHandler = Callable[[ConversationSession], Awaitable[None]]
+
+#: Channel name Conversation Orchestrator uses for voice participants. Not
+#: ``get_channel_name()``, which is provider-specific.
+CO_VOICE_CHANNEL = "VOICE"
+
+
+def _created_at_key(conversation: ConversationResponse) -> datetime:
+    """Parse ``ConversationResponse.created_at`` for chronological sorting.
+
+    Naive timestamps are treated as UTC. A missing or unparseable value
+    sorts first (``datetime.min``), so a conversation with good data always
+    wins over one without.
+    """
+    return parse_iso8601(conversation.created_at) or datetime.min.replace(tzinfo=timezone.utc)
 
 
 class VoiceChannel(BaseChannel):
@@ -84,12 +103,19 @@ class VoiceChannel(BaseChannel):
             config = ConversationRelayProviderConfig()
 
         super().__init__(tac, memory_mode=config.memory_mode)
+        # Live sessions by conversation id. Instance-local by design: a call
+        # is pinned to the process holding its WebSocket.
+        self._conversations: dict[str, ConversationSession] = {}
         self._provider = config.create_provider(self, tac.config)
         self._on_inbound_call_twiml: InboundCallTwiMLHandler | None = None
         self._on_call_status: CallStatusHandler | None = None
         self._on_amd: AmdHandler | None = None
         self._on_recording: RecordingHandler | None = None
+        self._on_call_ended: CallEndedHandler | None = None
         self._twilio_client: Client | None = None
+        # Live calls whose conversation CO already closed mid-call: their
+        # `on_conversation_ended` has fired, so teardown doesn't fire it again.
+        self._closed_while_live: set[str] = set()
 
     def on_inbound_call_twiml(self, callback: InboundCallTwiMLHandler) -> None:
         """Register a callback that produces per-call overrides for the
@@ -176,6 +202,31 @@ class VoiceChannel(BaseChannel):
             ```
         """
         self._on_recording = callback
+
+    def on_call_ended(self, callback: CallEndedHandler) -> None:
+        """Register a handler for WebSocket teardown.
+
+        Fires once per call, always, on the instance that held the call. It
+        receives the live session just before it is discarded, so it is the
+        only place late-call in-memory state — the transcript, `call_sid`,
+        anything you put on `metadata` — is still reachable.
+
+        Not the same as `on_conversation_ended` (fires when the *conversation*
+        closes, on any instance; on an orchestrated call, from a session
+        rebuilt from Conversation Orchestrator, identity only) or
+        `on_call_status` (a Twilio Calls-API webhook, no session). Handler
+        exceptions are logged and swallowed.
+
+        Example:
+            ```python
+            async def on_call_ended(session: ConversationSession) -> None:
+                await archive(session.call_sid, session.metadata.get("transcript", []))
+
+
+            voice_channel.on_call_ended(on_call_ended)
+            ```
+        """
+        self._on_call_ended = callback
 
     def _get_twilio_client(self) -> Client:
         if self._twilio_client is None:
@@ -319,6 +370,11 @@ class VoiceChannel(BaseChannel):
         hangs up while AMD is still resolving), and handlers shouldn't have to
         guard against it.
 
+        The session is released as on any hangup: `on_call_ended` fires now.
+        On an orchestrated call `on_conversation_ended` fires later, when
+        Conversation Orchestrator's CLOSED webhook arrives; otherwise it fires
+        now too.
+
         Args:
             call_sid: Twilio Call SID (from a call event, the outbound result, or
                 ``ConversationSession.call_sid``).
@@ -342,8 +398,301 @@ class VoiceChannel(BaseChannel):
 
         session = self.get_conversation_session_by_call_sid(call_sid)
         if session is not None:
-            await self._end_conversation(session.conversation_id)
+            await self._release_session(session.conversation_id)
         return hung_up
+
+    def _start_conversation(
+        self,
+        conv_id: str,
+        profile_id: str | None = None,
+    ) -> ConversationSession:
+        """Track a new session for a call, or return the existing one.
+
+        Profile data is fetched lazily during retrieve_memory() when needed.
+        """
+        if conv_id in self._conversations:
+            self.logger.debug(
+                "Conversation already exists, skipping initialization",
+                conversation_id=conv_id,
+                channel=self.get_channel_name(),
+            )
+            return self._conversations[conv_id]
+
+        self._conversations[conv_id] = ConversationSession(
+            conversation_id=conv_id,
+            profile_id=profile_id,
+            channel=self.get_channel_name(),
+        )
+
+        self.logger.info(
+            f"CONVERSATION | Started {self.get_channel_name()} conversation",
+            conversation_id=conv_id,
+            profile_id=profile_id,
+        )
+
+        # With a CO conversation behind the call, CO's PARTICIPANT_ADDED
+        # reports the start instead — see _track_conversation_started.
+        if not self._provider._conversation_closed_by_orchestrator:
+            track_event(
+                "Conversation Started",
+                self.tac.config.account_sid,
+                channel=self._telemetry_channel,
+                conversation_id=conv_id,
+                has_profile_id=profile_id is not None,
+            )
+
+        return self._conversations[conv_id]
+
+    async def _release_session(self, conv_id: str) -> ConversationSession | None:
+        """Free a finished call's session and fire the end-of-call hooks.
+
+        Called from every teardown path and idempotent, so a second call is a
+        no-op returning ``None``. Always fires ``on_call_ended``. Also fires
+        ``on_conversation_ended`` unless a Conversation Orchestrator CLOSED
+        webhook will do that later (see
+        ``VoiceProvider._conversation_closed_by_orchestrator``). Nothing is kept
+        for that CLOSED: it gets a session rebuilt from Conversation
+        Orchestrator.
+        """
+        session = self._conversations.pop(conv_id, None)
+        if session is None:
+            return None
+        return await self._run_release(conv_id, session)
+
+    async def _run_release(self, conv_id: str, session: ConversationSession) -> ConversationSession:
+        """The end-of-call work for a session `_release_session` just popped."""
+        # Measured before the callbacks below, which are application-owned:
+        # they are awaited and may do network I/O or mutate the session, and
+        # neither their latency nor their edits belong in the reported duration.
+        duration_ms = int((datetime.now() - session.started_at).total_seconds() * 1000)
+
+        if self._on_call_ended is not None:
+            try:
+                await self._on_call_ended(session)
+            except Exception as e:
+                self.logger.error(
+                    "Error in call ended callback",
+                    conversation_id=conv_id,
+                    error=str(e),
+                    exc_info=True,
+                )
+
+        if not self._provider._conversation_closed_by_orchestrator:
+            await self._trigger_conversation_ended(session)
+        else:
+            # CO closed this conversation mid-call, if at all; its hook fired then.
+            self._closed_while_live.discard(conv_id)
+
+        # Only when no CO conversation sits behind the call (relay-only, Media
+        # Streams): otherwise CO's CLOSED reports the end, with CO's duration.
+        if not self._provider._conversation_closed_by_orchestrator:
+            track_event(
+                "Conversation Ended",
+                self.tac.config.account_sid,
+                channel=self._telemetry_channel,
+                conversation_id=conv_id,
+                duration_ms=duration_ms,
+            )
+
+        self.logger.debug(
+            "Released voice session",
+            conversation_id=conv_id,
+            channel=self.get_channel_name(),
+        )
+        return session
+
+    async def _handle_conversation_closed(
+        self, conv_id: str, duration_ms: int | None = None
+    ) -> None:
+        """Fire ``on_conversation_ended`` for a CLOSED webhook.
+
+        The call has normally ended by now (the socket closed when the caller
+        hung up, or `end_call()` hung it up), and its session went with it. The
+        hook gets a session rebuilt from Conversation Orchestrator, identity
+        only, which is what lets it fire on whichever instance received the
+        webhook. The call's live state (transcript, `metadata`) reached
+        `on_call_ended` at teardown.
+
+        If this instance still holds the session, the call is live: CO closed
+        the conversation mid-call (a closed timeout during a long hold, or the
+        app closing it). The hook fires now, from a snapshot, and the session
+        stays for the call's own teardown to release — which is what keeps
+        ``on_call_ended`` firing and the rest of the call working. The call
+        then carries on under the closed conversation's id; CO starts a new
+        conversation for its later traffic, whose own CLOSED arrives here
+        later and takes the rebuild path.
+
+        The hook is at-least-once: a duplicate CLOSED delivery that isn't
+        deduped by its idempotency token fires it again, same as
+        `on_message_ready`.
+
+        Also reports "Conversation Ended" (``duration_ms`` is CO's
+        ``updatedAt − createdAt``). On the live path the session in hand already
+        proves the conversation is on voice, so no lookup is needed; otherwise
+        it is reported only if the rebuilt conversation is on voice.
+        """
+        live = self._conversations.get(conv_id)
+        if live is not None:
+            self.logger.warning(
+                "Conversation closed while its call is still live; the call continues "
+                "under the closed conversation's id",
+                conversation_id=conv_id,
+                call_sid=live.call_sid,
+            )
+            self._closed_while_live.add(conv_id)
+            self._track_conversation_ended(conv_id, duration_ms)
+            await self._trigger_conversation_ended(self._detached_snapshot(live))
+            return
+
+        notify = self.tac._has_conversation_ended_callback()
+        report = analytics_enabled()
+        if not (notify or report):
+            return
+        session = await self._rebuild_session(conv_id, shared=True)
+        if session is None:
+            return
+        if report:
+            self._track_conversation_ended(conv_id, duration_ms)
+        if notify:
+            await self._trigger_conversation_ended(session)
+
+    def _detached_snapshot(self, live: ConversationSession) -> ConversationSession:
+        """A copy of a live call's session that shares no mutable state with it.
+
+        `on_conversation_ended` may keep or edit what it's given while the call
+        carries on, so the callback-visible data — `metadata` and the nested
+        models — is deep-copied. The snapshot gets its own `cache_lock` rather
+        than the live call's, so nothing the callback does can block the call.
+        A `metadata` value that can't be copied (an app-owned handle, say) is
+        shared rather than failing the hook.
+        """
+        conv_id = live.conversation_id
+
+        def detached(value: Any, what: str) -> Any:
+            try:
+                return copy.deepcopy(value)
+            except Exception as e:
+                self.logger.debug(
+                    "Sharing a value that can't be copied into the CLOSED snapshot",
+                    conversation_id=conv_id,
+                    value=what,
+                    error=str(e),
+                )
+                return value
+
+        return live.model_copy(
+            update={
+                "metadata": {k: detached(v, f"metadata[{k!r}]") for k, v in live.metadata.items()},
+                "profile": detached(live.profile, "profile"),
+                "author_info": detached(live.author_info, "author_info"),
+                "ai_agent_info": detached(live.ai_agent_info, "ai_agent_info"),
+                "pending_handoff_data": detached(live.pending_handoff_data, "pending_handoff_data"),
+                "cached_memory": detached(live.cached_memory, "cached_memory"),
+                "cache_lock": asyncio.Lock(),
+            }
+        )
+
+    async def _rebuild_session(
+        self, conv_id: str, call_sid: str | None = None, *, shared: bool = False
+    ) -> ConversationSession | None:
+        """Reconstruct a session from Conversation Orchestrator.
+
+        Carries identity only — conversation id, call_sid, profile, both
+        participants. Live in-memory state (transcript, metadata) isn't
+        available here; it reaches ``on_call_ended``. ``call_sid`` defaults to a VOICE
+        participant address's ``channelId`` — the customer's if present, else
+        the agent's, else any other participant's. Returns ``None`` if no
+        participant is on the voice channel, which is how another channel's
+        CLOSED is filtered out.
+
+        ``shared=True`` (the CLOSED path) shares the participant lookup with
+        the other channels handling the same webhook; other callers need
+        fresh participants.
+        """
+        client = self.tac.conversation_orchestrator_client
+        if client is None:
+            return None
+
+        try:
+            if shared:
+                participants = await self.tac._list_participants_shared(conv_id)
+            else:
+                participants = await client.list_participants(conv_id)
+        except Exception as e:
+            self.logger.error(
+                "Failed to list participants while rebuilding a voice session",
+                conversation_id=conv_id,
+                error=str(e),
+            )
+            return None
+
+        if not any(a.channel == CO_VOICE_CHANNEL for p in participants for a in p.addresses):
+            return None
+
+        # A conversation grouped across channels may list another channel's
+        # customer first; the caller is the CUSTOMER on VOICE.
+        customer = next(
+            (
+                p
+                for p in participants
+                if p.type == "CUSTOMER" and any(a.channel == CO_VOICE_CHANNEL for a in p.addresses)
+            ),
+            None,
+        )
+        # TAC may own several numbers; the agent is whichever one this call used.
+        agent = next(
+            (
+                found
+                for number in self.tac.config.phone_numbers
+                if (found := self._find_agent_participant(participants, CO_VOICE_CHANNEL, number))
+                is not None
+            ),
+            None,
+        )
+
+        if call_sid is None:
+            # CO's conversation webhooks carry no channel ids; the call a
+            # voice participant is on is recorded on its VOICE address.
+            # Prefer the customer's, then the agent's, then anyone else's.
+            ordered = [p for p in (customer, agent) if p is not None] + [
+                p for p in participants if p is not customer and p is not agent
+            ]
+            call_sid = next(
+                (
+                    a.channel_id
+                    for p in ordered
+                    for a in p.addresses
+                    if a.channel == CO_VOICE_CHANNEL and a.channel_id
+                ),
+                None,
+            )
+            if call_sid is None:
+                self.logger.debug("Rebuilt voice session has no call_sid", conversation_id=conv_id)
+
+        session = ConversationSession(
+            conversation_id=conv_id,
+            call_sid=call_sid,
+            channel=self.get_channel_name(),
+            profile_id=customer.profile_id if customer else None,
+        )
+
+        if customer is not None:
+            customer_address = next(
+                (a.address for a in customer.addresses if a.channel == CO_VOICE_CHANNEL), None
+            )
+            if customer_address:
+                session.author_info = AuthorInfo(
+                    address=customer_address, participant_id=customer.id
+                )
+        if agent is not None:
+            session.ai_agent_info = AuthorInfo(
+                address=next(
+                    (a.address for a in agent.addresses if a.channel == CO_VOICE_CHANNEL),
+                    self.tac.config.phone_number,
+                ),
+                participant_id=agent.id,
+            )
+        return session
 
     def get_conversation_session_by_call_sid(self, call_sid: str) -> ConversationSession | None:
         """Look up the active voice session for a Twilio Call SID.
@@ -360,10 +709,11 @@ class VoiceChannel(BaseChannel):
         fires. Either way, treat this as racy and use :meth:`end_call` to hang
         up, which works whether or not a session exists yet.
 
-        At the other end, orchestrator mode keeps the session until Conversation
-        Orchestrator's CLOSED webhook, so it outlives the call and
-        ``on_call_status`` / ``on_recording`` do resolve. Relay-only mode tears
-        down on the provider's out-of-band callback instead, which races them.
+        At the other end the session is released as soon as the call's
+        WebSocket closes, in every mode — so out-of-band events that arrive
+        after the hangup (``on_call_status``, ``on_recording``) generally find
+        nothing here. Read late-call state from the session ``on_call_ended``
+        hands you instead.
 
         Named for ``ConversationSession``; ``session_manager`` deals in
         ``SessionState``, a different type.
@@ -383,13 +733,94 @@ class VoiceChannel(BaseChannel):
         Returns:
             The session, or ``None`` — not created yet (relay-only mode, or
             orchestrator mode where the background CO lookup hasn't finished),
-            the call ended, or it landed on another instance (see the
-            horizontal-scaling note in CLAUDE.md).
+            the call ended, or it landed on another instance. For the last
+            case, :meth:`resolve_conversation_session_by_call_sid` falls back
+            to Conversation Orchestrator.
         """
         for session in self._conversations.values():
             if session.call_sid == call_sid:
                 return session
         return None
+
+    async def resolve_conversation_session_by_call_sid(
+        self, call_sid: str
+    ) -> ConversationSession | None:
+        """Look up a call's session on any instance, falling back to
+        Conversation Orchestrator when this instance doesn't hold the call.
+
+        Out-of-band call events (``on_call_status``, ``on_amd``,
+        ``on_recording``) carry only a CallSid and, without
+        ``TACConfig.instance_public_domain``, can reach any replica. This
+        returns the live session when the call is held here — same as
+        :meth:`get_conversation_session_by_call_sid` — and otherwise, for a
+        ConversationRelay call in orchestrator mode, a session rebuilt from
+        Conversation Orchestrator.
+
+        A rebuilt session carries identity only (conversation id,
+        ``call_sid``, profile, both participants), is not tracked, and can't
+        be used with :meth:`send_response`: the call's WebSocket is on
+        another instance. If CO holds several conversations for the call
+        (it starts a new one when a conversation closes mid-call), the
+        active one wins, else the newest — this rule applies only to the
+        rebuild path. On the instance holding the call, the live session is
+        returned as-is, so after a mid-call close it still carries the
+        closed conversation's id while other instances return the new one;
+        correlate by ``call_sid`` if you need a stable key.
+
+        To tell live from rebuilt, check
+        ``voice_channel.get_websocket(session.conversation_id) is not None``
+        — true only for a session live on this instance. A rebuilt
+        session's ``started_at`` is the rebuild time, not the call's, and
+        its ``metadata`` is always empty.
+
+        Cost: on a local miss this makes up to two Conversation Orchestrator
+        requests (list conversations, then participants). Prefer
+        :meth:`get_conversation_session_by_call_sid` on hot paths, or when
+        ``TACConfig.instance_public_domain`` already routes call events to
+        the instance holding the call.
+
+        Example:
+            ```python
+            async def on_status(event: CallStatusEvent) -> None:
+                session = await voice_channel.resolve_conversation_session_by_call_sid(
+                    event.call_sid
+                )
+                if session is not None:
+                    audit_log(session.conversation_id, session.profile_id, event.call_status)
+            ```
+
+        Args:
+            call_sid: Twilio Call SID, e.g. from a call event.
+
+        Returns:
+            The live or rebuilt session, or ``None`` — relay-only or Media
+            Streams mode (no CO conversation behind the call), CO knows no
+            conversation for it, or the lookup failed (logged).
+        """
+        session = self.get_conversation_session_by_call_sid(call_sid)
+        if session is not None:
+            return session
+
+        client = self.tac.conversation_orchestrator_client
+        if client is None or not self._provider._conversation_closed_by_orchestrator:
+            return None
+
+        try:
+            conversations = await client.list_conversations(channel_id=call_sid)
+        except Exception as e:
+            self.logger.error(
+                "Failed to look up the conversation for a call",
+                call_sid=call_sid,
+                error=str(e),
+                exc_info=True,
+            )
+            return None
+        if not conversations:
+            return None
+
+        active = [c for c in conversations if c.status == "ACTIVE"]
+        chosen = max(active or conversations, key=_created_at_key)
+        return await self._rebuild_session(chosen.id, call_sid)
 
     async def handle_websocket(self, websocket: WebSocketProtocol) -> None:
         """
@@ -415,10 +846,14 @@ class VoiceChannel(BaseChannel):
         self,
         options: InitiateVoiceConversationOptions,
     ) -> InitiateVoiceConversationResult:
-        """Initiate an outbound voice conversation.
+        """Initiate an outbound voice conversation through the active provider.
 
-        Only ``ConversationRelayProvider`` supports outbound calls today —
-        raises ``NotImplementedError`` for any other provider.
+        `ConversationRelayProvider`, `OpenAIRealtimeProvider` and
+        `GPTLiveProvider` all place outbound calls. The Media Streams
+        providers also take a per-call `session_config`, via
+        `InitiateVoiceConversationOptionsOpenAIRealtime` or
+        `InitiateVoiceConversationOptionsGPTLive`. A provider without
+        outbound support raises `NotImplementedError`.
         """
         return await self._provider.initiate_outbound_conversation(options)
 
@@ -427,14 +862,26 @@ class VoiceChannel(BaseChannel):
     ) -> None:
         """Process conversation webhooks for cleanup and cache invalidation.
 
-        Voice channel processes CONVERSATION_UPDATED events:
-        - CLOSED status: Clean up local session state
-        - INACTIVE status: Invalidate cached memory (memory will be updated by
-          Conversation Orchestrator)
+        Voice channel processes these events:
 
-        Note: Conversation tracking uses instance-local memory. In multi-instance
-        deployments, webhooks may route to a different instance, preventing cleanup.
-        See CLAUDE.md for horizontal scaling considerations.
+        - **PARTICIPANT_ADDED**: report "Conversation Started" when the customer
+          joins on voice (orchestrated ConversationRelay only).
+        - **CLOSED** (CONVERSATION_UPDATED): fire ``on_conversation_ended``.
+          The call's session is normally already released (the WebSocket
+          closed when the caller hung up), so this rebuilds it from
+          Conversation Orchestrator — which is also what makes the hook fire
+          on whichever instance received the webhook rather than only on the
+          one that held the call. If this instance still holds the call's
+          session (the call is live), the hook fires now instead, with a
+          snapshot of that live session, and the session stays until the
+          call's own teardown — which still fires ``on_call_ended``. A single
+          call can then produce a second ``on_conversation_ended``, under a
+          different conversation id, when Conversation Orchestrator later
+          closes the conversation it started for the call's remaining
+          traffic. It also reports "Conversation Ended", with CO's duration.
+        - **INACTIVE**: invalidate cached memory, if this instance holds the
+          session. A call is pinned to one instance for its lifetime, so an
+          INACTIVE landing elsewhere has no cache to clear and is ignored.
 
         Args:
             webhook_data: Raw webhook event data from Twilio
@@ -457,29 +904,45 @@ class VoiceChannel(BaseChannel):
             )
             return
 
-        if event_type == "CONVERSATION_UPDATED":
-            conv_id = event_data.get("id")
-            status = event_data.get("status")
+        if event_type == "PARTICIPANT_ADDED":
+            # Only with a CO conversation behind calls; otherwise the session
+            # reports the start and counting this too would double it.
+            if self._provider._conversation_closed_by_orchestrator:
+                self._track_conversation_started(event_data)
+            return
+        if event_type != "CONVERSATION_UPDATED":
+            return
 
-            if not conv_id:
+        conv_id = event_data.get("id")
+        status = event_data.get("status")
+        if not conv_id:
+            return
+
+        if event_data.get("configurationId") != self.tac.config.conversation_configuration_id:
+            return
+
+        if status == "CLOSED":
+            if not self._provider._conversation_closed_by_orchestrator:
+                # This provider has no Conversation Orchestrator conversation
+                # behind its calls; on_conversation_ended already fired at
+                # teardown and firing again here would double it.
                 return
-
+            await self._handle_conversation_closed(
+                conv_id, elapsed_ms(event_data.get("createdAt"), event_data.get("updatedAt"))
+            )
+        elif status == "INACTIVE" and self.memory_mode == "once":
             session = self._conversations.get(conv_id)
-            if not session or session.channel != self.get_channel_name():
+            if session is None:
                 return
-
-            if status == "CLOSED":
-                await self._end_conversation(conv_id)
-            elif status == "INACTIVE" and self.memory_mode == "once":
-                # Invalidate cached memory when conversation becomes inactive
-                # Memory is updated by Conversation Orchestrator on INACTIVE transition
-                async with session.cache_lock:
-                    if session.cached_memory is not None:
-                        session.cached_memory = None
-                        self.logger.debug(
-                            "Invalidated cached memory on INACTIVE status",
-                            conversation_id=conv_id,
-                        )
+            # Memory is updated by Conversation Orchestrator on the INACTIVE
+            # transition, so the cached copy is stale from here on.
+            async with session.cache_lock:
+                if session.cached_memory is not None:
+                    session.cached_memory = None
+                    self.logger.debug(
+                        "Invalidated cached memory on INACTIVE status",
+                        conversation_id=conv_id,
+                    )
 
     async def send_response(
         self,
@@ -503,6 +966,15 @@ class VoiceChannel(BaseChannel):
 
     def get_channel_name(self) -> str:
         return self._provider.channel_name
+
+    @property
+    def _co_channel(self) -> str:
+        # get_channel_name() is the provider's transport label; CO always
+        # records voice participants as VOICE.
+        return CO_VOICE_CHANNEL
+
+    def _is_own_co_address(self, address: str) -> bool:
+        return address in self.tac.config.phone_numbers
 
     @property
     def _telemetry_channel(self) -> str:

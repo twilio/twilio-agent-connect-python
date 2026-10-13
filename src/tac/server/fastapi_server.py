@@ -145,10 +145,12 @@ class TACFastAPIServer:
         can't know what URL plumbing they're doing outside this server.
         """
         assert self.voice_channel is not None  # checked by caller
-        if not self.tac.config.voice_public_domain:
+        if not self.tac.config.voice_callback_domain:
             raise ValueError(
                 "Voice channel is configured but TACConfig.voice_public_domain is "
-                "not set. Set it directly or via the TWILIO_VOICE_PUBLIC_DOMAIN env var."
+                "not set. Set it directly or via the TWILIO_VOICE_PUBLIC_DOMAIN env var. "
+                "(TACConfig.instance_public_domain also satisfies this, if each replica "
+                "is directly addressable.)"
             )
         self._validate_call_event_paths()
 
