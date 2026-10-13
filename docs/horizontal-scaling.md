@@ -83,8 +83,8 @@ genuinely can't, route by `conversation_id` at the load balancer.
 
 Metadata you pass to `initiate_outbound_conversation` is stored on the
 conversation in Conversation Orchestrator (keys of up to 128 letters, digits,
-`.`, `_` or `-`; string values up to 512 characters; at most 8 keys including TAC's
-`direction`), so a reply can find it on any replica:
+`.`, `_` or `-`; string values up to 512 characters; at most 8 keys), so a reply
+can find it on any replica:
 
 ```python
 async def on_message(text, session, memory):

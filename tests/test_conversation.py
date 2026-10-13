@@ -1315,13 +1315,13 @@ class TestConversationClient:
             api_key="SK1", api_secret="secret", configuration_id="conv_configuration_test123"
         )
 
-        await client.create_conversation(metadata={"direction": "outbound"})
+        await client.create_conversation(metadata={"appointment_id": "apt_42"})
 
         mock_client.post.assert_called_once_with(
             "https://conversations.twilio.com/v2/Conversations",
             json={
                 "configurationId": "conv_configuration_test123",
-                "metadata": {"direction": "outbound"},
+                "metadata": {"appointment_id": "apt_42"},
             },
         )
 
@@ -1400,7 +1400,7 @@ class TestConversationClient:
         mock_response.json.return_value = {
             "id": "CH1",
             "accountId": "AC1",
-            "metadata": {"existing": "kept", "direction": "outbound"},
+            "metadata": {"existing": "kept", "appointment_id": "apt_42"},
         }
         mock_response.raise_for_status = Mock()
         mock_client = AsyncMock()
@@ -1410,10 +1410,10 @@ class TestConversationClient:
             api_key="SK1", api_secret="secret", configuration_id="conv_configuration_test123"
         )
 
-        result = await client.patch_conversation_metadata("CH1", {"direction": "outbound"})
+        result = await client.patch_conversation_metadata("CH1", {"appointment_id": "apt_42"})
 
         mock_client.patch.assert_called_once_with(
             "https://conversations.twilio.com/v2/Conversations/CH1",
-            json={"metadata": {"direction": "outbound"}},
+            json={"metadata": {"appointment_id": "apt_42"}},
         )
-        assert result.metadata == {"existing": "kept", "direction": "outbound"}
+        assert result.metadata == {"existing": "kept", "appointment_id": "apt_42"}

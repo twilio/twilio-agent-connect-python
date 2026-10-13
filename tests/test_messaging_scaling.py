@@ -708,11 +708,37 @@ class TestConversationMetadata:
 
         await send_outbound(channel, {"appointment_id": "apt_42"})
 
-        assert create.await_args.kwargs["metadata"] == {
-            "direction": "outbound",
-            "appointment_id": "apt_42",
-        }
+        assert create.await_args.kwargs["metadata"] == {"appointment_id": "apt_42"}
         assert counter.count("patch_conversation_metadata") == 0
+
+    @pytest.mark.asyncio
+    async def test_without_metadata_creation_sends_none_and_nothing_is_patched(self) -> None:
+        tac, channel, counter = make_sms_channel()
+        create = AsyncMock(return_value=("CH123", False))
+        tac.conversation_orchestrator_client.create_or_reuse_conversation = create
+
+        result = await send_outbound(channel)
+
+        assert create.await_args.kwargs["metadata"] is None
+        assert result.session.metadata["direction"] == "outbound"
+        assert await result.session.conversation_metadata() == {}
+        assert counter.count("patch_conversation_metadata") == 0
+        assert counter.count("get_conversation") == 0
+
+    @pytest.mark.asyncio
+    async def test_without_metadata_a_reused_conversation_is_not_patched(self) -> None:
+        tac, channel, counter = make_sms_channel()
+        counter.co_metadata = {"earlier": "kept"}
+        tac.conversation_orchestrator_client.create_or_reuse_conversation = AsyncMock(
+            return_value=("CH123", True)
+        )
+
+        result = await send_outbound(channel)
+
+        assert counter.count("patch_conversation_metadata") == 0
+        # What the reused conversation holds is unknown, so the accessor fetches.
+        assert await result.session.conversation_metadata() == {"earlier": "kept"}
+        assert counter.count("get_conversation") == 1
 
     @pytest.mark.asyncio
     async def test_unfit_entries_are_skipped_with_a_warning_but_kept_on_the_session(
@@ -725,7 +751,7 @@ class TestConversationMetadata:
         with patch.object(channel.logger, "warning") as warning:
             result = await send_outbound(channel, {"count": 3, "ok": "yes"})
 
-        assert create.await_args.kwargs["metadata"] == {"direction": "outbound", "ok": "yes"}
+        assert create.await_args.kwargs["metadata"] == {"ok": "yes"}
         assert result.session.metadata["count"] == 3
         warning.assert_called_once()
 
@@ -747,8 +773,27 @@ class TestConversationMetadata:
             await send_outbound(channel, metadata={"appointment_id": "apt_secret"})
 
         assert "metadata" in warning.call_args.args[0]
-        assert warning.call_args.kwargs["metadata_keys"] == ["appointment_id", "direction"]
+        assert warning.call_args.kwargs["metadata_keys"] == ["appointment_id"]
         assert "apt_secret" not in str(warning.call_args)
+
+    @pytest.mark.asyncio
+    async def test_a_rejected_creation_without_metadata_does_not_blame_it(self) -> None:
+        tac, channel, _counter = make_sms_channel()
+        request = httpx.Request("POST", "https://conversations.twilio.com/v2/Conversations")
+        rejection = httpx.HTTPStatusError(
+            "400", request=request, response=httpx.Response(400, request=request)
+        )
+        co = tac.conversation_orchestrator_client
+        assert co is not None
+        co.create_or_reuse_conversation = AsyncMock(side_effect=rejection)  # type: ignore[method-assign]
+
+        with (
+            patch.object(channel.logger, "warning") as warning,
+            pytest.raises(httpx.HTTPStatusError),
+        ):
+            await send_outbound(channel)
+
+        warning.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_a_reused_conversation_gets_the_metadata_patched_in(self) -> None:
@@ -763,7 +808,6 @@ class TestConversationMetadata:
         assert counter.count("patch_conversation_metadata") == 1
         assert await result.session.conversation_metadata() == {
             "earlier": "kept",
-            "direction": "outbound",
             "appointment_id": "apt_42",
         }
         assert counter.count("get_conversation") == 0
@@ -800,10 +844,7 @@ class TestConversationMetadata:
 
         assert seen[0].metadata["appointment_id"] == "apt_42"
         assert seen[0].metadata["direction"] == "outbound"
-        assert await seen[0].conversation_metadata() == {
-            "direction": "outbound",
-            "appointment_id": "apt_42",
-        }
+        assert await seen[0].conversation_metadata() == {"appointment_id": "apt_42"}
         assert counter.count("get_conversation") == 0
 
     @pytest.mark.asyncio
@@ -826,7 +867,7 @@ class TestConversationMetadata:
     @pytest.mark.asyncio
     async def test_another_instance_reads_metadata_through_the_accessor(self) -> None:
         tac_b, instance_b, counter_b = make_sms_channel()
-        counter_b.co_metadata = {"direction": "outbound", "appointment_id": "apt_42"}
+        counter_b.co_metadata = {"appointment_id": "apt_42"}
         seen: list[ConversationSession] = []
         tac_b.on_message_ready(lambda msg, session, mem: seen.append(session))
 
@@ -973,7 +1014,7 @@ class TestConversationMetadata:
         await send_outbound(channel, {"appointment_id": "apt_42"})
         await channel.process_webhook(closed())
 
-        assert results == [{"direction": "outbound", "appointment_id": "apt_42"}]
+        assert results == [{"appointment_id": "apt_42"}]
         assert counter.count("get_conversation") == 0
 
     @pytest.mark.asyncio

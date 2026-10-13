@@ -875,9 +875,7 @@ class MessagingChannel(BaseChannel):
         conversation_id: str | None = None
         reused = False
 
-        co_metadata, skipped = fit_conversation_metadata(
-            options.metadata, reserved={"direction": "outbound"}
-        )
+        co_metadata, skipped = fit_conversation_metadata(options.metadata)
         if skipped:
             self.logger.warning(
                 "Outbound metadata not stored on the conversation: Conversation "
@@ -913,14 +911,18 @@ class MessagingChannel(BaseChannel):
                         ],
                     ),
                 ],
-                metadata=co_metadata,
+                # None, not {}, so a send without metadata creates the
+                # conversation exactly as main did.
+                metadata=co_metadata or None,
             )
 
             known_co_metadata: dict[str, str] | None = co_metadata
-            if reused:
+            if reused and not co_metadata:
+                # Nothing to merge; what the reused conversation already
+                # holds is unknown until the accessor fetches it.
+                known_co_metadata = None
+            elif reused:
                 # Existing conversation: merge ours in; CO keeps keys set earlier.
-                # This sets `direction` to `outbound` on a conversation that may have
-                # begun inbound, matching what `session.metadata` reports.
                 try:
                     patched = (
                         await self.conversation_orchestrator_client.patch_conversation_metadata(
@@ -997,6 +999,7 @@ class MessagingChannel(BaseChannel):
         except Exception as e:
             if (
                 conversation_id is None
+                and co_metadata
                 and isinstance(e, httpx.HTTPStatusError)
                 and 400 <= e.response.status_code < 500
             ):
