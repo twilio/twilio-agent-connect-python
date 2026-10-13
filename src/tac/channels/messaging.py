@@ -424,8 +424,9 @@ class MessagingChannel(BaseChannel):
 
         Any replica can handle any webhook. The idempotency cache is
         per-process, though, so a Twilio retry landing on a different replica
-        is processed again — `on_message_ready` handlers must tolerate being
-        called twice for the same message.
+        is processed again, and `on_message_ready` can run twice for the same
+        message. Retries are rare when the webhook is acknowledged before
+        processing, as `TACFastAPIServer` does.
 
         Args:
             webhook_data: Raw webhook event data from Twilio

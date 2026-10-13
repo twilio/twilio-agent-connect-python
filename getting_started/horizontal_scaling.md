@@ -11,16 +11,13 @@ Point Twilio's webhooks and your voice domain at an ordinary load balancer. No s
 - **Messaging (SMS, RCS, WhatsApp, Chat):** any replica can handle any webhook. Each message is handled on its own, from the webhook and one Conversation Orchestrator lookup.
 - **Voice:** any replica can accept a call's WebSocket. The call then stays on that replica until it ends.
 
-## Step 2: Make `on_message_ready` Idempotent
+### Retried webhooks
 
-TAC drops duplicate webhook deliveries using Twilio's idempotency token, but it remembers them per replica. A retry that lands on a different replica is processed again.
+Like most webhook senders, Twilio delivers at least once: if it doesn't get a `200` back, it sends the webhook again with the same `I-Twilio-Idempotency-Token`. No sender can rule this out, because the `200` itself can be lost. `TACFastAPIServer` returns `200` as soon as a webhook arrives, before your handler runs, so a slow LLM call never causes a retry. Retries come only from failures such as a network error or a replica crashing mid-request, so they're rare.
 
-> [!WARNING]
-> With more than one replica, `on_message_ready` may run twice for the same message. At worst that's one extra LLM call and one duplicate reply.
+TAC drops a retry that reaches the replica that already handled the message. A retry that reaches a different replica runs `on_message_ready` again, and the customer can get a second reply. For most agents that's acceptable and you don't need to do anything. If your handler does something that mustn't happen twice, such as taking a payment, route webhooks by conversation id at the load balancer so retries reach the same replica.
 
-Write handlers that tolerate this. If you can't, route webhooks by conversation id at the load balancer.
-
-## Step 3: Keep State Between Turns Yourself
+## Step 2: Keep State Between Turns Yourself
 
 A messaging session lasts one turn: from the webhook until `on_message_ready` returns. Anything you put on `session.metadata` is gone by the next message, on every replica. To keep state across turns, store it in your own store, keyed by `session.conversation_id`.
 
@@ -45,7 +42,7 @@ def handle_error(error: Exception, context: dict) -> None:
 tac.on_error(handle_error)
 ```
 
-## Step 4: Read Call State in `on_call_ended`
+## Step 3: Read Call State in `on_call_ended`
 
 `on_conversation_ended` fires on whichever replica receives Conversation Orchestrator's CLOSED webhook. That may not be the one that handled the conversation, so the session it gets is rebuilt from Conversation Orchestrator. It has the conversation id, profile and participants (and `call_sid` on voice), but none of your `session.metadata`.
 
@@ -68,7 +65,7 @@ voice_channel.on_call_ended(on_call_ended)
 
 `end_call()` behaves like any hangup: `on_call_ended` fires right away, and `on_conversation_ended` fires once, when Conversation Orchestrator closes the conversation.
 
-## Step 5: Give Each Voice Replica Its Own Hostname
+## Step 4: Give Each Voice Replica Its Own Hostname
 
 Some of a call's webhooks, such as call status, answering machine detection, recording and the ConversationRelay `<Connect action>` callback, carry only a `CallSid`. Through the load balancer they reach a random replica, not the one holding the call. To send them to the right replica, set `TWILIO_INSTANCE_PUBLIC_DOMAIN` on each replica to that replica's own public hostname:
 
@@ -99,7 +96,7 @@ TAC then points the call's WebSocket and `<Connect action>` URLs at this replica
 
 **Without it:** leave `TWILIO_INSTANCE_PUBLIC_DOMAIN` unset, and either route those webhooks by `CallSid` at the load balancer or look the call up with `VoiceChannel.resolve_conversation_session_by_call_sid()`. On orchestrated ConversationRelay calls it returns a session rebuilt from Conversation Orchestrator when the call is on another replica. That's enough to match an event to its conversation and customer, but not to speak on the call.
 
-## Step 6: Shut Down Without Dropping Calls
+## Step 5: Shut Down Without Dropping Calls
 
 On SIGTERM, uvicorn (which `TACFastAPIServer` runs on) closes every open WebSocket. TAC tears each call down and fires `on_call_ended`, so nothing leaks, but the calls are cut off. To let calls finish during a redeploy or scale-in, have your platform hold off SIGTERM:
 
@@ -138,7 +135,6 @@ On a server other than uvicorn, check that it closes WebSocket connections on sh
 ## Checklist
 
 - [ ] Replicas behind a load balancer; no sticky sessions needed
-- [ ] `on_message_ready` tolerates running twice for one message
 - [ ] State between turns kept in your own store, keyed by `conversation_id`
 - [ ] Call state saved in `on_call_ended`, not `on_conversation_ended`
 - [ ] Voice: `TWILIO_INSTANCE_PUBLIC_DOMAIN` set per replica if you use per-call Media Streams session configs, or call webhooks routed by `CallSid` otherwise
