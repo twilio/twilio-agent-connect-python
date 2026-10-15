@@ -161,9 +161,9 @@ class TestTACConfig:
         assert "account_sid" in str(error)
         assert "api_key" in str(error)
         assert "api_secret" in str(error)
-        # phone_number is no longer a plain required field (it's back-filled
-        # from phone_numbers); the "at least one of the two" requirement is
-        # covered separately by test_at_least_one_phone_required.
+        # phone_number/phone_numbers are optional at the config level; the
+        # Voice and SMS channels enforce them at construction.
+        assert "phone_number" not in str(error)
 
     def test_minimal_relay_only_config(self):
         """Test that relay-only mode only requires conversation_configuration_id to be omitted."""
@@ -284,9 +284,11 @@ def test_phone_entries_stripped():
     assert cfg.phone_numbers == ["+1555", "+1444"]
 
 
-def test_at_least_one_phone_required():
-    with pytest.raises(ValidationError):
-        TACConfig(**BASE)
+def test_phone_number_optional():
+    """phone_number/phone_numbers are optional at the config level."""
+    cfg = TACConfig(**BASE, rcs_sender_id="rcs:agent")
+    assert cfg.phone_number is None
+    assert cfg.phone_numbers == []
 
 
 def test_rcs_and_whatsapp_optional_and_symmetric():

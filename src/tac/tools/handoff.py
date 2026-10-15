@@ -202,10 +202,18 @@ async def _handoff_impl(
         # Studio expects for those channels. Chat's agent address is an identity
         # (e.g. "ai-assistant"), not a Twilio sender, so it keeps the configured
         # default phone number.
+        from_address: str | None
         if channel != "CHAT" and session.ai_agent_info is not None:
             from_address = session.ai_agent_info.address
         else:
             from_address = config.phone_number
+        if from_address is None:
+            error = "No Studio `From` sender: Chat handoff requires phone_number in TACConfig."
+            logger.error(
+                f"Failed to deliver handoff payload: {error}",
+                conversation_id=session.conversation_id,
+            )
+            return {"status": "handoff_failed", "channel": channel, "error": error}
         try:
             await post_studio_handoff(
                 payload,

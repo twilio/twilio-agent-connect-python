@@ -297,8 +297,8 @@ class ConversationRelayProvider(VoiceProvider):
         # TAC's address for THIS call is the dialed number from the setup
         # message, not blindly the default `phone_number` — a call may have
         # come in on any number in the configured allowlist. Fall back to the
-        # default (guaranteed non-None post-validation: TACConfig requires at
-        # least one of phone_number/phone_numbers and back-fills the default)
+        # default (guaranteed non-None: VoiceChannel requires at least one of
+        # phone_number/phone_numbers and TACConfig back-fills the default)
         # if the dialed number is missing or not one of ours.
         cfg = self.channel.tac.config
         dialed = self._agent_address(setup_msg)

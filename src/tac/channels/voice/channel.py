@@ -84,6 +84,14 @@ class VoiceChannel(BaseChannel):
             config = ConversationRelayProviderConfig()
 
         super().__init__(tac, memory_mode=config.memory_mode)
+
+        if not tac.config.phone_numbers:
+            raise ValueError(
+                "phone_number(s) is required for Voice channel. "
+                "Set TWILIO_PHONE_NUMBER / TWILIO_PHONE_NUMBERS or "
+                "provide phone_number / phone_numbers in TACConfig."
+            )
+
         self._provider = config.create_provider(self, tac.config)
         self._on_inbound_call_twiml: InboundCallTwiMLHandler | None = None
         self._on_call_status: CallStatusHandler | None = None

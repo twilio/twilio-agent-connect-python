@@ -273,15 +273,16 @@ class TestTACConfigFromEnv:
             TACConfig.from_env()
 
     def test_from_env_missing_phone_number(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Test from_env() raises ValidationError when neither TWILIO_PHONE_NUMBER nor
-        TWILIO_PHONE_NUMBERS is set (phone_number is now optional if phone_numbers is set,
-        but at least one of the two is required)."""
+        """Test from_env() succeeds when neither TWILIO_PHONE_NUMBER nor
+        TWILIO_PHONE_NUMBERS is set."""
         self._set_all_env_vars(monkeypatch)
         monkeypatch.delenv("TWILIO_PHONE_NUMBER", raising=False)
         monkeypatch.delenv("TWILIO_PHONE_NUMBERS", raising=False)
 
-        with pytest.raises(ValidationError):
-            TACConfig.from_env()
+        config = TACConfig.from_env()
+
+        assert config.phone_number is None
+        assert config.phone_numbers == []
 
     def test_from_env_missing_phone_number_backfilled_from_phone_numbers(
         self, monkeypatch: pytest.MonkeyPatch
