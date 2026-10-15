@@ -285,7 +285,7 @@ def test_phone_entries_stripped():
 
 
 def test_phone_number_optional():
-    """RCS/WhatsApp/Chat-only deployments need no phone number at the config level."""
+    """phone_number/phone_numbers are optional at the config level."""
     cfg = TACConfig(**BASE, rcs_sender_id="rcs:agent")
     assert cfg.phone_number is None
     assert cfg.phone_numbers == []

@@ -167,7 +167,7 @@ async def test_rcs_channel_requires_sender_id() -> None:
 
 
 def test_rcs_channel_without_phone_number() -> None:
-    """RCS-only deployments don't need a phone number."""
+    """RCS channel doesn't require a phone number."""
     config = get_test_config()
     config.pop("phone_number")
     tac = TAC(config)

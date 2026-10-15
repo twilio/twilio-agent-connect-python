@@ -274,7 +274,7 @@ class TestTACConfigFromEnv:
 
     def test_from_env_missing_phone_number(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test from_env() succeeds when neither TWILIO_PHONE_NUMBER nor
-        TWILIO_PHONE_NUMBERS is set (e.g. an RCS/WhatsApp/Chat-only deployment)."""
+        TWILIO_PHONE_NUMBERS is set."""
         self._set_all_env_vars(monkeypatch)
         monkeypatch.delenv("TWILIO_PHONE_NUMBER", raising=False)
         monkeypatch.delenv("TWILIO_PHONE_NUMBERS", raising=False)

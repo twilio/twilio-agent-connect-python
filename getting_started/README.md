@@ -121,7 +121,7 @@ See `examples/.env.example` for all available configuration options. Key variabl
 - `TWILIO_API_KEY`: Twilio API key SID (starts with SK)
 - `TWILIO_API_SECRET`: Twilio API key secret
 
-### Required for Voice and SMS (omit for RCS/WhatsApp/Chat-only deployments)
+### Required for Voice and SMS Channels
 - `TWILIO_PHONE_NUMBER`: Your Twilio phone number (or set `TWILIO_PHONE_NUMBERS` instead)
 - `TWILIO_PHONE_NUMBERS`: For multiple phone numbers, set this comma-separated list (e.g. `+15551234567,+14440000000`) instead of `TWILIO_PHONE_NUMBER`. The first number is the default sender for outbound
 

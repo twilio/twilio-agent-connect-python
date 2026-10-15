@@ -261,8 +261,7 @@ class TACConfig(BaseModel):
         "(send/receive) — the sender used for outbound when a call does not "
         "specify `from_`. Optional; back-filled from `phone_numbers` when "
         "omitted, and always a member of `phone_numbers` when set. Required "
-        "(this or `phone_numbers`) only by the Voice and SMS channels, so "
-        "RCS/WhatsApp/Chat-only deployments can leave both unset.",
+        "(this or `phone_numbers`) by the Voice and SMS channels.",
     )
 
     phone_numbers: list[str] = Field(
