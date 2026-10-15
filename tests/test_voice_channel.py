@@ -3017,6 +3017,16 @@ class TestVoiceChannelConfigDeprecatedAlias:
         assert caught[0].lineno == expected_lineno
 
 
+def test_voice_channel_requires_phone_number() -> None:
+    """Voice channel construction fails without phone_number(s)."""
+    cfg = get_test_config()
+    del cfg["phone_number"]
+    tac = TAC(cfg)
+
+    with pytest.raises(ValueError, match="phone_number\\(s\\) is required for Voice channel"):
+        VoiceChannel(tac)
+
+
 def test_voice_resolve_from_number() -> None:
     cfg = get_test_config()
     cfg["phone_numbers"] = ["+15551234567", "+14440000000"]

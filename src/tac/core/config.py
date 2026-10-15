@@ -259,9 +259,10 @@ class TACConfig(BaseModel):
         default=None,
         description="Default Twilio phone number for Voice (inbound) and SMS "
         "(send/receive) — the sender used for outbound when a call does not "
-        "specify `from_`. Optional if `phone_numbers` is set; at least one of "
-        "the two is required. After validation this is always populated and is "
-        "guaranteed to be a member of `phone_numbers`.",
+        "specify `from_`. Optional; back-filled from `phone_numbers` when "
+        "omitted, and always a member of `phone_numbers` when set. Required "
+        "(this or `phone_numbers`) only by the Voice and SMS channels, so "
+        "RCS/WhatsApp/Chat-only deployments can leave both unset.",
     )
 
     phone_numbers: list[str] = Field(
@@ -422,7 +423,7 @@ class TACConfig(BaseModel):
     @model_validator(mode="after")
     def _normalize_sender_sets(self) -> "TACConfig":
         self.phone_number, self.phone_numbers = self._normalize_sender_pair(
-            self.phone_number, self.phone_numbers, required=True, field="phone_number"
+            self.phone_number, self.phone_numbers, required=False, field="phone_number"
         )
         self.rcs_sender_id, self.rcs_sender_ids = self._normalize_sender_pair(
             self.rcs_sender_id, self.rcs_sender_ids, required=False, field="rcs_sender_id"
@@ -504,8 +505,9 @@ class TACConfig(BaseModel):
         Whichever side is set backfills the other: the singular becomes the
         default sender and the plural becomes the full allowlist. Entries are
         whitespace-trimmed and de-duplicated, with the default always kept
-        first. `phone_number`/`phone_numbers` requires at least one of the two;
-        the RCS and WhatsApp pairs stay optional.
+        first. All three pairs are optional at the config level; each channel
+        requires its own pair at construction (Voice and SMS need
+        `phone_number`/`phone_numbers`).
 
         **Memory Configuration:**
 
