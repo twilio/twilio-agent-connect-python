@@ -5,8 +5,8 @@ import asyncio
 import pytest
 
 from tac import TAC, TACConfig
+from tac.models import InterruptMessage, voice as voice_models
 from tac.models.session import ConversationSession
-from tac.models.voice import InterruptMessage
 
 
 def get_test_config() -> TACConfig:
@@ -20,6 +20,11 @@ def get_test_config() -> TACConfig:
         api_secret="test_api_token",
         phone_number="+15551234567",
     )
+
+
+def test_interrupt_message_exported_from_models() -> None:
+    """InterruptMessage is importable from tac.models for annotating on_interrupt callbacks."""
+    assert InterruptMessage is voice_models.InterruptMessage
 
 
 class TestInterruptCallbacks:

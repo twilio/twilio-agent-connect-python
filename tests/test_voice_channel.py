@@ -323,24 +323,32 @@ class TestVoiceChannel:
 
     @pytest.mark.asyncio
     async def test_handle_interrupt_message(self) -> None:
-        """Test handling interrupt message."""
+        """Interrupt message reaches the on_interrupt callback with its details."""
         tac = TAC(get_test_config())
         channel = VoiceChannel(tac)
+        received: list[tuple[ConversationSession, InterruptMessage]] = []
+        tac.on_interrupt(lambda session, data: received.append((session, data)))
 
         # Setup conversation first
         channel._start_conversation("CALL123", None)
 
-        # Create interrupt message
-        interrupt_msg = InterruptMessage(
-            type="interrupt",
-            utteranceUntilInterrupt="Hello, I was saying...",
-            durationUntilInterruptMs=1500,
+        # Parse from the ConversationRelay wire format
+        interrupt_msg = InterruptMessage.model_validate(
+            {
+                "type": "interrupt",
+                "utteranceUntilInterrupt": "Hello, I was saying...",
+                "durationUntilInterruptMs": 1500,
+            }
         )
 
         # Call handler directly
         channel._provider._handle_interrupt("CALL123", interrupt_msg)
 
-        # Test passes if no exception is raised
+        assert len(received) == 1
+        session, data = received[0]
+        assert session.conversation_id == "CALL123"
+        assert data.utterance_until_interrupt == "Hello, I was saying..."
+        assert data.duration_until_interrupt_ms == 1500
 
     @pytest.mark.asyncio
     async def test_send_response(self) -> None:

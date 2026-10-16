@@ -16,6 +16,7 @@ from tac.models.intelligence import OperatorProcessingResult
 from tac.models.memory import ProfileLookupResponse
 from tac.models.session import ConversationSession
 from tac.models.tac import TACMemoryResponse
+from tac.models.voice import InterruptMessage
 from tac.utils.redaction import mask_address
 
 
@@ -113,8 +114,8 @@ class TAC:
         ) = None
 
         self._interrupt_callback: (
-            Callable[[ConversationSession, Any], None]
-            | Callable[[ConversationSession, Any], Awaitable[None]]
+            Callable[[ConversationSession, InterruptMessage], None]
+            | Callable[[ConversationSession, InterruptMessage], Awaitable[None]]
             | None
         ) = None
 
@@ -294,17 +295,32 @@ class TAC:
     def on_interrupt(
         self,
         callback: (
-            Callable[[ConversationSession, Any], None]
-            | Callable[[ConversationSession, Any], Awaitable[None]]
+            Callable[[ConversationSession, InterruptMessage], None]
+            | Callable[[ConversationSession, InterruptMessage], Awaitable[None]]
         ),
     ) -> None:
-        """Register callback invoked on user interrupt.
+        """Register callback invoked when the caller interrupts the agent on a voice call.
+
+        Currently fired by the ConversationRelay voice provider. The callback receives:
+
+        - `context`: the `ConversationSession` for the call (`context.conversation_id`
+          identifies the conversation)
+        - `interrupt_data`: an `InterruptMessage` with `utterance_until_interrupt` (the
+          text the agent had spoken when interrupted) and `duration_until_interrupt_ms`
+          (how long it had been speaking); either may be `None` if ConversationRelay
+          doesn't report it
 
         Example:
             ```python
-            def handle_interrupt(context: ConversationSession, interrupt_data: Any):
-                # Handle user interrupt...
-                pass
+            from tac.models import ConversationSession, InterruptMessage
+
+
+            def handle_interrupt(context: ConversationSession, interrupt_data: InterruptMessage):
+                print(
+                    f"{context.conversation_id} interrupted after "
+                    f"{interrupt_data.duration_until_interrupt_ms} ms: "
+                    f"{interrupt_data.utterance_until_interrupt!r}"
+                )
 
 
             tac.on_interrupt(handle_interrupt)
@@ -448,13 +464,13 @@ class TAC:
     def trigger_interrupt(
         self,
         conversation_context: ConversationSession,
-        interrupt_data: Any,
+        interrupt_data: InterruptMessage,
     ) -> None:
         """Trigger the registered interrupt callback.
 
         Args:
             conversation_context: Session containing conversation information.
-            interrupt_data: Interrupt event data from voice channel.
+            interrupt_data: Parsed interrupt message from the voice channel.
         """
         if self._interrupt_callback:
             result = self._interrupt_callback(conversation_context, interrupt_data)
