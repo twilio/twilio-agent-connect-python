@@ -938,11 +938,13 @@ class MessagingChannel(BaseChannel):
         """
         conversation_id = session.conversation_id
         channel = self.get_channel_name()
-        agent_address = (
-            ParticipantAddress(channel=channel, address=session.ai_agent_info.address)
-            if session.ai_agent_info is not None
-            else self._agent_address(session)
-        )
+        # Keep _agent_address's channelId (required for CHAT); the session
+        # only overrides which sender.
+        agent_address = self._agent_address(session)
+        if session.ai_agent_info is not None:
+            agent_address = agent_address.model_copy(
+                update={"address": session.ai_agent_info.address}
+            )
 
         def _owns_agent_address(p: ParticipantResponse) -> bool:
             return self._owns_address(p, channel, agent_address.address)

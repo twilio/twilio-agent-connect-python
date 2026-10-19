@@ -246,6 +246,44 @@ class TestChatChannel:
         assert captured[0].metadata["channel_id"] == "CH_CHAT_SID_456"
 
     @pytest.mark.asyncio
+    async def test_lazily_added_agent_carries_channel_id(self) -> None:
+        """Conversation Orchestrator requires channelId on a CHAT participant address."""
+        tac = TAC(get_test_config())
+        channel = ChatChannel(tac)
+        captured: list[str] = []
+        tac.on_message_ready(lambda msg, ctx, mem: captured.append(msg))
+
+        webhook = create_communication_created_webhook(
+            "CH123",
+            "PA_USER",
+            "Test",
+            "2025-11-18T00:00:00.000Z",
+            channel_id="CH_CHAT_SID_456",
+        )
+        customer = chat_participant("PA_USER", "CUSTOMER", "user@example.com", "CH_CHAT_SID_456")
+        agent = chat_participant("PA_AGENT", "AI_AGENT", "ai-assistant", "CH_CHAT_SID_456")
+        with (
+            patch.object(
+                tac.conversation_orchestrator_client,
+                "list_participants",
+                new=AsyncMock(return_value=[customer]),
+            ),
+            patch.object(
+                tac.conversation_orchestrator_client,
+                "add_participant",
+                new=AsyncMock(return_value=agent),
+            ) as mock_add,
+        ):
+            await channel.process_webhook(webhook)
+
+        mock_add.assert_awaited_once()
+        assert mock_add.await_args is not None
+        assert mock_add.await_args.kwargs["addresses"] == [
+            ParticipantAddress(channel="CHAT", address="ai-assistant", channel_id="CH_CHAT_SID_456")
+        ]
+        assert captured == ["Test"]
+
+    @pytest.mark.asyncio
     async def test_ignores_sms_messages(self) -> None:
         """COMMUNICATION_CREATED with author.channel=SMS is filtered by ChatChannel."""
         tac = TAC(get_test_config())
