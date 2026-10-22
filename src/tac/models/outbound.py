@@ -25,7 +25,12 @@ class InitiateMessagingConversationOptions(BaseModel):
 
     to: str = Field(..., min_length=1)
     message: str = Field(..., min_length=1)
-    metadata: dict[str, Any] | None = Field(default=None)
+    metadata: dict[str, Any] | None = Field(
+        default=None,
+        description="Attached to the returned session. Entries with string values that "
+        "fit Conversation Orchestrator's limits are also stored on the conversation, for "
+        "`ConversationSession.conversation_metadata()` on any replica.",
+    )
     from_: str | None = Field(
         default=None,
         description="Sender address to send from. Must be one of the channel's "

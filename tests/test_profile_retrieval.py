@@ -313,9 +313,12 @@ class TestProfileInSMSChannel:
         assert received_context.profile.traits["Contact"]["firstName"] == "John"
 
     @pytest.mark.asyncio
-    async def test_sms_profile_cached_across_messages(self) -> None:
-        """Profile is fetched once per session, then cached."""
+    async def test_sms_profile_refetched_per_message(self) -> None:
+        """A stateless session can't cache traits across messages — so each
+        message sees the profile as it is now, not as it was at message one."""
         from unittest.mock import patch
+
+        sessions: list[ConversationSession] = []
 
         config = get_test_config_with_trait_groups()
         tac = TAC(config)
@@ -346,6 +349,7 @@ class TestProfileInSMSChannel:
                 meta=MemoryRetrievalMeta(queryTime=0),
             )
         )
+        tac.on_message_ready(lambda msg, ctx, mem: sessions.append(ctx))
 
         with patch.object(
             tac.conversation_orchestrator_client,
@@ -358,7 +362,7 @@ class TestProfileInSMSChannel:
                     "CH123456", "MB123", "Hello", "2025-11-18T00:00:01.000Z"
                 )
             )
-            session = channel._conversations["CH123456"]
+            session = sessions[-1]
             assert session.profile is not None
             assert session.profile.traits["Contact"]["firstName"] == "John"
 
@@ -368,9 +372,11 @@ class TestProfileInSMSChannel:
                     "CH123456", "MB123", "Hi again", "2025-11-18T00:00:02.000Z"
                 )
             )
-            session = channel._conversations["CH123456"]
-            # Cached → still v1 (John), not re-fetched to v2 (Jane).
-            assert session.profile.traits["Contact"]["firstName"] == "John"
+            session = sessions[-1]
+            # Each message derives its own session, so traits are current
+            # rather than frozen at the conversation's first message.
+            assert session.profile is not None
+            assert session.profile.traits["Contact"]["firstName"] == "Jane"
 
 
 class TestProfileInConversationSession:

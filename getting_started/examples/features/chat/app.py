@@ -110,7 +110,8 @@ async def handle_message_ready(
             }
             conversation_history[conv_id].append(assistant_msg)
 
-            await chat_channel.send_response(conv_id, llm_response)
+            # Hand back the session the callback received — no extra API call.
+            await chat_channel.send_response(context, llm_response)
 
     except Exception as e:
         logger.error("Error processing message", conversation_id=conv_id, error=str(e))

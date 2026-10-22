@@ -51,6 +51,14 @@ def _is_disabled() -> bool:
     return _disabled
 
 
+def analytics_enabled() -> bool:
+    """Whether product analytics are on — i.e. ``TAC_ANALYTICS_DISABLED`` isn't ``"true"``.
+
+    Lets a caller skip work, like an API call, that would only feed an event.
+    """
+    return not _is_disabled()
+
+
 def _on_error(*args: Any) -> None:
     # Debug, not warning: telemetry is best-effort and its failures are not the
     # consumer's problem, so they shouldn't surface in an application's logs.
