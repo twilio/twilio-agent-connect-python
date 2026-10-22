@@ -61,6 +61,7 @@ from tac.models.tac import (
 from tac.models.voice import (
     AmdEvent,
     CallStatusEvent,
+    InterruptMessage,
     RecordingEvent,
     VoiceTwiMLOptions,
     VoiceTwiMLOptionsConversationRelay,
@@ -100,6 +101,7 @@ __all__ = [
     "InitiateVoiceConversationOptions",
     "InitiateVoiceConversationResult",
     "IntelligenceConfiguration",
+    "InterruptMessage",
     "Knowledge",
     "KnowledgeBase",
     "KnowledgeChunkResult",
