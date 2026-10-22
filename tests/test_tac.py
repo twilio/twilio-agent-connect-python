@@ -1,5 +1,8 @@
 """Tests for TAC core class."""
 
+import asyncio
+from unittest.mock import AsyncMock
+
 import pytest
 
 from tac import TAC, TACConfig
@@ -214,3 +217,143 @@ class TestTAC:
 
         result = await tac.trigger_message_ready("test message", session, None)
         assert result is None
+
+
+class TestSharedParticipantLookup:
+    """One CO webhook fans out to every channel; their participant lookups
+    for the same conversation must cost one request."""
+
+    @staticmethod
+    def make_tac() -> TAC:
+        return TAC(get_test_config())
+
+    @pytest.mark.asyncio
+    async def test_concurrent_lookups_share_one_request(self) -> None:
+        tac = self.make_tac()
+        calls = 0
+        release = asyncio.Event()
+
+        async def list_participants(conversation_id: str) -> list[str]:
+            nonlocal calls
+            calls += 1
+            await release.wait()
+            return ["participant"]
+
+        tac.conversation_orchestrator_client.list_participants = list_participants
+        first = asyncio.create_task(tac._list_participants_shared("conv_1"))
+        second = asyncio.create_task(tac._list_participants_shared("conv_1"))
+        await asyncio.sleep(0)
+        release.set()
+
+        assert await first == ["participant"]
+        assert await second == ["participant"]
+        assert calls == 1
+
+    @pytest.mark.asyncio
+    async def test_repeat_lookup_is_served_from_the_cache(self) -> None:
+        tac = self.make_tac()
+        lookup = AsyncMock(return_value=["participant"])
+        tac.conversation_orchestrator_client.list_participants = lookup
+
+        await tac._list_participants_shared("conv_1")
+        await tac._list_participants_shared("conv_1")
+
+        lookup.assert_awaited_once_with("conv_1")
+
+    @pytest.mark.asyncio
+    async def test_each_conversation_is_looked_up_separately(self) -> None:
+        tac = self.make_tac()
+        lookup = AsyncMock(return_value=[])
+        tac.conversation_orchestrator_client.list_participants = lookup
+
+        await tac._list_participants_shared("conv_1")
+        await tac._list_participants_shared("conv_2")
+
+        assert lookup.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_a_failure_is_not_cached(self) -> None:
+        tac = self.make_tac()
+        lookup = AsyncMock(side_effect=[RuntimeError("CO down"), ["participant"]])
+        tac.conversation_orchestrator_client.list_participants = lookup
+
+        with pytest.raises(RuntimeError, match="CO down"):
+            await tac._list_participants_shared("conv_1")
+        assert await tac._list_participants_shared("conv_1") == ["participant"]
+        assert lookup.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_cancelling_one_waiter_does_not_cancel_the_lookup(self) -> None:
+        tac = self.make_tac()
+        calls = 0
+        release = asyncio.Event()
+
+        async def list_participants(conversation_id: str) -> list[str]:
+            nonlocal calls
+            calls += 1
+            await release.wait()
+            return ["participant"]
+
+        tac.conversation_orchestrator_client.list_participants = list_participants
+        first = asyncio.create_task(tac._list_participants_shared("conv_1"))
+        second = asyncio.create_task(tac._list_participants_shared("conv_1"))
+        await asyncio.sleep(0)
+        first.cancel()
+        await asyncio.sleep(0)
+        release.set()
+
+        assert await second == ["participant"]
+        assert calls == 1
+
+    @pytest.mark.asyncio
+    async def test_failure_after_all_waiters_cancelled_is_not_cached(self) -> None:
+        tac = self.make_tac()
+        release = asyncio.Event()
+
+        async def failing(conversation_id: str) -> list[str]:
+            await release.wait()
+            raise RuntimeError("CO down")
+
+        tac.conversation_orchestrator_client.list_participants = failing
+        waiter = asyncio.create_task(tac._list_participants_shared("conv_1"))
+        await asyncio.sleep(0)
+        waiter.cancel()
+        release.set()
+        for _ in range(5):
+            await asyncio.sleep(0)
+
+        tac.conversation_orchestrator_client.list_participants = AsyncMock(return_value=["ok"])
+        assert await tac._list_participants_shared("conv_1") == ["ok"]
+
+    @pytest.mark.asyncio
+    async def test_concurrent_failure_reaches_both_waiters_then_is_evicted(self) -> None:
+        tac = self.make_tac()
+        release = asyncio.Event()
+
+        async def failing(conversation_id: str) -> list[str]:
+            await release.wait()
+            raise RuntimeError("CO down")
+
+        tac.conversation_orchestrator_client.list_participants = failing
+        first = asyncio.create_task(tac._list_participants_shared("conv_1"))
+        second = asyncio.create_task(tac._list_participants_shared("conv_1"))
+        await asyncio.sleep(0)
+        release.set()
+
+        with pytest.raises(RuntimeError, match="CO down"):
+            await first
+        with pytest.raises(RuntimeError, match="CO down"):
+            await second
+
+        lookup = AsyncMock(return_value=["ok"])
+        tac.conversation_orchestrator_client.list_participants = lookup
+        assert await tac._list_participants_shared("conv_1") == ["ok"]
+        lookup.assert_awaited_once_with("conv_1")
+
+    @pytest.mark.asyncio
+    async def test_raises_when_orchestrator_is_not_configured(self) -> None:
+        tac = self.make_tac()
+        tac.conversation_orchestrator_client = None
+
+        with pytest.raises(RuntimeError, match="not configured"):
+            await tac._list_participants_shared("conv_1")

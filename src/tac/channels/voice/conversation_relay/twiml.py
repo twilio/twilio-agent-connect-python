@@ -320,10 +320,9 @@ class TwiMLBuilderConversationRelay(TwiMLBuilderBase):
                 self.tac_config.account_sid,
                 self.tac_config.studio_handoff_flow_sid,
             )
-        # Channel default. None if voice_public_domain isn't set; that's fine
+        # Channel default. None if no public domain is set; that's fine
         # because every layer above this one is already exhausted.
-        if self.tac_config.voice_public_domain:
-            return (
-                f"https://{self.tac_config.voice_public_domain}{self.tac_config.voice_action_path}"
-            )
+        domain = self.tac_config.voice_callback_domain
+        if domain:
+            return f"https://{domain}{self.tac_config.voice_action_path}"
         return None

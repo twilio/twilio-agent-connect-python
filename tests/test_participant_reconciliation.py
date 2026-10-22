@@ -4,6 +4,8 @@ Covers the matrix of participant states that v1-bridge capture can leave us
 with. The resolution rules were agreed with the Conversation Orchestrator team.
 """
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
@@ -13,6 +15,7 @@ import pytest
 from tac import TAC
 from tac.channels.sms import SMSChannel
 from tac.models.conversation import ParticipantAddress, ParticipantResponse
+from tac.models.session import ConversationSession
 
 
 def _participant(
@@ -35,6 +38,20 @@ def _participant(
             "addresses": [addr],
         }
     )
+
+
+@contextmanager
+def _participants(items: list[ParticipantResponse]) -> Iterator[list[ParticipantResponse]]:
+    """Hand `_reconcile_participants` its (already-fetched) participant list.
+
+    A context manager purely so it reads inline with the `patch.object(...)`
+    entries it replaced — the caller fetches the list now, not reconcile.
+    """
+    yield items
+
+
+def _session(conv_id: str = "CH123") -> ConversationSession:
+    return ConversationSession(conversation_id=conv_id, channel="SMS")
 
 
 def _tac() -> TAC:
@@ -83,14 +100,10 @@ async def test_agent_plus_customer_no_puts() -> None:
     customer = _participant("PA_C", "CUSTOMER", "+12345678901")
 
     with (
-        patch.object(
-            tac.conversation_orchestrator_client,
-            "list_participants",
-            return_value=[agent, customer],
-        ),
+        _participants([agent, customer]) as participants,
         patch.object(tac.conversation_orchestrator_client, "update_participant") as mock_update,
     ):
-        result = await channel._reconcile_participants("CH123")
+        result = await channel._reconcile_participants(_session(), participants)
 
     assert result is not None
     assert result[0].id == "PA_A"
@@ -110,18 +123,14 @@ async def test_agent_plus_unknown_customer_promotes_customer() -> None:
     promoted = _participant("PA_C", "CUSTOMER", "+12345678901")
 
     with (
-        patch.object(
-            tac.conversation_orchestrator_client,
-            "list_participants",
-            return_value=[agent, unknown_customer],
-        ),
+        _participants([agent, unknown_customer]) as participants,
         patch.object(
             tac.conversation_orchestrator_client,
             "update_participant",
             new=AsyncMock(return_value=promoted),
         ) as mock_update,
     ):
-        result = await channel._reconcile_participants("CH123")
+        result = await channel._reconcile_participants(_session(), participants)
 
     assert result is not None
     assert result[0].id == "PA_A"
@@ -145,18 +154,14 @@ async def test_unknown_agent_plus_customer_promotes_agent() -> None:
     promoted = _participant("PA_A", "AI_AGENT", "+15551234567")
 
     with (
-        patch.object(
-            tac.conversation_orchestrator_client,
-            "list_participants",
-            return_value=[unknown_agent, customer],
-        ),
+        _participants([unknown_agent, customer]) as participants,
         patch.object(
             tac.conversation_orchestrator_client,
             "update_participant",
             new=AsyncMock(return_value=promoted),
         ) as mock_update,
     ):
-        result = await channel._reconcile_participants("CH123")
+        result = await channel._reconcile_participants(_session(), participants)
 
     assert result is not None
     assert result[0].id == "PA_A"
@@ -184,18 +189,14 @@ async def test_unknown_agent_plus_unknown_customer_promotes_both() -> None:
         return promoted_agent if kwargs["participant_id"] == "PA_A" else promoted_customer
 
     with (
-        patch.object(
-            tac.conversation_orchestrator_client,
-            "list_participants",
-            return_value=[unknown_agent, unknown_customer],
-        ),
+        _participants([unknown_agent, unknown_customer]) as participants,
         patch.object(
             tac.conversation_orchestrator_client,
             "update_participant",
             new=AsyncMock(side_effect=update_side_effect),
         ) as mock_update,
     ):
-        result = await channel._reconcile_participants("CH123")
+        result = await channel._reconcile_participants(_session(), participants)
 
     assert result is not None
     assert result[0].type == "AI_AGENT"
@@ -225,15 +226,11 @@ async def test_non_agent_at_our_address_refuses_to_overwrite(
     customer = _participant("PA_C", "CUSTOMER", "+12345678901")
 
     with (
-        patch.object(
-            tac.conversation_orchestrator_client,
-            "list_participants",
-            return_value=[conflicting, customer],
-        ),
+        _participants([conflicting, customer]) as participants,
         patch.object(tac.conversation_orchestrator_client, "update_participant") as mock_update,
         patch.object(tac.conversation_orchestrator_client, "add_participant") as mock_add,
     ):
-        result = await channel._reconcile_participants("CH123")
+        result = await channel._reconcile_participants(_session(), participants)
 
     assert result is None
     mock_update.assert_not_called()
@@ -250,11 +247,7 @@ async def test_solo_customer_posts_agent() -> None:
     created_agent = _participant("PA_A", "AI_AGENT", "+15551234567")
 
     with (
-        patch.object(
-            tac.conversation_orchestrator_client,
-            "list_participants",
-            return_value=[customer],
-        ),
+        _participants([customer]) as participants,
         patch.object(
             tac.conversation_orchestrator_client,
             "add_participant",
@@ -262,7 +255,7 @@ async def test_solo_customer_posts_agent() -> None:
         ) as mock_add,
         patch.object(tac.conversation_orchestrator_client, "update_participant") as mock_update,
     ):
-        result = await channel._reconcile_participants("CH123")
+        result = await channel._reconcile_participants(_session(), participants)
 
     assert result is not None
     assert result[0].id == "PA_A"
@@ -292,18 +285,14 @@ async def test_add_agent_409_returns_none() -> None:
     conflict = httpx.HTTPStatusError("409", request=mock_response.request, response=mock_response)
 
     with (
-        patch.object(
-            tac.conversation_orchestrator_client,
-            "list_participants",
-            new=AsyncMock(return_value=[customer]),
-        ),
+        _participants([customer]) as participants,
         patch.object(
             tac.conversation_orchestrator_client,
             "add_participant",
             new=AsyncMock(side_effect=conflict),
         ) as mock_add,
     ):
-        result = await channel._reconcile_participants("CH123")
+        result = await channel._reconcile_participants(_session(), participants)
 
     assert result is None
     mock_add.assert_awaited_once()
@@ -326,28 +315,41 @@ async def test_promote_409_returns_none() -> None:
     conflict = httpx.HTTPStatusError("409", request=mock_response.request, response=mock_response)
 
     with (
-        patch.object(
-            tac.conversation_orchestrator_client,
-            "list_participants",
-            new=AsyncMock(return_value=[unknown_agent, customer]),
-        ),
+        _participants([unknown_agent, customer]) as participants,
         patch.object(
             tac.conversation_orchestrator_client,
             "update_participant",
             new=AsyncMock(side_effect=conflict),
         ) as mock_update,
     ):
-        result = await channel._reconcile_participants("CH123")
+        result = await channel._reconcile_participants(_session(), participants)
 
     assert result is None
     mock_update.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-async def test_list_participants_failure_returns_none() -> None:
-    """list_participants raising (e.g. Conversation Orchestrator down) skips the webhook."""
+async def test_list_participants_failure_drops_the_inbound_message() -> None:
+    """Conversation Orchestrator being down skips the webhook.
+
+    The fetch lives in `_handle_communication_created` now (one call shared by
+    the self-message check, reconciliation, and profile resolution), so this
+    exercises the whole inbound path rather than reconcile alone.
+    """
     tac = _tac()
     channel = SMSChannel(tac)
+    errors: list[dict] = []
+    tac.on_error(lambda err, ctx: errors.append(ctx))
+
+    webhook_event = {
+        "id": "comms_communication_01test",
+        "conversationId": "CH123",
+        "accountId": "ACtest",
+        "author": {"address": "+12345678901", "channel": "SMS", "participantId": "PA_C"},
+        "content": {"type": "TEXT", "text": "hi"},
+        "recipients": [],
+        "createdAt": "2026-04-27T00:00:00Z",
+    }
 
     with (
         patch.object(
@@ -356,11 +358,13 @@ async def test_list_participants_failure_returns_none() -> None:
             new=AsyncMock(side_effect=httpx.ConnectError("conversation orchestrator unreachable")),
         ),
         patch.object(tac.conversation_orchestrator_client, "update_participant") as mock_update,
+        patch.object(tac, "trigger_message_ready", new=AsyncMock()) as ready,
     ):
-        result = await channel._reconcile_participants("CH123")
+        await channel._handle_communication_created(webhook_event)
 
-    assert result is None
+    ready.assert_not_awaited()
     mock_update.assert_not_called()
+    assert errors and errors[0]["dropped_inbound"] is True
 
 
 @pytest.mark.asyncio
@@ -377,11 +381,7 @@ async def test_customer_promotion_creates_profile_on_lookup_miss() -> None:
     promoted = _participant("PA_C", "CUSTOMER", "+12345678901")
 
     with (
-        patch.object(
-            tac.conversation_orchestrator_client,
-            "list_participants",
-            return_value=[agent, unknown_customer],
-        ),
+        _participants([agent, unknown_customer]) as participants,
         patch.object(
             tac.conversation_orchestrator_client,
             "update_participant",
@@ -403,7 +403,7 @@ async def test_customer_promotion_creates_profile_on_lookup_miss() -> None:
             new=AsyncMock(return_value="mem_profile_01new"),
         ) as mock_create,
     ):
-        result = await channel._reconcile_participants("CH123")
+        result = await channel._reconcile_participants(_session(), participants)
 
     assert result is not None
     mock_lookup.assert_awaited_once()
@@ -426,11 +426,7 @@ async def test_customer_promotion_proceeds_without_profile_on_errors() -> None:
     promoted = _participant("PA_C", "CUSTOMER", "+12345678901")
 
     with (
-        patch.object(
-            tac.conversation_orchestrator_client,
-            "list_participants",
-            return_value=[agent, unknown_customer],
-        ),
+        _participants([agent, unknown_customer]) as participants,
         patch.object(
             tac.conversation_orchestrator_client,
             "update_participant",
@@ -447,7 +443,7 @@ async def test_customer_promotion_proceeds_without_profile_on_errors() -> None:
             new=AsyncMock(side_effect=httpx.ConnectError("conversation memory down")),
         ),
     ):
-        result = await channel._reconcile_participants("CH123")
+        result = await channel._reconcile_participants(_session(), participants)
 
     assert result is not None
     kwargs = mock_update.await_args.kwargs
@@ -497,9 +493,9 @@ async def test_reconciliation_lifts_customer_profile_onto_session() -> None:
             "list_participants",
             return_value=[agent, customer],
         ),
-        patch.object(tac, "trigger_message_ready", new=AsyncMock(return_value=None)),
+        patch.object(tac, "trigger_message_ready", new=AsyncMock(return_value=None)) as ready,
     ):
         await channel._handle_communication_created(webhook_event)
 
-    session = channel._conversations["CH123"]
+    session = ready.await_args.args[1]
     assert session.profile_id == "mem_profile_01abc"

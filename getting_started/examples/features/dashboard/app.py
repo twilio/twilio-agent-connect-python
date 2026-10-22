@@ -49,6 +49,11 @@ openai_client = AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
 conversation_history: dict[str, list[ChatCompletionMessageParam]] = {}
 
+# Messaging channels are stateless — they derive a session per webhook and keep
+# nothing — so the dashboard's live messaging panel is fed by the app instead.
+# Cleared in on_conversation_ended below.
+messaging_sessions: dict[str, ConversationSession] = {}
+
 SYSTEM_MESSAGE: ChatCompletionSystemMessageParam = {
     "role": "system",
     "content": (
@@ -66,6 +71,8 @@ async def handle_message_ready(
     memory_response: TACMemoryResponse | None,
 ) -> str:
     conv_id = context.conversation_id
+    if context.channel != voice_channel.get_channel_name():
+        messaging_sessions[conv_id] = context
 
     try:
         if conv_id not in conversation_history:
@@ -96,7 +103,13 @@ async def handle_message_ready(
         return "Sorry, I encountered an error processing your message."
 
 
+async def handle_conversation_ended(context: ConversationSession) -> None:
+    messaging_sessions.pop(context.conversation_id, None)
+    conversation_history.pop(context.conversation_id, None)
+
+
 tac.on_message_ready(handle_message_ready)
+tac.on_conversation_ended(handle_conversation_ended)
 
 if __name__ == "__main__":
     from tac.server.config import TACServerConfig
@@ -112,7 +125,11 @@ if __name__ == "__main__":
     from dashboard import mount_dashboard  # type: ignore[import-not-found]
 
     mount_dashboard(
-        server.app, tac, channels=[sms_channel, voice_channel], messages=conversation_history
+        server.app,
+        tac,
+        channels=[sms_channel, voice_channel],
+        messages=conversation_history,
+        messaging_sessions=messaging_sessions,
     )
 
     logger.info(f"Dashboard: http://localhost:{server.config.port}/dashboard")

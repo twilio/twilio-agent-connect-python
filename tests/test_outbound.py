@@ -60,6 +60,29 @@ def make_participant(
     )
 
 
+def _inbound_event(
+    conversation_id: str,
+    *,
+    author_address: str,
+    author_participant_id: str,
+    text: str = "hello",
+) -> dict:
+    """A COMMUNICATION_CREATED payload, as Conversation Orchestrator sends it."""
+    return {
+        "id": "comms_communication_01test",
+        "conversationId": conversation_id,
+        "accountId": "ACtest123",
+        "author": {
+            "address": author_address,
+            "channel": "SMS",
+            "participantId": author_participant_id,
+        },
+        "content": {"type": "TEXT", "text": text},
+        "recipients": [],
+        "createdAt": "2026-04-27T00:00:00Z",
+    }
+
+
 def make_action_response(conversation_id: str) -> ActionResponse:
     return ActionResponse(
         id="ACT_test",
@@ -177,6 +200,9 @@ def _mock_sms_outbound(
 ) -> None:
     co = tac.conversation_orchestrator_client
     co.create_or_reuse_conversation = AsyncMock(return_value=(conv_id, reused))
+    co.patch_conversation_metadata = AsyncMock(
+        return_value=ConversationResponse(id=conv_id, account_id="ACtest123", metadata={})
+    )
     co.list_participants = AsyncMock(
         return_value=[
             make_participant(
@@ -213,7 +239,9 @@ class TestSMSOutbound:
         tac.conversation_orchestrator_client.create_action.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_creates_local_session(self) -> None:
+    async def test_returns_a_session_ready_to_reply_with(self) -> None:
+        """The channel stores nothing — the caller holds the session and hands
+        it back to send_response, which then needs no lookup."""
         tac = TAC(get_test_config())
         channel = SMSChannel(tac)
         _mock_sms_outbound(tac)
@@ -222,8 +250,11 @@ class TestSMSOutbound:
             InitiateMessagingConversationOptions(to="+15559876543", message="Hi")
         )
 
-        assert "CHsms_out" in channel._conversations
-        assert channel._conversations["CHsms_out"] is result.session
+        assert result.session.conversation_id == "CHsms_out"
+        assert result.session.author_info is not None
+        assert result.session.author_info.participant_id is not None
+        assert result.session.ai_agent_info is not None
+        assert result.session.ai_agent_info.participant_id is not None
 
     @pytest.mark.asyncio
     async def test_custom_metadata(self) -> None:
@@ -263,6 +294,9 @@ class TestSMSOutbound:
 
         co = tac.conversation_orchestrator_client
         co.create_or_reuse_conversation = AsyncMock(return_value=("CHreused", True))
+        co.patch_conversation_metadata = AsyncMock(
+            return_value=ConversationResponse(id="CHreused", account_id="ACtest123", metadata={})
+        )
         co.list_participants = AsyncMock(return_value=[])
         co.update_conversation = AsyncMock()
 
@@ -272,7 +306,6 @@ class TestSMSOutbound:
             )
 
         co.update_conversation.assert_not_called()
-        assert "CHreused" not in channel._conversations
 
     @pytest.mark.asyncio
     async def test_closes_new_conversation_on_failure(self) -> None:
@@ -290,7 +323,6 @@ class TestSMSOutbound:
             )
 
         co.update_conversation.assert_called_once_with("CHnew", "CLOSED")
-        assert "CHnew" not in channel._conversations
 
     @pytest.mark.asyncio
     async def test_passes_participants_in_create(self) -> None:
@@ -333,6 +365,9 @@ def _mock_chat_outbound(
 ) -> None:
     co = tac.conversation_orchestrator_client
     co.create_or_reuse_conversation = AsyncMock(return_value=(conv_id, reused))
+    co.patch_conversation_metadata = AsyncMock(
+        return_value=ConversationResponse(id=conv_id, account_id="ACtest123", metadata={})
+    )
     co.list_participants = AsyncMock(
         return_value=[
             make_participant(
@@ -842,79 +877,59 @@ class TestInitiateVoiceConversationOptionsForbidsExtra:
 
 
 class TestIsOwnMessage:
-    @pytest.mark.asyncio
-    async def test_tier1_default_agent_address(self) -> None:
-        tac = TAC(get_test_config())
-        channel = SMSChannel(tac)
-
-        result = await channel._is_own_message("+15551234567", "CHtest", None)
-        assert result is True
+    """TAC must not reply to itself. The configured agent address catches the
+    common case for free; the participant list catches an agent speaking from
+    some other address."""
 
     @pytest.mark.asyncio
-    async def test_tier2_api_fallback(self) -> None:
+    async def test_default_agent_address_short_circuits_before_any_api_call(self) -> None:
         tac = TAC(get_test_config())
         channel = SMSChannel(tac)
+        tac.conversation_orchestrator_client.list_participants = AsyncMock()
+        tac.on_message_ready(lambda msg, ctx, mem: pytest.fail("own message reached the callback"))
 
-        tac.conversation_orchestrator_client.list_participants = AsyncMock(
-            return_value=[
-                make_participant(
-                    id="PAagent_custom",
-                    conversation_id="CHtest",
-                    type="AI_AGENT",
-                    channel="SMS",
-                    address="+15550009999",
-                ),
-            ]
+        await channel._handle_communication_created(
+            _inbound_event("CHtest", author_address="+15551234567", author_participant_id="PAme")
         )
 
-        # No local session — triggers API fallback
-        result = await channel._is_own_message("+15550009999", "CHtest", "PAagent_custom")
-        assert result is True
+        tac.conversation_orchestrator_client.list_participants.assert_not_awaited()
 
-    @pytest.mark.asyncio
-    async def test_returns_false_for_customer(self) -> None:
+    def test_agent_typed_participant_at_another_address_is_us(self) -> None:
+        tac = TAC(get_test_config())
+        channel = SMSChannel(tac)
+        participants = [
+            make_participant(
+                id="PAagent_custom",
+                conversation_id="CHtest",
+                type="AI_AGENT",
+                channel="SMS",
+                address="+15550009999",
+            )
+        ]
+
+        assert channel._is_own_message("PAagent_custom", participants, "CHtest") is True
+
+    def test_customer_participant_is_not_us(self) -> None:
+        tac = TAC(get_test_config())
+        channel = SMSChannel(tac)
+        participants = [
+            make_participant(
+                id="PAcust",
+                conversation_id="CHtest",
+                type="CUSTOMER",
+                channel="SMS",
+                address="+15559876543",
+            )
+        ]
+
+        assert channel._is_own_message("PAcust", participants, "CHtest") is False
+
+    def test_unknown_author_is_not_us(self) -> None:
         tac = TAC(get_test_config())
         channel = SMSChannel(tac)
 
-        channel._start_conversation("CHtest")
-
-        result = await channel._is_own_message("+15559876543", "CHtest", None)
-        assert result is False
-
-    @pytest.mark.asyncio
-    async def test_tier2_fires_when_session_exists(self) -> None:
-        """API fallback fires when author is not the default agent address."""
-        tac = TAC(get_test_config())
-        channel = SMSChannel(tac)
-        tac.conversation_orchestrator_client.list_participants = AsyncMock(
-            return_value=[
-                make_participant(
-                    id="PAsomeid",
-                    conversation_id="CHtest",
-                    type="AI_AGENT",
-                    channel="SMS",
-                    address="+15559999999",
-                ),
-            ]
-        )
-
-        channel._start_conversation("CHtest")
-
-        result = await channel._is_own_message("+15559999999", "CHtest", "PAsomeid")
-        assert result is True
-        tac.conversation_orchestrator_client.list_participants.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_tier2_handles_api_error_gracefully(self) -> None:
-        tac = TAC(get_test_config())
-        channel = SMSChannel(tac)
-
-        tac.conversation_orchestrator_client.list_participants = AsyncMock(
-            side_effect=Exception("API error")
-        )
-
-        result = await channel._is_own_message("+15559999999", "CHtest", "PAsomeid")
-        assert result is False
+        assert channel._is_own_message("PAmissing", [], "CHtest") is False
+        assert channel._is_own_message(None, [], "CHtest") is False
 
 
 # =============================================================================
@@ -929,7 +944,7 @@ class TestChatSendResponseAfterOutbound:
         channel = ChatChannel(tac)
         _mock_chat_outbound(tac)
 
-        await channel.initiate_outbound_conversation(
+        result = await channel.initiate_outbound_conversation(
             InitiateChatConversationOptions(
                 to="customer@example.com",
                 channel_id="CHSIDabc",
@@ -941,7 +956,9 @@ class TestChatSendResponseAfterOutbound:
             return_value=make_action_response("CHchat_out")
         )
 
-        await channel.send_response("CHchat_out", "Follow-up")
+        # Hand back the session initiation returned — it already carries the
+        # channelId chat needs, so the follow-up costs no extra lookup.
+        await channel.send_response(result.session, "Follow-up")
 
         call_args = tac.conversation_orchestrator_client.create_action.call_args
         action_request = call_args.args[1]
@@ -989,7 +1006,6 @@ class TestInitiateConversationActionFailure:
             )
 
         co.update_conversation.assert_called_once_with("CHnew_action", "CLOSED")
-        assert "CHnew_action" not in channel._conversations
 
     @pytest.mark.asyncio
     async def test_does_not_close_reused_conversation_on_action_failure(self) -> None:
@@ -998,6 +1014,11 @@ class TestInitiateConversationActionFailure:
 
         co = tac.conversation_orchestrator_client
         co.create_or_reuse_conversation = AsyncMock(return_value=("CHreused_action", True))
+        co.patch_conversation_metadata = AsyncMock(
+            return_value=ConversationResponse(
+                id="CHreused_action", account_id="ACtest123", metadata={}
+            )
+        )
         co.list_participants = AsyncMock(
             return_value=[
                 make_participant(
@@ -1025,7 +1046,6 @@ class TestInitiateConversationActionFailure:
             )
 
         co.update_conversation.assert_not_called()
-        assert "CHreused_action" not in channel._conversations
 
 
 # =============================================================================
@@ -1234,6 +1254,9 @@ def _mock_rcs_outbound(
 ) -> None:
     co = tac.conversation_orchestrator_client
     co.create_or_reuse_conversation = AsyncMock(return_value=(conv_id, reused))
+    co.patch_conversation_metadata = AsyncMock(
+        return_value=ConversationResponse(id=conv_id, account_id="ACtest123", metadata={})
+    )
     co.list_participants = AsyncMock(
         return_value=[
             make_participant(
@@ -1327,6 +1350,9 @@ def _mock_whatsapp_outbound(
 ) -> None:
     co = tac.conversation_orchestrator_client
     co.create_or_reuse_conversation = AsyncMock(return_value=(conv_id, reused))
+    co.patch_conversation_metadata = AsyncMock(
+        return_value=ConversationResponse(id=conv_id, account_id="ACtest123", metadata={})
+    )
     co.list_participants = AsyncMock(
         return_value=[
             make_participant(

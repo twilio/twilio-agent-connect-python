@@ -128,6 +128,7 @@ See `examples/.env.example` for all available configuration options. Key variabl
 
 ### Optional (Voice Channel)
 - `TWILIO_VOICE_PUBLIC_DOMAIN`: Your ngrok domain (required for voice)
+- `TWILIO_INSTANCE_PUBLIC_DOMAIN`: This process's own public hostname, only when running voice on more than one replica; leave unset for a single instance
 
 ### Optional (OpenAI Example)
 - `OPENAI_API_KEY`: Your OpenAI API key (only needed to run OpenAI examples)
