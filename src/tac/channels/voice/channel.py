@@ -103,6 +103,14 @@ class VoiceChannel(BaseChannel):
             config = ConversationRelayProviderConfig()
 
         super().__init__(tac, memory_mode=config.memory_mode)
+
+        if not tac.config.phone_numbers:
+            raise ValueError(
+                "phone_number(s) is required for Voice channel. "
+                "Set TWILIO_PHONE_NUMBER / TWILIO_PHONE_NUMBERS or "
+                "provide phone_number / phone_numbers in TACConfig."
+            )
+
         # Live sessions by conversation id. Instance-local by design: a call
         # is pinned to the process holding its WebSocket.
         self._conversations: dict[str, ConversationSession] = {}

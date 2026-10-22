@@ -338,6 +338,29 @@ class TestHandoffExecution:
         _, call_kwargs = post_mock.call_args
         assert call_kwargs["from_address"] == "+15551234567"
 
+    @pytest.mark.asyncio
+    async def test_handoff_chat_without_phone_number_fails(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Chat hands off From the configured phone number; without one, report
+        handoff_failed instead of posting a Studio execution with no From."""
+        tac = TAC(get_test_config(phone_number=None))
+        tac.conversation_orchestrator_client.update_conversation = AsyncMock()
+        tac.conversation_orchestrator_client.clear_status_callbacks = AsyncMock()
+
+        post_mock = AsyncMock()
+        monkeypatch.setattr(handoff_module, "post_studio_handoff", post_mock)
+
+        session = ConversationSession(conversation_id="conv_123", channel="CHAT")
+        session.ai_agent_info = AuthorInfo(address="ai-assistant", participant_id="p_agent")
+
+        tool = create_studio_handoff_tool(tac, session)
+        result = await tool(reason="Customer wants human")
+
+        post_mock.assert_not_called()
+        assert result["status"] == "handoff_failed"
+        assert "phone_number" in result["error"]
+
     def test_factory_raises_without_flow_sid(self) -> None:
         """Factory rejects missing studio_handoff_flow_sid — it's misconfig, not a soft fallback."""
         tac = TAC(get_test_config(studio_handoff_flow_sid=None))

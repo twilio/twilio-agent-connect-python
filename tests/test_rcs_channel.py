@@ -166,6 +166,18 @@ async def test_rcs_channel_requires_sender_id() -> None:
         RCSChannel(tac)
 
 
+def test_rcs_channel_without_phone_number() -> None:
+    """RCS channel doesn't require a phone number."""
+    config = get_test_config()
+    config.pop("phone_number")
+    tac = TAC(config)
+
+    channel = RCSChannel(tac)
+
+    assert channel.get_channel_name() == "RCS"
+    assert tac.config.phone_number is None
+
+
 @pytest.mark.asyncio
 async def test_is_default_agent_address_configured(mock_tac: TAC) -> None:
     """Test agent address detection with configured rcs_sender_id from TAC config."""

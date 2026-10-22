@@ -406,13 +406,13 @@ class TestSMSChannel:
         assert channel.tac == tac
 
     def test_initialization_without_phone_number(self) -> None:
-        """Test TAC config validation fails without phone_number."""
+        """Test SMS channel construction fails without phone_number(s)."""
         config = get_test_config()
         del config["phone_number"]
+        tac = TAC(config)
 
-        # phone_number is now required at TACConfig level
-        with pytest.raises(ValueError):
-            TAC(config)
+        with pytest.raises(ValueError, match="phone_number\\(s\\) is required for SMS channel"):
+            SMSChannel(tac)
 
     @pytest.mark.asyncio
     async def test_process_message_auto_initialize(self) -> None:
