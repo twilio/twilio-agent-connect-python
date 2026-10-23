@@ -22,6 +22,7 @@ from tac.models.outbound import (
 )
 from tac.models.voice import TwiMLRequest
 from tac.tools import function_tool
+from tac.utils.distrusted_intermediates import _DistrustingSSLObject
 
 _VALID_SESSION_CONFIG = {
     "model": "gpt-live-1",
@@ -302,6 +303,25 @@ class TestOutboundCallSessionConfig:
             await asyncio.wait_for(provider.handle_websocket(twilio_ws), timeout=5)
 
         assert mock_connect.call_args.args[0] == "wss://api.openai.com/v1/live/sessions"
+
+    @pytest.mark.asyncio
+    async def test_model_connection_uses_distrusting_ssl_context(self) -> None:
+        channel = make_channel()
+        provider = channel._provider
+
+        twilio_ws = FakeTwilioWebSocket(
+            events=[{"event": "start", "start": {"callSid": "CA123", "streamSid": "MZ123"}}]
+        )
+        model_ws = FakeModelWebSocket(events=[])
+
+        with patch(
+            "tac.channels.voice.media_streams.gpt_live.provider.websockets.connect",
+            new=AsyncMock(return_value=model_ws),
+        ) as mock_connect:
+            await asyncio.wait_for(provider.handle_websocket(twilio_ws), timeout=5)
+
+        context = mock_connect.call_args.kwargs["ssl"]
+        assert context.sslobject_class is _DistrustingSSLObject
 
     @pytest.mark.asyncio
     async def test_session_config_token_not_leaked_if_twiml_build_fails(self) -> None:
