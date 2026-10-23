@@ -71,6 +71,6 @@ jobs:
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          uv run --group docs mike deploy --push --update-aliases --alias-type=copy \
+          uv run --frozen --group docs mike deploy --push --update-aliases --alias-type=copy \
             "$VERSION" latest
-          uv run --group docs mike set-default --push latest
+          uv run --frozen --group docs mike set-default --push latest
