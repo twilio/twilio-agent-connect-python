@@ -343,10 +343,14 @@ class TestHandoffExecution:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Chat hands off From the configured phone number; without one, report
-        handoff_failed instead of posting a Studio execution with no From."""
+        handoff_failed before touching the conversation. Setting it INACTIVE or
+        clearing its status callbacks would stop TAC's webhooks with no Studio
+        flow to take over."""
         tac = TAC(get_test_config(phone_number=None))
-        tac.conversation_orchestrator_client.update_conversation = AsyncMock()
-        tac.conversation_orchestrator_client.clear_status_callbacks = AsyncMock()
+        update_mock = AsyncMock()
+        clear_mock = AsyncMock()
+        tac.conversation_orchestrator_client.update_conversation = update_mock
+        tac.conversation_orchestrator_client.clear_status_callbacks = clear_mock
 
         post_mock = AsyncMock()
         monkeypatch.setattr(handoff_module, "post_studio_handoff", post_mock)
@@ -357,8 +361,11 @@ class TestHandoffExecution:
         tool = create_studio_handoff_tool(tac, session)
         result = await tool(reason="Customer wants human")
 
+        update_mock.assert_not_awaited()
+        clear_mock.assert_not_awaited()
         post_mock.assert_not_called()
         assert result["status"] == "handoff_failed"
+        assert "CHAT" in result["error"]
         assert "phone_number" in result["error"]
 
     def test_factory_raises_without_flow_sid(self) -> None:

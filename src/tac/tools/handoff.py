@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Annotated, Any
 import httpx
 
 from tac import get_logger
+from tac.context.conversation import ConversationClient
 from tac.models.handoff import HandoffPayload, PendingHandoffData
 from tac.models.session import ConversationSession
 from tac.tools.base import InjectedToolArg, TACTool, function_tool
@@ -153,33 +154,8 @@ async def _handoff_impl(
     channel = session.channel
     co_client = tac_instance.conversation_orchestrator_client
 
-    # 1. Set conversation to INACTIVE so no new messages are routed here.
-    # Downstream (Studio/Flex) flips it back to ACTIVE on pickup and CLOSED
-    # on hangup — we don't close it ourselves.
-    try:
-        await co_client.update_conversation(
-            conversation_id=session.conversation_id,
-            status="INACTIVE",
-        )
-    except Exception as e:
-        logger.warning(
-            f"Failed to set conversation INACTIVE during handoff: {e}",
-            conversation_id=session.conversation_id,
-        )
-
-    # 2. Clear statusCallbacks so TAC stops receiving webhook events
-    try:
-        await co_client.clear_status_callbacks(
-            conversation_id=session.conversation_id,
-        )
-    except Exception as e:
-        logger.warning(
-            f"Failed to clear status callbacks during handoff: {e}",
-            conversation_id=session.conversation_id,
-        )
-
-    # 3. Deliver handoff payload.
     if channel == "VOICE":
+        await _stop_tac_routing(co_client, session.conversation_id)
         # Voice: store on session for deferred delivery. The voice channel
         # sends the WS "end" message after the LLM's final response so the
         # caller hears a goodbye before transfer.
@@ -188,49 +164,86 @@ async def _handoff_impl(
         session.pending_handoff_data = PendingHandoffData(
             handoff_data=payload.model_dump_json(by_alias=True),
         )
+        return {"status": "handoff_initiated", "channel": channel}
+
+    # Digital channels: POST handoff payload to the Studio Flow Executions
+    # endpoint. Resolve the Studio sender BEFORE touching the conversation:
+    # once it's INACTIVE with status callbacks cleared, TAC no longer receives
+    # its webhooks, so a handoff that can't be delivered must fail first.
+    config = tac_instance.config
+    # Studio's `From` is the Twilio sender its widgets reply from, so it must
+    # match the channel of `To` (the customer address). SMS/RCS/WhatsApp hand
+    # off From the sender the customer actually reached
+    # (`session.ai_agent_info.address`), in the same channel-prefixed form as
+    # `To` — `+1555…`, `rcs:<sender_id>`, `whatsapp:+1555…` — which is what
+    # Studio expects for those channels. Chat's agent address is an identity
+    # (e.g. "ai-assistant"), not a Twilio sender, so it keeps the configured
+    # default phone number.
+    from_address: str | None
+    if channel != "CHAT" and session.ai_agent_info is not None:
+        from_address = session.ai_agent_info.address
     else:
-        # Digital channels: POST handoff payload to the Studio Flow Executions
-        # endpoint. A delivery failure here means the user is stranded on a
-        # conversation we've already flagged INACTIVE — report that honestly
-        # so the LLM can tell the user instead of claiming success.
-        config = tac_instance.config
-        # Studio's `From` is the Twilio sender its widgets reply from, so it must
-        # match the channel of `To` (the customer address). SMS/RCS/WhatsApp hand
-        # off From the sender the customer actually reached
-        # (`session.ai_agent_info.address`), in the same channel-prefixed form as
-        # `To` — `+1555…`, `rcs:<sender_id>`, `whatsapp:+1555…` — which is what
-        # Studio expects for those channels. Chat's agent address is an identity
-        # (e.g. "ai-assistant"), not a Twilio sender, so it keeps the configured
-        # default phone number.
-        from_address: str | None
-        if channel != "CHAT" and session.ai_agent_info is not None:
-            from_address = session.ai_agent_info.address
-        else:
-            from_address = config.phone_number
-        if from_address is None:
-            error = "No Studio `From` sender: Chat handoff requires phone_number in TACConfig."
-            logger.error(
-                f"Failed to deliver handoff payload: {error}",
-                conversation_id=session.conversation_id,
-            )
-            return {"status": "handoff_failed", "channel": channel, "error": error}
-        try:
-            await post_studio_handoff(
-                payload,
-                session,
-                handoff_url=studio_executions_url(config.studio_handoff_flow_sid),
-                from_address=from_address,
-                api_key=config.api_key,
-                api_secret=config.api_secret,
-            )
-        except Exception as e:
-            logger.error(
-                f"Failed to deliver handoff payload: {e}",
-                conversation_id=session.conversation_id,
-            )
-            return {"status": "handoff_failed", "channel": channel, "error": str(e)}
+        from_address = config.phone_number
+    if from_address is None:
+        error = f"No Studio `From` sender for {channel} handoff: set phone_number in TACConfig."
+        logger.error(
+            f"Failed to deliver handoff payload: {error}",
+            conversation_id=session.conversation_id,
+        )
+        return {"status": "handoff_failed", "channel": channel, "error": error}
+
+    await _stop_tac_routing(co_client, session.conversation_id)
+    # A delivery failure here means the user is stranded on a conversation
+    # we've already flagged INACTIVE — report that honestly so the LLM can
+    # tell the user instead of claiming success.
+    try:
+        await post_studio_handoff(
+            payload,
+            session,
+            handoff_url=studio_executions_url(config.studio_handoff_flow_sid),
+            from_address=from_address,
+            api_key=config.api_key,
+            api_secret=config.api_secret,
+        )
+    except Exception as e:
+        logger.error(
+            f"Failed to deliver handoff payload: {e}",
+            conversation_id=session.conversation_id,
+        )
+        return {"status": "handoff_failed", "channel": channel, "error": str(e)}
 
     return {"status": "handoff_initiated", "channel": channel}
+
+
+async def _stop_tac_routing(co_client: ConversationClient, conversation_id: str) -> None:
+    """Take the conversation away from TAC ahead of a handoff.
+
+    Failures are logged and swallowed so the handoff still proceeds.
+    """
+    # 1. Set conversation to INACTIVE so no new messages are routed here.
+    # Downstream (Studio/Flex) flips it back to ACTIVE on pickup and CLOSED
+    # on hangup — we don't close it ourselves.
+    try:
+        await co_client.update_conversation(
+            conversation_id=conversation_id,
+            status="INACTIVE",
+        )
+    except Exception as e:
+        logger.warning(
+            f"Failed to set conversation INACTIVE during handoff: {e}",
+            conversation_id=conversation_id,
+        )
+
+    # 2. Clear statusCallbacks so TAC stops receiving webhook events
+    try:
+        await co_client.clear_status_callbacks(
+            conversation_id=conversation_id,
+        )
+    except Exception as e:
+        logger.warning(
+            f"Failed to clear status callbacks during handoff: {e}",
+            conversation_id=conversation_id,
+        )
 
 
 DEFAULT_HANDOFF_TOOL_NAME = "handoff"
