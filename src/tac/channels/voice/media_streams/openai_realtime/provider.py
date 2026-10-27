@@ -14,6 +14,7 @@ import asyncio
 import base64
 import contextlib
 import json
+import ssl
 import uuid
 from typing import TYPE_CHECKING, Any
 
@@ -35,6 +36,7 @@ from tac.models.outbound import (
 from tac.models.session import ConversationSession
 from tac.models.stream import StreamStartMessage
 from tac.models.voice import VoiceTwiMLOptionsMediaStreams
+from tac.utils.distrusted_intermediates import distrusting_ssl_context
 from tac.utils.redaction import mask_phone, redact_twiml_parameters
 
 if TYPE_CHECKING:
@@ -309,6 +311,7 @@ class OpenAIRealtimeProvider(MediaStreamsOpenAIProvider[_CallState]):
                 "Authorization": f"Bearer {self.config.openai_api_key}",
                 "User-Agent": OPENAI_USER_AGENT,
             },
+            ssl=distrusting_ssl_context(ssl.create_default_context()),
         )
         call = self._calls.get(conv_id)
         if call is not None:
