@@ -7,7 +7,7 @@ on:
 jobs:
   test:
     name: Test - Python ${{ matrix.python-version }}
-    runs-on: ${{ github.repository_owner == 'twilio' && 'ubuntu-x64' || 'ubuntu-latest' }}
+    runs-on: ${{ github.repository_owner == 'twilio' && 'ubuntu-x64' || 'ubuntu-latest-large' }}
     if: github.repository_owner == 'twilio'
     permissions:
       contents: read
@@ -38,7 +38,7 @@ jobs:
   deploy:
     name: Publish to PyPI
     needs: [test]
-    runs-on: ${{ github.repository_owner == 'twilio' && 'ubuntu-x64' || 'ubuntu-latest' }}
+    runs-on: ${{ github.repository_owner == 'twilio' && 'ubuntu-x64' || 'ubuntu-latest-large' }}
     if: github.repository_owner == 'twilio'
     environment: pypi
     permissions:
