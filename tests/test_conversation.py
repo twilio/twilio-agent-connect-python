@@ -225,6 +225,17 @@ class TestConversationModels:
         assert participant.created_at is None
         assert participant.updated_at is None
 
+    def test_participant_response_without_name(self):
+        """Test ParticipantResponse accepts a missing or null name."""
+        response_data = {
+            "id": "MB123456",
+            "conversationId": "CH123456",
+            "accountId": "AC123456",
+        }
+
+        assert ParticipantResponse(**response_data).name is None
+        assert ParticipantResponse(**response_data, name=None).name is None
+
     def test_participant_request_with_agent_type(self):
         """Test ParticipantRequest accepts AGENT type."""
         request = ParticipantRequest(
