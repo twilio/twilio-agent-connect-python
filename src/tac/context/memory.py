@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from typing import Any, TypeVar
+from urllib.parse import quote
 
 import httpx
 from pydantic import BaseModel, ValidationError
@@ -18,6 +19,15 @@ from tac.models.memory import (
 )
 
 _ItemModel = TypeVar("_ItemModel", bound=BaseModel)
+
+
+def _segment(value: str) -> str:
+    """Percent-encode a value used as a single URL path segment.
+
+    Path parameters reach these clients as data, so they must not be able to
+    introduce separators and address a different resource.
+    """
+    return quote(value, safe="")
 
 
 class MemoryClient(BaseAPIClient):
@@ -75,7 +85,7 @@ class MemoryClient(BaseAPIClient):
             parsed.
         """
 
-        endpoint = f"/v1/Stores/{self.store_id}/Profiles/{profile_id}/Recall"
+        endpoint = f"/v1/Stores/{_segment(self.store_id)}/Profiles/{_segment(profile_id)}/Recall"
         url = f"{self.base_url}{endpoint}"
 
         request_data = MemoryRetrievalRequest(
@@ -189,7 +199,7 @@ class MemoryClient(BaseAPIClient):
             httpx.HTTPError: If the API request fails
             ValueError: If the response cannot be parsed
         """
-        endpoint = f"/v1/Stores/{self.store_id}/Profiles/{profile_id}"
+        endpoint = f"/v1/Stores/{_segment(self.store_id)}/Profiles/{_segment(profile_id)}"
         url = f"{self.base_url}{endpoint}"
 
         params = {}
@@ -250,7 +260,7 @@ class MemoryClient(BaseAPIClient):
             httpx.HTTPError: If the API request fails
             ValueError: If the response cannot be parsed
         """
-        endpoint = f"/v1/Stores/{self.store_id}/Profiles/Lookup"
+        endpoint = f"/v1/Stores/{_segment(self.store_id)}/Profiles/Lookup"
         url = f"{self.base_url}{endpoint}"
 
         request_data = ProfileLookupRequest(id_type=id_type, value=value)
@@ -311,7 +321,7 @@ class MemoryClient(BaseAPIClient):
             httpx.HTTPError: If the API request fails.
             ValueError: If the response does not contain an `id` field.
         """
-        endpoint = f"/v1/Stores/{self.store_id}/Profiles"
+        endpoint = f"/v1/Stores/{_segment(self.store_id)}/Profiles"
         url = f"{self.base_url}{endpoint}"
 
         payload: dict[str, Any] = {"traits": traits}
@@ -368,7 +378,9 @@ class MemoryClient(BaseAPIClient):
         Raises:
             httpx.HTTPError: If the API request fails
         """
-        endpoint = f"/v1/Stores/{self.store_id}/Profiles/{profile_id}/Observations"
+        endpoint = (
+            f"/v1/Stores/{_segment(self.store_id)}/Profiles/{_segment(profile_id)}/Observations"
+        )
         url = f"{self.base_url}{endpoint}"
 
         observation: dict[str, Any] = {
@@ -426,7 +438,10 @@ class MemoryClient(BaseAPIClient):
         Raises:
             httpx.HTTPError: If the API request fails
         """
-        endpoint = f"/v1/Stores/{self.store_id}/Profiles/{profile_id}/ConversationSummaries"
+        endpoint = (
+            f"/v1/Stores/{_segment(self.store_id)}"
+            f"/Profiles/{_segment(profile_id)}/ConversationSummaries"
+        )
         url = f"{self.base_url}{endpoint}"
 
         payload: dict[str, Any] = {
