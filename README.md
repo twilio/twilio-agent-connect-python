@@ -34,6 +34,7 @@ Seamlessly integrate with Twilio Conversation Memory and Conversation Orchestrat
 > **Building AI agents on AWS or Microsoft?** Connect them to Twilio's voice, messaging, and conversation context with these dedicated packages:
 > - **[TAC for AWS](https://github.com/twilio/twilio-agent-connect-aws)** — Strands, Bedrock Agents, Bedrock AgentCore
 > - **[TAC for Microsoft](https://github.com/twilio/twilio-agent-connect-microsoft)** — Microsoft Agent Framework, Azure AI Foundry (incl. Voice Live), Azure OpenAI
+> - **[TAC for Google](https://github.com/twilio/twilio-agent-connect-google)** — Google Cloud agent platforms; Gemini Enterprise Agent Platform (Vertex AI), Gemini Enterprise Customer Experience / CX Agent Studio, and Google ADK.
 
 ---
 
