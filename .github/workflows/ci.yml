@@ -13,7 +13,7 @@ permissions:
 jobs:
   lockfile-hygiene:
     name: Lockfile Hygiene
-    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || 'ubuntu-x64' }}
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest-large' || 'ubuntu-x64' }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
 
@@ -22,7 +22,7 @@ jobs:
 
   lint:
     name: Linting
-    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || 'ubuntu-x64' }}
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest-large' || 'ubuntu-x64' }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
 
@@ -70,7 +70,7 @@ jobs:
 
   type-check:
     name: Type Check
-    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || 'ubuntu-x64' }}
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest-large' || 'ubuntu-x64' }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
 
@@ -111,7 +111,7 @@ jobs:
 
   test:
     name: Test - Python ${{ matrix.python-version }}
-    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || 'ubuntu-x64' }}
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest-large' || 'ubuntu-x64' }}
     strategy:
       fail-fast: false
       matrix:
@@ -148,7 +148,7 @@ jobs:
 
   build:
     name: Build Package
-    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || 'ubuntu-x64' }}
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest-large' || 'ubuntu-x64' }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
 
@@ -189,7 +189,7 @@ jobs:
   all-checks:
     name: All Checks Passed
     needs: [lockfile-hygiene, lint, type-check, test, build]
-    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || 'ubuntu-x64' }}
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest-large' || 'ubuntu-x64' }}
     if: always()
     steps:
       - name: Check all job statuses
