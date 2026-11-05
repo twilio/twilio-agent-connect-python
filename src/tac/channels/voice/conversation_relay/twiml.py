@@ -22,6 +22,7 @@ _OPTIONAL_RELAY_ATTRS = (
     "welcome_greeting",
     "welcome_greeting_interruptible",
     "conversation_configuration",
+    "conversation_id",
     # language / TTS / STT
     "language",
     "tts_language",
