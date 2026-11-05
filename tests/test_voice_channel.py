@@ -17,6 +17,7 @@ from tac.models.voice import (
     InterruptMessage,
     PromptMessage,
     SetupMessage,
+    TwiMLRequest,
     VoiceTwiMLOptionsConversationRelay,
 )
 from tests.voice_invariants import assert_no_residual_state
@@ -734,6 +735,62 @@ class TestVoiceChannel:
         assert 'conversationConfiguration="conv_configuration_test123"' in twiml
         assert "</Connect>" in twiml
         assert "</Response>" in twiml
+
+    @pytest.mark.asyncio
+    async def test_handle_incoming_call_routes_to_pre_created_conversation(self) -> None:
+        """A pre-created conversation is routed by id and the configuration is dropped."""
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+        request = TwiMLRequest(From="+15559876543", To="+15551234567", CallSid="CA123")
+        client = tac.conversation_orchestrator_client
+        assert client is not None
+
+        with patch.object(
+            client, "create_or_reuse_conversation", AsyncMock(return_value=("conv_pre", False))
+        ) as create:
+            twiml = await channel.handle_incoming_call(request)
+
+        participants = create.call_args.args[0]
+        assert participants[0].type == "CUSTOMER"
+        assert participants[0].addresses[0].address == "+15559876543"
+        assert participants[1].type == "AI_AGENT"
+        assert participants[1].addresses[0].address == "+15551234567"
+        assert 'conversationId="conv_pre"' in twiml
+        assert "conversationConfiguration=" not in twiml
+        assert 'name="tacConversationId" value="conv_pre"' in twiml
+
+    @pytest.mark.asyncio
+    async def test_handle_incoming_call_falls_back_when_pre_create_fails(self) -> None:
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+        request = TwiMLRequest(From="+15559876543", To="+15551234567", CallSid="CA123")
+        client = tac.conversation_orchestrator_client
+        assert client is not None
+
+        with patch.object(
+            client, "create_or_reuse_conversation", AsyncMock(side_effect=RuntimeError("boom"))
+        ):
+            twiml = await channel.handle_incoming_call(request)
+
+        assert "conversationConfiguration=" in twiml
+        assert "conversationId=" not in twiml
+
+    @pytest.mark.asyncio
+    async def test_handle_incoming_call_skips_pre_create_when_customizer_sets_id(self) -> None:
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+        channel.on_inbound_call_twiml(
+            AsyncMock(return_value=VoiceTwiMLOptionsConversationRelay(conversation_id="conv_mine"))
+        )
+        request = TwiMLRequest(From="+15559876543", To="+15551234567", CallSid="CA123")
+        client = tac.conversation_orchestrator_client
+        assert client is not None
+
+        with patch.object(client, "create_or_reuse_conversation", AsyncMock()) as create:
+            twiml = await channel.handle_incoming_call(request)
+
+        create.assert_not_called()
+        assert 'conversationId="conv_mine"' in twiml
 
     @pytest.mark.asyncio
     async def test_handle_incoming_call_default_greeting(self) -> None:
