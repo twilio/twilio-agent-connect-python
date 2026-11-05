@@ -1,6 +1,7 @@
 """Tests for Voice Channel."""
 
 import asyncio
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -2505,6 +2506,146 @@ class TestConversationInitializationFlow:
         # Everything the lookup registered is cleaned up (not leaked) even
         # though no prompt ever arrived to claim conv_id itself.
         assert_no_residual_state(channel, "CH_setup_test")
+
+    @staticmethod
+    def _setup_then_disconnect(custom_parameters: dict[str, str]) -> AsyncMock:
+        """A websocket that sends one setup message carrying `custom_parameters`,
+        yields to the event loop so the background init can run, then disconnects."""
+        from tac.channels.websocket_protocol import WebSocketDisconnectError
+
+        ws = AsyncMock()
+        sent = False
+
+        async def fake_receive_json() -> dict[str, Any]:
+            nonlocal sent
+            if not sent:
+                sent = True
+                return {
+                    "type": "setup",
+                    "callSid": "CA_pre",
+                    "from": "+15559998888",
+                    "to": "+15551234567",
+                    "customParameters": custom_parameters,
+                }
+            await asyncio.sleep(0)
+            await asyncio.sleep(0)
+            raise WebSocketDisconnectError()
+
+        ws.receive_json = fake_receive_json
+        return ws
+
+    @staticmethod
+    def _customer(participant_id: str, channel: str, address: str) -> ParticipantResponse:
+        return ParticipantResponse(
+            id=participant_id,
+            conversationId="conv_pre",
+            accountId="ACtest123",
+            name="Customer",
+            type="CUSTOMER",
+            addresses=[ParticipantAddress(channel=channel, address=address)],
+        )
+
+    @pytest.mark.asyncio
+    async def test_setup_with_pre_created_conversation_skips_polling(self) -> None:
+        """A tacConversationId on setup registers the session directly: no
+        list_conversations poll, and cleanup still releases everything."""
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+        co_client = tac.conversation_orchestrator_client
+        co_client.list_conversations = AsyncMock(return_value=[])
+        co_client.list_participants = AsyncMock(
+            return_value=[self._customer("PA_voice", "VOICE", "+15559998888")]
+        )
+
+        await channel.handle_websocket(
+            self._setup_then_disconnect({"tacConversationId": "conv_pre"})
+        )
+
+        co_client.list_conversations.assert_not_called()
+        co_client.list_participants.assert_called_once_with("conv_pre")
+        assert_no_residual_state(channel, "conv_pre")
+
+    @pytest.mark.asyncio
+    async def test_register_pre_created_conversation_takes_voice_customer(self) -> None:
+        """A conversation grouped across channels may list another channel's
+        customer first; the caller is the CUSTOMER on VOICE."""
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+        co_client = tac.conversation_orchestrator_client
+        co_client.list_participants = AsyncMock(
+            return_value=[
+                self._customer("PA_sms", "SMS", "+15550001111"),
+                self._customer("PA_voice", "VOICE", "+15559998888"),
+            ]
+        )
+        setup_msg = SetupMessage(type="setup", callSid="CA_pre", **{"from": "+15559998888"})
+
+        conv_id, _ = await channel._provider._register_conversation(
+            "conv_pre", "CA_pre", setup_msg, MagicMock()
+        )
+
+        assert conv_id == "conv_pre"
+        session = channel._conversations["conv_pre"]
+        assert session.author_info is not None
+        assert session.author_info.address == "+15559998888"
+
+    @pytest.mark.asyncio
+    async def test_setup_with_nonexistent_conversation_registers_nothing(self) -> None:
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+        co_client = tac.conversation_orchestrator_client
+        co_client.list_participants = AsyncMock(side_effect=RuntimeError("404 not found"))
+
+        await channel.handle_websocket(
+            self._setup_then_disconnect({"tacConversationId": "conv_missing"})
+        )
+
+        co_client.list_participants.assert_called_once_with("conv_missing")
+        assert len(channel._conversations) == 0
+        assert_no_residual_state(channel, "conv_missing")
+
+    @pytest.mark.asyncio
+    async def test_handle_incoming_call_concurrent_calls_share_conversation(self) -> None:
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+        client = tac.conversation_orchestrator_client
+        assert client is not None
+
+        with patch.object(
+            client,
+            "create_or_reuse_conversation",
+            AsyncMock(side_effect=[("conv_shared", False), ("conv_shared", True)]),
+        ) as create:
+            first, second = await asyncio.gather(
+                channel.handle_incoming_call(
+                    TwiMLRequest(From="+15559876543", To="+15551234567", CallSid="CA123")
+                ),
+                channel.handle_incoming_call(
+                    TwiMLRequest(From="+15559876543", To="+15551234567", CallSid="CA456")
+                ),
+            )
+
+        assert create.call_count == 2
+        assert 'conversationId="conv_shared"' in first
+        assert 'conversationId="conv_shared"' in second
+
+    @pytest.mark.asyncio
+    async def test_handle_incoming_call_reuses_leaked_empty_conversation(self) -> None:
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+        client = tac.conversation_orchestrator_client
+        assert client is not None
+
+        with patch.object(
+            client,
+            "create_or_reuse_conversation",
+            AsyncMock(return_value=("conv_leaked", True)),
+        ):
+            twiml = await channel.handle_incoming_call(
+                TwiMLRequest(From="+15559876543", To="+15551234567", CallSid="CA123")
+            )
+
+        assert 'conversationId="conv_leaked"' in twiml
 
     @pytest.mark.asyncio
     async def test_subsequent_prompts_reuse_conversation(self) -> None:
