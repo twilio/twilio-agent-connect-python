@@ -149,6 +149,20 @@ class TestPartnerConnectorUserAgent:
         assert PartnerConnector.AZURE_AGENT_FRAMEWORK.connector_name == "AgentFrameworkConnector"
         assert PartnerConnector.AZURE_VOICE_LIVE.package_name == "tac-azure"
         assert PartnerConnector.AZURE_VOICE_LIVE.connector_name == "VoiceLiveConnector"
+        assert PartnerConnector.GOOGLE_ADK_AGENT_ENGINE.package_name == "tac-google"
+        assert PartnerConnector.GOOGLE_ADK_AGENT_ENGINE.connector_name == "ADKAgentEngineConnector"
+        assert PartnerConnector.GOOGLE_STUDIO_AGENT_ENGINE.package_name == "tac-google"
+        assert (
+            PartnerConnector.GOOGLE_STUDIO_AGENT_ENGINE.connector_name
+            == "StudioAgentEngineConnector"
+        )
+        assert PartnerConnector.GOOGLE_CX_AGENT_STUDIO.package_name == "tac-google"
+        assert PartnerConnector.GOOGLE_CX_AGENT_STUDIO.connector_name == "CXAgentStudioConnector"
+        assert PartnerConnector.GOOGLE_CONVERSATIONAL_AGENTS.package_name == "tac-google"
+        assert (
+            PartnerConnector.GOOGLE_CONVERSATIONAL_AGENTS.connector_name
+            == "ConversationalAgentsConnector"
+        )
 
     def test_full_user_agent_format_with_partner(self) -> None:
         client = ConversationClient(
