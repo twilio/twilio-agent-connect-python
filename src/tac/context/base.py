@@ -10,11 +10,11 @@ from tac.core.logging import get_logger
 class PartnerConnector(Enum):
     """Closed set of partner connectors allowed to identify themselves in the User-Agent.
 
-    Partner packages built on top of TAC (e.g. ``tac_aws``, ``tac_azure``) select
-    a value from this enum and pass it to :func:`register_partner_connector`. The
-    enum is intentionally closed so that customers cannot set arbitrary
-    User-Agent values. Adding a new partner connector requires a release of
-    core TAC.
+    Partner packages built on top of TAC (e.g. ``tac_aws``, ``tac_azure``,
+    ``tac_google``) select a value from this enum and pass it to
+    :func:`register_partner_connector`. The enum is intentionally closed so
+    that customers cannot set arbitrary User-Agent values. Adding a new
+    partner connector requires a release of core TAC.
 
     Each value is a ``(package_name, connector_name)`` tuple. The package name
     becomes a User-Agent product token and the connector name becomes a
@@ -26,6 +26,10 @@ class PartnerConnector(Enum):
     AWS_AGENTCORE = ("tac-aws", "BedrockAgentCoreConnector")
     AZURE_AGENT_FRAMEWORK = ("tac-azure", "AgentFrameworkConnector")
     AZURE_VOICE_LIVE = ("tac-azure", "VoiceLiveConnector")
+    GOOGLE_ADK_AGENT_ENGINE = ("tac-google", "ADKAgentEngineConnector")
+    GOOGLE_STUDIO_AGENT_ENGINE = ("tac-google", "StudioAgentEngineConnector")
+    GOOGLE_CX_AGENT_STUDIO = ("tac-google", "CXAgentStudioConnector")
+    GOOGLE_CONVERSATIONAL_AGENTS = ("tac-google", "ConversationalAgentsConnector")
 
     @property
     def package_name(self) -> str:

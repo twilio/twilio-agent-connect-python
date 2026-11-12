@@ -31,9 +31,10 @@
 Seamlessly integrate with Twilio Conversation Memory and Conversation Orchestrator to build LLM-powered agents with persistent memory and conversation context.
 
 > [!TIP]
-> **Building AI agents on AWS or Microsoft?** Connect them to Twilio's voice, messaging, and conversation context with these dedicated packages:
+> **Building AI agents on AWS, Microsoft, or Google?** Connect them to Twilio's voice, messaging, and conversation context with these dedicated packages:
 > - **[TAC for AWS](https://github.com/twilio/twilio-agent-connect-aws)** — Strands, Bedrock Agents, Bedrock AgentCore
 > - **[TAC for Microsoft](https://github.com/twilio/twilio-agent-connect-microsoft)** — Microsoft Agent Framework, Azure AI Foundry (incl. Voice Live), Azure OpenAI
+> - **[TAC for Google](https://github.com/twilio/twilio-agent-connect-google)** — ADK and Agent Studio on Agent Engine, CX Agent Studio, Conversational Agents (Dialogflow CX)
 
 ---
 
@@ -196,9 +197,10 @@ TAC_ANALYTICS_DISABLED=true
 - **[ConversationRelay-Only Mode](https://github.com/twilio/twilio-agent-connect-python/blob/main/getting_started/examples/features/relay_only.py)** - Get started with voice using just ConversationRelay
 - More examples coming soon
 
-**AWS and Microsoft connectors:**
+**AWS, Microsoft, and Google connectors:**
 - **[TAC for AWS](https://github.com/twilio/twilio-agent-connect-aws)** — `StrandsConnector`, `BedrockConnector`, `BedrockAgentCoreConnector` for AWS Strands, Bedrock Agents, and Bedrock AgentCore
 - **[TAC for Microsoft](https://github.com/twilio/twilio-agent-connect-microsoft)** — `AgentFrameworkConnector` and `VoiceLiveConnector` for Microsoft Agent Framework, Azure AI Foundry (including Voice Live), and Azure OpenAI
+- **[TAC for Google](https://github.com/twilio/twilio-agent-connect-google)** — `ADKAgentEngineConnector`, `StudioAgentEngineConnector`, `CXAgentStudioConnector`, `ConversationalAgentsConnector` for Google ADK, Agent Studio, CX Agent Studio, and Conversational Agents (Dialogflow CX)
 
 **Documentation:**
 - **[API Reference](https://twilio.github.io/twilio-agent-connect-python/)** - Full API documentation generated from the source
