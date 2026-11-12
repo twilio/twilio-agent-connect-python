@@ -454,6 +454,59 @@ class TestChatOutbound:
 
 class TestVoiceOutbound:
     @pytest.mark.asyncio
+    async def test_pre_creates_conversation_and_routes_call_by_id(self) -> None:
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+        client = tac.conversation_orchestrator_client
+        assert client is not None
+        mock_client = MagicMock()
+        mock_client.calls.create.return_value = MagicMock(sid="CApre")
+
+        with (
+            patch.object(channel, "_get_twilio_client", return_value=mock_client),
+            patch.object(
+                client, "create_or_reuse_conversation", AsyncMock(return_value=("conv_out", False))
+            ) as create,
+        ):
+            await channel.initiate_outbound_conversation(
+                InitiateVoiceConversationOptions(
+                    to="+15559876543", websocket_url="wss://example.com/ws"
+                )
+            )
+
+        participants = create.call_args.args[0]
+        assert participants[0].addresses[0].address == "+15559876543"
+        assert participants[1].addresses[0].address == "+15551234567"
+        twiml = mock_client.calls.create.call_args.kwargs["twiml"]
+        assert 'conversationId="conv_out"' in twiml
+        assert "conversationConfiguration=" not in twiml
+
+    @pytest.mark.asyncio
+    async def test_places_call_with_configuration_when_pre_create_fails(self) -> None:
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+        client = tac.conversation_orchestrator_client
+        assert client is not None
+        mock_client = MagicMock()
+        mock_client.calls.create.return_value = MagicMock(sid="CAfallback")
+
+        with (
+            patch.object(channel, "_get_twilio_client", return_value=mock_client),
+            patch.object(
+                client, "create_or_reuse_conversation", AsyncMock(side_effect=RuntimeError("boom"))
+            ),
+        ):
+            await channel.initiate_outbound_conversation(
+                InitiateVoiceConversationOptions(
+                    to="+15559876543", websocket_url="wss://example.com/ws"
+                )
+            )
+
+        twiml = mock_client.calls.create.call_args.kwargs["twiml"]
+        assert "conversationConfiguration=" in twiml
+        assert "conversationId=" not in twiml
+
+    @pytest.mark.asyncio
     async def test_places_call_with_twiml(self) -> None:
         tac = TAC(get_test_config())
         channel = VoiceChannel(tac)
