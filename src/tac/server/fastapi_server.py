@@ -4,7 +4,7 @@ This module provides FastAPIWebSocketAdapter (bridges FastAPI WebSocket to
 WebSocketProtocol) and TACFastAPIServer (creates a FastAPI app with routes for
 voice, messaging, and CI webhooks).
 
-Requires: pip install tac[server]
+Requires: pip install "twilio-agent-connect[server]"
 """
 
 from __future__ import annotations
@@ -36,7 +36,8 @@ try:
     )
 except ImportError as e:
     raise ImportError(
-        "TACFastAPIServer requires FastAPI and uvicorn. Install with: pip install tac[server]"
+        "TACFastAPIServer requires FastAPI and uvicorn. "
+        "Install with: pip install 'twilio-agent-connect[server]'"
     ) from e
 
 logger = get_logger(__name__)
