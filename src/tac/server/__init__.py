@@ -1,6 +1,6 @@
 """Server module providing batteries-included FastAPI server for TAC channels.
 
-Requires the 'server' optional dependency: pip install tac[server]
+Requires the 'server' optional dependency: pip install "twilio-agent-connect[server]"
 """
 
 from tac.server.config import TACServerConfig

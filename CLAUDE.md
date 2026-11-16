@@ -145,7 +145,7 @@ CI (`.github/workflows/ci.yml`) runs lockfile hygiene, ruff, mypy, tests on Pyth
 
 ## Common Pitfalls
 
-1. **Install name is `twilio-agent-connect`** - the import name is `tac`, but `pip install tac[server]` installs a different package.
+1. **Install name is `twilio-agent-connect`** - the import name is `tac`, but there is no `tac` package on PyPI, so `pip install tac[server]` fails.
 2. **Messaging sessions last one turn** - don't keep cross-turn state in `session.metadata`; key it by `conversation_id` yourself.
 3. **Messaging needs Conversation Orchestrator** - in ConversationRelay-only mode, messaging channels raise and memory is empty.
 4. **`"once"` memory is voice-only** - on messaging channels it warns and runs as `"always"`.

@@ -4,7 +4,7 @@ This module provides utilities for validating Twilio webhook signatures
 in FastAPI applications. It handles proxy headers (X-Forwarded-Proto,
 X-Forwarded-Host) for environments like ngrok.
 
-Requires: pip install tac[server]
+Requires: pip install "twilio-agent-connect[server]"
 """
 
 import logging
