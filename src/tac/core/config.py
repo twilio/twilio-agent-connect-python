@@ -269,7 +269,8 @@ class TACConfig(BaseModel):
         "(send/receive) — the sender used for outbound when a call does not "
         "specify `from_`. Optional; back-filled from `phone_numbers` when "
         "omitted, and always a member of `phone_numbers` when set. Required "
-        "(this or `phone_numbers`) by the Voice and SMS channels.",
+        "(this or `phone_numbers`) by the Voice and SMS channels, and for "
+        "Studio handoff from Chat.",
     )
 
     phone_numbers: list[str] = Field(
@@ -415,15 +416,12 @@ class TACConfig(BaseModel):
     def _normalize_sender_pair(
         default: str | None,
         plural: list[str],
-        *,
-        required: bool,
-        field: str,
     ) -> tuple[str | None, list[str]]:
         """Reconcile a (default, allowlist) sender pair.
 
         Strips entries, back-fills whichever side is missing, guarantees the
         default is a member of the allowlist, and de-duplicates while keeping
-        the default first. When `required` and both sides are empty, raises.
+        the default first.
         """
         default = default.strip() if isinstance(default, str) else None
         if not default:
@@ -436,8 +434,6 @@ class TACConfig(BaseModel):
                 cleaned.append(trimmed)
 
         if default is None and not cleaned:
-            if required:
-                raise ValueError(f"At least one of `{field}` / `{field}s` must be set.")
             return None, []
 
         if default is None:
@@ -452,13 +448,13 @@ class TACConfig(BaseModel):
     @model_validator(mode="after")
     def _normalize_sender_sets(self) -> "TACConfig":
         self.phone_number, self.phone_numbers = self._normalize_sender_pair(
-            self.phone_number, self.phone_numbers, required=False, field="phone_number"
+            self.phone_number, self.phone_numbers
         )
         self.rcs_sender_id, self.rcs_sender_ids = self._normalize_sender_pair(
-            self.rcs_sender_id, self.rcs_sender_ids, required=False, field="rcs_sender_id"
+            self.rcs_sender_id, self.rcs_sender_ids
         )
         self.whatsapp_number, self.whatsapp_numbers = self._normalize_sender_pair(
-            self.whatsapp_number, self.whatsapp_numbers, required=False, field="whatsapp_number"
+            self.whatsapp_number, self.whatsapp_numbers
         )
         return self
 
@@ -500,9 +496,6 @@ class TACConfig(BaseModel):
         - `TWILIO_AUTH_TOKEN`: Twilio Auth Token for API authentication
         - `TWILIO_API_KEY`: Twilio API Key SID (starts with SK)
         - `TWILIO_API_SECRET`: Twilio API Secret for API Key authentication
-        - `TWILIO_PHONE_NUMBER` and/or `TWILIO_PHONE_NUMBERS`: at least one is
-          required. Phone number(s) for voice and SMS channels — see
-          **Multi-Value Senders** below.
 
         **Required for Conversation Orchestrator / Memory / Knowledge:**
 
@@ -511,6 +504,9 @@ class TACConfig(BaseModel):
 
         **Optional:**
 
+        - `TWILIO_PHONE_NUMBER` and/or `TWILIO_PHONE_NUMBERS`: phone number(s)
+          for the voice and SMS channels, which require at least one, and for
+          Studio handoff from Chat — see **Multi-Value Senders** below.
         - `TWILIO_RCS_SENDER_ID` and/or `TWILIO_RCS_SENDER_IDS`: RCS Sender ID(s)
           for RCS channel
         - `TWILIO_WHATSAPP_NUMBER` and/or `TWILIO_WHATSAPP_NUMBERS`:
