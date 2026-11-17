@@ -10,7 +10,7 @@
       
       
       
-        <link rel="canonical" href="https://twilio.github.io/twilio-agent-connect-python/2.5.0/api/media_streams/">
+        <link rel="canonical" href="https://twilio.github.io/twilio-agent-connect-python/2.6.0/api/media_streams/">
       
       
         <link rel="prev" href="../channels/">
@@ -1816,7 +1816,16 @@ interchangeable.</p>
 
 
 <a href="#tac.channels.voice.media_streams.gpt_live.GPTLiveProvider" class="headerlink" title="Permanent link">&para;</a></h3>
-<div class="doc-signature highlight"><pre><span></span><code><span class="nf">GPTLiveProvider</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">:</span> <span class="n"><span title="typing.Any">Any</span></span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">:</span> <span class="n"><span title="typing.Any">Any</span></span><span class="p">)</span>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">GPTLiveProvider</span><span class="p">(</span>
+    <span class="n">channel</span><span class="p">:</span> <span class="n"><a class="autorefs autorefs-internal" title="VoiceChannel (tac.channels.voice.channel.VoiceChannel)" href="../channels/#tac.channels.VoiceChannel">VoiceChannel</a></span><span class="p">,</span>
+    <span class="n">tac_config</span><span class="p">:</span> <span class="n"><a class="autorefs autorefs-internal" title="TACConfig
+
+
+  
+      pydantic-model
+   (tac.core.config.TACConfig)" href="../core/#tac.core.TACConfig">TACConfig</a></span><span class="p">,</span>
+    <span class="n">config</span><span class="p">:</span> <span class="n"><span title="tac.channels.voice.media_streams.shared.config.MediaStreamsOpenAIProviderConfig">MediaStreamsOpenAIProviderConfig</span></span><span class="p">,</span>
+<span class="p">)</span>
 </code></pre></div>
 
     <div class="doc doc-contents ">
@@ -2193,6 +2202,15 @@ leaving the caller connected to silence.</p>
             <li>
               <code><span title="tac.models.outbound.InitiateVoiceConversationOptionsGPTLive.to">to</span></code>
                 (<code><span title="str">str</span></code>)
+            </li>
+            <li>
+              <code><a class="autorefs autorefs-internal" title="from_
+
+
+  
+      pydantic-field
+   (tac.models.outbound.InitiateVoiceConversationOptionsGPTLive.from_)" href="../models/#tac.models.InitiateVoiceConversationOptions.from_">from_</a></code>
+                (<code><span title="str">str</span> | None</code>)
             </li>
             <li>
               <code><a class="autorefs autorefs-internal" title="websocket_url
@@ -2745,6 +2763,15 @@ leaving the caller connected to silence.</p>
             <li>
               <code><span title="tac.models.outbound.InitiateVoiceConversationOptionsOpenAIRealtime.to">to</span></code>
                 (<code><span title="str">str</span></code>)
+            </li>
+            <li>
+              <code><a class="autorefs autorefs-internal" title="from_
+
+
+  
+      pydantic-field
+   (tac.models.outbound.InitiateVoiceConversationOptionsOpenAIRealtime.from_)" href="../models/#tac.models.InitiateVoiceConversationOptions.from_">from_</a></code>
+                (<code><span title="str">str</span> | None</code>)
             </li>
             <li>
               <code><a class="autorefs autorefs-internal" title="websocket_url

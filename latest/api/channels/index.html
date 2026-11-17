@@ -10,7 +10,7 @@
       
       
       
-        <link rel="canonical" href="https://twilio.github.io/twilio-agent-connect-python/2.5.0/api/channels/">
+        <link rel="canonical" href="https://twilio.github.io/twilio-agent-connect-python/2.6.0/api/channels/">
       
       
         <link rel="prev" href="../core/">
@@ -841,6 +841,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#tac.channels.VoiceChannel.on_call_ended" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        on_call_ended
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#tac.channels.VoiceChannel.handle_incoming_call" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -911,6 +922,17 @@
     <span class="md-ellipsis">
       
         get_conversation_session_by_call_sid
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.channels.VoiceChannel.resolve_conversation_session_by_call_sid" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        resolve_conversation_session_by_call_sid
       
     </span>
   </a>
@@ -1679,6 +1701,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#tac.channels.VoiceChannel.on_call_ended" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        on_call_ended
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#tac.channels.VoiceChannel.handle_incoming_call" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1749,6 +1782,17 @@
     <span class="md-ellipsis">
       
         get_conversation_session_by_call_sid
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tac.channels.VoiceChannel.resolve_conversation_session_by_call_sid" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        resolve_conversation_session_by_call_sid
       
     </span>
   </a>
@@ -1979,8 +2023,11 @@
         <p>Abstract base class for TAC channels.</p>
 <p>Channels handle protocol-specific webhook processing and response delivery
 for different communication channels (SMS, Voice, etc.).</p>
-<p>This class provides common conversation lifecycle management that is shared
-across all channel types.</p>
+<p>Provides only what every channel family shares: webhook deduplication,
+participant-matching helpers, and memory retrieval.</p>
+<p>Session storage deliberately isn't here. <code>VoiceChannel</code> owns its
+sessions (a call is pinned to one process); messaging channels derive a
+session per request and hold nothing between them.</p>
 
         <p>Initialize base channel.</p>
 
@@ -2023,8 +2070,8 @@ across all channel types.</p>
               <div class="doc-md-description">
                 <p>Memory retrieval mode. Default is "never".
 - "always": Retrieve memory for every message with the query string
-- "once": Retrieve memory once at conversation start with empty query and cache it.
-         Cache is invalidated when conversation becomes INACTIVE.
+- "once" (Voice only): Retrieve once with an empty query and cache it on
+         the session. Invalidated when the conversation becomes INACTIVE.
 - "never": Skip memory retrieval</p>
               </div>
             </td>
@@ -2565,18 +2612,36 @@ If an active conversation with the same addresses already exists
 <p>Provides shared webhook processing logic for channels that use
 Conversation Orchestrator webhooks with COMMUNICATION_CREATED
 and CONVERSATION_UPDATED event types.</p>
-<p>Subclasses must implement:
-- is_default_agent_address(): Fast-path check for the channel's default agent address
-- get_agent_address(conversation_id): Return the agent's ParticipantAddress for a conversation
-- get_channel_name(): Return channel name ("SMS", "RCS", "WHATSAPP", "CHAT")</p>
-<p>send_response() is provided here as a shared implementation. Subclasses may
-override _build_channel_settings() to customize how ActionChannelSettings
-is built for the outbound send (e.g. chat requires channel_id).</p>
-<p>Subclass class attributes:
-- reconcile_customer_type: If True, reconciliation will also promote a
+<p><strong>Stateless by construction.</strong> No conversation session is kept between
+webhooks: each request derives its own <code>ConversationSession</code> from the
+payload, config, and one <code>list_participants</code> call it needs anyway. So any
+replica can serve any webhook — no sticky sessions, no shared datastore.
+A session lasts one turn, so <code>session.metadata</code> doesn't carry over to the
+next message; keep state across turns in your own store, keyed by
+<code>conversation_id</code>. <code>ConversationSession.conversation_metadata()</code> reads the
+metadata stored on Conversation Orchestrator from any instance.</p>
+<p>Subclasses must implement:</p>
+<ul>
+<li><code>is_default_agent_address()</code>: Fast-path check for the channel's default agent address</li>
+<li><code>get_agent_address(conversation_id)</code>: Return the agent's <code>ParticipantAddress</code></li>
+<li><code>get_channel_name()</code>: Return channel name (<code>"SMS"</code>, <code>"RCS"</code>, <code>"WHATSAPP"</code>, <code>"CHAT"</code>)</li>
+</ul>
+<p><code>send_response()</code> is provided here as a shared implementation. Subclasses may
+override <code>_build_channel_settings()</code> to customize how <code>ActionChannelSettings</code>
+is built for the outbound send (e.g. chat requires <code>channel_id</code>).</p>
+<p>Subclass class attributes:</p>
+<ul>
+<li><code>reconcile_customer_type</code>: If True, reconciliation will also promote a
   channel-matching UNKNOWN participant (not owning the agent address) to
   CUSTOMER. Set False for channels where the customer is identified
-  author-driven (e.g. chat).</p>
+  author-driven (e.g. chat).</li>
+<li>derive_inbound_agent_from_recipients: If True, the inbound agent address
+  is derived from the webhook's recipient (which of TAC's configured
+  numbers was messaged), validated against the channel's allowlist. True
+  for phone-like channels (SMS, RCS, WhatsApp). Set False for channels
+  where the agent is a single identity rather than a number set (e.g.
+  chat), which keeps the default-address path instead.</li>
+</ul>
 
 
 
@@ -2616,9 +2681,10 @@ is built for the outbound send (e.g. chat requires channel_id).</p>
 
     <div class="doc doc-contents ">
 
-        <p>Fast-path check: is the author address this channel's default agent address?</p>
-<p>For example, config.phone_number for SMS, config.rcs_sender_id for RCS,
-config.whatsapp_number for WhatsApp, agent_address for Chat.</p>
+        <p>Fast-path check: is the author address one of this channel's configured agent addresses?</p>
+<p>Checks the channel's full sender allowlist, not just the default sender:
+<code>config.phone_numbers</code> for SMS, <code>config.rcs_sender_ids</code> for RCS,
+<code>config.whatsapp_numbers</code> for WhatsApp, and <code>agent_address</code> for Chat.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -2667,7 +2733,7 @@ config.whatsapp_number for WhatsApp, agent_address for Chat.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>True if the address matches the channel's default agent address</p>
+                <p>True if the address matches one of the channel's configured agent addresses</p>
               </div>
             </td>
           </tr>
@@ -2704,9 +2770,8 @@ config.whatsapp_number for WhatsApp, agent_address for Chat.</p>
     <div class="doc doc-contents ">
 
         <p>Return the agent-side ParticipantAddress for this conversation.</p>
-<p>Used by <code>_reconcile_participants</code> to identify which participant (by
-channel + address) represents the agent. May read from session state
-(e.g. chat's per-conversation channelId) to build the address.</p>
+<p>Identifies which participant represents the agent, and supplies the
+<code>from</code> address for outbound sends.</p>
 
 
     </div>
@@ -2726,7 +2791,12 @@ channel + address) represents the agent. May read from session state
 
 <a href="#tac.channels.MessagingChannel.send_response" class="headerlink" title="Permanent link">&para;</a></h4>
 <div class="doc-signature highlight"><pre><span></span><code><span class="nf">send_response</span><span class="p">(</span>
-    <span class="n">conversation_id</span><span class="p">:</span> <span class="n"><span title="str">str</span></span><span class="p">,</span>
+    <span class="n">conversation_id</span><span class="p">:</span> <span class="n"><span title="str">str</span></span> <span class="o">|</span> <span class="n"><a class="autorefs autorefs-internal" title="ConversationSession
+
+
+  
+      pydantic-model
+   (tac.models.session.ConversationSession)" href="../models/#tac.models.ConversationSession">ConversationSession</a></span><span class="p">,</span>
     <span class="n">response</span><span class="p">:</span> <span class="n"><span title="str">str</span></span>
     <span class="o">|</span> <span class="n"><span title="collections.abc.AsyncGenerator">AsyncGenerator</span></span><span class="p">[</span><span class="n"><span title="str">str</span></span> <span class="o">|</span> <span class="n"><span title="dict">dict</span></span><span class="p">[</span><span class="n"><span title="str">str</span></span><span class="p">,</span> <span class="n"><span title="typing.Any">Any</span></span><span class="p">],</span> <span class="kc">None</span><span class="p">],</span>
     <span class="n">role</span><span class="p">:</span> <span class="n"><span title="str">str</span></span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
@@ -2736,11 +2806,11 @@ channel + address) represents the agent. May read from session state
     <div class="doc doc-contents ">
 
         <p>Send a text response using the Conversation Orchestrator Send API.</p>
-<p>Reads the agent and customer participant ids stashed on the session
-by inbound reconciliation or outbound initiation. Missing ids are a
-misuse — send_response is only expected to be called after an inbound
-webhook (COMMUNICATION_CREATED → reconcile) or after
-<code>initiate_outbound_conversation</code>, both of which populate the session.</p>
+<p><strong>Pass the session, not the id.</strong> Hand back the one <code>on_message_ready</code>
+gave you (or that <code>initiate_outbound_conversation</code> returned) and the
+send costs no extra API call — it already carries both participants.
+A bare id still works, but the channel keeps no session to look up, so
+it spends a <code>list_participants</code> call rebuilding one.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -2759,11 +2829,18 @@ webhook (COMMUNICATION_CREATED → reconcile) or after
                 <code>conversation_id</code>
             </td>
             <td>
-                  <code><span title="str">str</span></code>
+                  <code><span title="str">str</span> | <a class="autorefs autorefs-internal" title="ConversationSession
+
+
+  
+      pydantic-model
+   (tac.models.session.ConversationSession)" href="../models/#tac.models.ConversationSession">ConversationSession</a></code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Conversation ID to send response to</p>
+                <p>The <code>ConversationSession</code> to reply within
+(preferred), or the conversation id. Named for the id it took
+before sessions were accepted, so existing keyword calls work.</p>
               </div>
             </td>
             <td>
@@ -2834,7 +2911,7 @@ passed, since messaging channels don't support streaming)</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>If the session or participant ids are missing</p>
+                <p>If no recipient can be resolved for the conversation.</p>
               </div>
             </td>
           </tr>
@@ -2867,12 +2944,18 @@ passed, since messaging channels don't support streaming)</p>
     <div class="doc doc-contents ">
 
         <p>Process messaging channel webhook event and manage conversation lifecycle.</p>
-<p>Handles:
-- COMMUNICATION_CREATED: Process incoming messages from customers
-- CONVERSATION_UPDATED: Clean up when conversation is closed</p>
-<p>Note: Conversation tracking uses instance-local memory. In multi-instance
-deployments, webhooks may route to a different instance, preventing cleanup.
-See CLAUDE.md for horizontal scaling considerations.</p>
+<p>Handles:</p>
+<ul>
+<li>COMMUNICATION_CREATED: Process incoming messages from customers</li>
+<li>CONVERSATION_UPDATED: Fire <code>on_conversation_ended</code> and report
+  "Conversation Ended" when the conversation closes</li>
+<li>PARTICIPANT_ADDED: Report "Conversation Started" when the customer joins on this channel</li>
+</ul>
+<p>Any replica can handle any webhook. The idempotency cache is
+per-process, though, so a Twilio retry landing on a different replica
+is processed again, and <code>on_message_ready</code> can run twice for the same
+message. Retries are rare when the webhook is acknowledged before
+processing, as <code>TACFastAPIServer</code> does.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -2996,13 +3079,15 @@ Uses Twilio's i-twilio-idempotency-token header for deduplication.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Memory retrieval mode. Default is "never".
-- "always": Retrieve memory for every message with the query string
-- "once": Retrieve memory once at conversation start with empty query and cache it.
-         Cache is invalidated when conversation becomes INACTIVE and is fetched
-         again the next time a message triggers memory retrieval after the
-         conversation becomes ACTIVE.
-- "never": Skip memory retrieval</p>
+                <p>Memory retrieval mode. Default is <code>"never"</code>.</p>
+<ul>
+<li><code>"always"</code>: Retrieve memory for every message with the query string</li>
+<li><code>"never"</code>: Skip memory retrieval</li>
+<li><code>"once"</code>: <strong>Deprecated</strong> on messaging channels and removed in 3.0.
+  It caches a recall on a session that outlives one request, which
+  messaging channels don't keep, so it logs a warning and runs as
+  <code>"always"</code>. It's still supported on the Voice channel.</li>
+</ul>
               </div>
             </td>
           </tr>
@@ -3168,7 +3253,7 @@ and provides RCS-specific message sending and filtering.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Check if the author address matches the configured RCS sender ID.</p>
+        <p>Check if the author address is one of the configured RCS senders.</p>
 
 
     </div>
@@ -3195,7 +3280,7 @@ and provides RCS-specific message sending and filtering.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Get the agent's participant address for this conversation.</p>
+        <p>Get the agent's default participant address for this conversation.</p>
 
 
     </div>
@@ -3234,9 +3319,11 @@ and provides RCS-specific message sending and filtering.</p>
         <p>Initiate an outbound RCS conversation.</p>
 <p>Creates a conversation via Conversation Orchestrator with inline
 participants, then sends the initial message via the Actions API.
-Uses the RCS sender ID from TACConfig as the from address.
-If an active conversation with the same addresses already exists
-(group-by dedup), CO returns 409 and the existing conversation is reused.</p>
+Uses <code>options.from_</code> when provided (must be one of the configured RCS
+senders), otherwise falls back to the default <code>rcs_sender_id</code> from
+TACConfig. If an active conversation with the same addresses already
+exists (group-by dedup), CO returns 409 and the existing conversation
+is reused.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -3314,11 +3401,12 @@ If an active conversation with the same addresses already exists
       <tbody>
           <tr class="doc-section-item">
             <td>
-                  <code><span title="RuntimeError">RuntimeError</span></code>
+                  <code><span title="ValueError">ValueError</span></code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>If rcs_sender_id is not configured</p>
+                <p>If <code>options.from_</code> is set but is not one of the configured
+RCS senders.</p>
               </div>
             </td>
           </tr>
@@ -3898,6 +3986,45 @@ that's <code>CallOptions.record</code>, which is required for this to fire.</p>
 <div class="doc doc-object doc-function">
 
 
+<h4 id="tac.channels.VoiceChannel.on_call_ended" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">on_call_ended</span>
+
+
+<a href="#tac.channels.VoiceChannel.on_call_ended" class="headerlink" title="Permanent link">&para;</a></h4>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">on_call_ended</span><span class="p">(</span><span class="n">callback</span><span class="p">:</span> <span class="n"><span title="tac.channels.voice.channel.CallEndedHandler">CallEndedHandler</span></span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Register a handler for WebSocket teardown.</p>
+<p>Fires once per call, always, on the instance that held the call. It
+receives the live session just before it is discarded, so it is the
+only place late-call in-memory state — the transcript, <code>call_sid</code>,
+anything you put on <code>metadata</code> — is still reachable.</p>
+<p>Not the same as <code>on_conversation_ended</code> (fires when the <em>conversation</em>
+closes, on any instance; on an orchestrated call, from a session
+rebuilt from Conversation Orchestrator, identity only) or
+<code>on_call_status</code> (a Twilio Calls-API webhook, no session). Handler
+exceptions are logged and swallowed.</p>
+
+
+<details class="example" open>
+  <summary>Example</summary>
+  <div class="highlight"><pre><span></span><code><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">on_call_ended</span><span class="p">(</span><span class="n">session</span><span class="p">:</span> <span class="n">ConversationSession</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="k">await</span> <span class="n">archive</span><span class="p">(</span><span class="n">session</span><span class="o">.</span><span class="n">call_sid</span><span class="p">,</span> <span class="n">session</span><span class="o">.</span><span class="n">metadata</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;transcript&quot;</span><span class="p">,</span> <span class="p">[]))</span>
+
+
+<span class="n">voice_channel</span><span class="o">.</span><span class="n">on_call_ended</span><span class="p">(</span><span class="n">on_call_ended</span><span class="p">)</span>
+</code></pre></div>
+</details>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
 <h4 id="tac.channels.VoiceChannel.handle_incoming_call" class="doc doc-heading">
             <span class="doc doc-object-name doc-function-name">handle_incoming_call</span>
 
@@ -4202,6 +4329,10 @@ No-ops the session cleanup if none is tracked.</p>
 <p>Does not raise — hanging up an already-ended call is routine (the callee
 hangs up while AMD is still resolving), and handlers shouldn't have to
 guard against it.</p>
+<p>The session is released as on any hangup: <code>on_call_ended</code> fires now.
+On an orchestrated call <code>on_conversation_ended</code> fires later, when
+Conversation Orchestrator's CLOSED webhook arrives; otherwise it fires
+now too.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -4304,10 +4435,11 @@ lookup started at WebSocket setup finishes — so it may already exist
 before the caller has said anything, including before <code>on_amd</code>
 fires. Either way, treat this as racy and use :meth:<code>end_call</code> to hang
 up, which works whether or not a session exists yet.</p>
-<p>At the other end, orchestrator mode keeps the session until Conversation
-Orchestrator's CLOSED webhook, so it outlives the call and
-<code>on_call_status</code> / <code>on_recording</code> do resolve. Relay-only mode tears
-down on the provider's out-of-band callback instead, which races them.</p>
+<p>At the other end the session is released as soon as the call's
+WebSocket closes, in every mode — so out-of-band events that arrive
+after the hangup (<code>on_call_status</code>, <code>on_recording</code>) generally find
+nothing here. Read late-call state from the session <code>on_call_ended</code>
+hands you instead.</p>
 <p>Named for <code>ConversationSession</code>; <code>session_manager</code> deals in
 <code>SessionState</code>, a different type.</p>
 
@@ -4403,7 +4535,7 @@ down on the provider's out-of-band callback instead, which races them.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>the call ended, or it landed on another instance (see the</p>
+                <p>the call ended, or it landed on another instance. For the last</p>
               </div>
             </td>
           </tr>
@@ -4418,7 +4550,181 @@ down on the provider's out-of-band callback instead, which races them.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>horizontal-scaling note in CLAUDE.md).</p>
+                <p>case, :meth:<code>resolve_conversation_session_by_call_sid</code> falls back</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><a class="autorefs autorefs-internal" title="ConversationSession
+
+
+  
+      pydantic-model
+   (tac.models.session.ConversationSession)" href="../models/#tac.models.ConversationSession">ConversationSession</a> | None</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>to Conversation Orchestrator.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="tac.channels.VoiceChannel.resolve_conversation_session_by_call_sid" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">resolve_conversation_session_by_call_sid</span>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-async"><code>async</code></small>
+  </span>
+
+<a href="#tac.channels.VoiceChannel.resolve_conversation_session_by_call_sid" class="headerlink" title="Permanent link">&para;</a></h4>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">resolve_conversation_session_by_call_sid</span><span class="p">(</span>
+    <span class="n">call_sid</span><span class="p">:</span> <span class="n"><span title="str">str</span></span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n"><a class="autorefs autorefs-internal" title="ConversationSession
+
+
+  
+      pydantic-model
+   (tac.models.session.ConversationSession)" href="../models/#tac.models.ConversationSession">ConversationSession</a></span> <span class="o">|</span> <span class="kc">None</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Look up a call's session on any instance, falling back to
+Conversation Orchestrator when this instance doesn't hold the call.</p>
+<p>Out-of-band call events (<code>on_call_status</code>, <code>on_amd</code>,
+<code>on_recording</code>) carry only a CallSid and, without
+<code>TACConfig.instance_public_domain</code>, can reach any replica. This
+returns the live session when the call is held here — same as
+:meth:<code>get_conversation_session_by_call_sid</code> — and otherwise, for a
+ConversationRelay call in orchestrator mode, a session rebuilt from
+Conversation Orchestrator.</p>
+<p>A rebuilt session carries identity only (conversation id,
+<code>call_sid</code>, profile, both participants), is not tracked, and can't
+be used with :meth:<code>send_response</code>: the call's WebSocket is on
+another instance. If CO holds several conversations for the call
+(it starts a new one when a conversation closes mid-call), the
+active one wins, else the newest — this rule applies only to the
+rebuild path. On the instance holding the call, the live session is
+returned as-is, so after a mid-call close it still carries the
+closed conversation's id while other instances return the new one;
+correlate by <code>call_sid</code> if you need a stable key.</p>
+<p>To tell live from rebuilt, check
+<code>voice_channel.get_websocket(session.conversation_id) is not None</code>
+— true only for a session live on this instance. A rebuilt
+session's <code>started_at</code> is the rebuild time, not the call's, and
+its <code>metadata</code> is always empty.</p>
+<p>Cost: on a local miss this makes up to two Conversation Orchestrator
+requests (list conversations, then participants). Prefer
+:meth:<code>get_conversation_session_by_call_sid</code> on hot paths, or when
+<code>TACConfig.instance_public_domain</code> already routes call events to
+the instance holding the call.</p>
+
+
+<details class="example" open>
+  <summary>Example</summary>
+  <div class="highlight"><pre><span></span><code><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">on_status</span><span class="p">(</span><span class="n">event</span><span class="p">:</span> <span class="n">CallStatusEvent</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">session</span> <span class="o">=</span> <span class="k">await</span> <span class="n">voice_channel</span><span class="o">.</span><span class="n">resolve_conversation_session_by_call_sid</span><span class="p">(</span>
+        <span class="n">event</span><span class="o">.</span><span class="n">call_sid</span>
+    <span class="p">)</span>
+    <span class="k">if</span> <span class="n">session</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">audit_log</span><span class="p">(</span><span class="n">session</span><span class="o">.</span><span class="n">conversation_id</span><span class="p">,</span> <span class="n">session</span><span class="o">.</span><span class="n">profile_id</span><span class="p">,</span> <span class="n">event</span><span class="o">.</span><span class="n">call_status</span><span class="p">)</span>
+</code></pre></div>
+</details>
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>call_sid</code>
+            </td>
+            <td>
+                  <code><span title="str">str</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Twilio Call SID, e.g. from a call event.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><a class="autorefs autorefs-internal" title="ConversationSession
+
+
+  
+      pydantic-model
+   (tac.models.session.ConversationSession)" href="../models/#tac.models.ConversationSession">ConversationSession</a> | None</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The live or rebuilt session, or <code>None</code> — relay-only or Media</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><a class="autorefs autorefs-internal" title="ConversationSession
+
+
+  
+      pydantic-model
+   (tac.models.session.ConversationSession)" href="../models/#tac.models.ConversationSession">ConversationSession</a> | None</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Streams mode (no CO conversation behind the call), CO knows no</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><a class="autorefs autorefs-internal" title="ConversationSession
+
+
+  
+      pydantic-model
+   (tac.models.session.ConversationSession)" href="../models/#tac.models.ConversationSession">ConversationSession</a> | None</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>conversation for it, or the lookup failed (logged).</p>
               </div>
             </td>
           </tr>
@@ -4515,9 +4821,13 @@ the active provider.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Initiate an outbound voice conversation.</p>
-<p>Only <code>ConversationRelayProvider</code> supports outbound calls today —
-raises <code>NotImplementedError</code> for any other provider.</p>
+        <p>Initiate an outbound voice conversation through the active provider.</p>
+<p><code>ConversationRelayProvider</code>, <code>OpenAIRealtimeProvider</code> and
+<code>GPTLiveProvider</code> all place outbound calls. The Media Streams
+providers also take a per-call <code>session_config</code>, via
+<code>InitiateVoiceConversationOptionsOpenAIRealtime</code> or
+<code>InitiateVoiceConversationOptionsGPTLive</code>. A provider without
+outbound support raises <code>NotImplementedError</code>.</p>
 
 
     </div>
@@ -4545,13 +4855,27 @@ raises <code>NotImplementedError</code> for any other provider.</p>
     <div class="doc doc-contents ">
 
         <p>Process conversation webhooks for cleanup and cache invalidation.</p>
-<p>Voice channel processes CONVERSATION_UPDATED events:
-- CLOSED status: Clean up local session state
-- INACTIVE status: Invalidate cached memory (memory will be updated by
-  Conversation Orchestrator)</p>
-<p>Note: Conversation tracking uses instance-local memory. In multi-instance
-deployments, webhooks may route to a different instance, preventing cleanup.
-See CLAUDE.md for horizontal scaling considerations.</p>
+<p>Voice channel processes these events:</p>
+<ul>
+<li><strong>PARTICIPANT_ADDED</strong>: report "Conversation Started" when the customer
+  joins on voice (orchestrated ConversationRelay only).</li>
+<li><strong>CLOSED</strong> (CONVERSATION_UPDATED): fire <code>on_conversation_ended</code>.
+  The call's session is normally already released (the WebSocket
+  closed when the caller hung up), so this rebuilds it from
+  Conversation Orchestrator — which is also what makes the hook fire
+  on whichever instance received the webhook rather than only on the
+  one that held the call. If this instance still holds the call's
+  session (the call is live), the hook fires now instead, with a
+  snapshot of that live session, and the session stays until the
+  call's own teardown — which still fires <code>on_call_ended</code>. A single
+  call can then produce a second <code>on_conversation_ended</code>, under a
+  different conversation id, when Conversation Orchestrator later
+  closes the conversation it started for the call's remaining
+  traffic. It also reports "Conversation Ended", with CO's duration.</li>
+<li><strong>INACTIVE</strong>: invalidate cached memory, if this instance holds the
+  session. A call is pinned to one instance for its lifetime, so an
+  INACTIVE landing elsewhere has no cache to clear and is ignored.</li>
+</ul>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -4850,7 +5174,7 @@ and provides WhatsApp-specific message sending and filtering.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Check if the author address matches the configured WhatsApp number.</p>
+        <p>Check if the author address is one of the configured WhatsApp numbers.</p>
 
 
     </div>
@@ -4877,7 +5201,7 @@ and provides WhatsApp-specific message sending and filtering.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Get the agent's participant address for this conversation.</p>
+        <p>Get the agent's default participant address for this conversation.</p>
 
 
     </div>
@@ -4916,9 +5240,11 @@ and provides WhatsApp-specific message sending and filtering.</p>
         <p>Initiate an outbound WhatsApp conversation.</p>
 <p>Creates a conversation via Conversation Orchestrator with inline
 participants, then sends the initial message via the Actions API.
-Uses the WhatsApp number from TACConfig as the from address.
-If an active conversation with the same addresses already exists
-(group-by dedup), CO returns 409 and the existing conversation is reused.</p>
+Uses <code>options.from_</code> when provided (must be one of the configured
+WhatsApp numbers), otherwise falls back to the default <code>whatsapp_number</code>
+from TACConfig. If an active conversation with the same addresses
+already exists (group-by dedup), CO returns 409 and the existing
+conversation is reused.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -4996,11 +5322,12 @@ If an active conversation with the same addresses already exists
       <tbody>
           <tr class="doc-section-item">
             <td>
-                  <code><span title="RuntimeError">RuntimeError</span></code>
+                  <code><span title="ValueError">ValueError</span></code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>If whatsapp_number is not configured</p>
+                <p>If <code>options.from_</code> is set but is not one of the configured
+WhatsApp numbers.</p>
               </div>
             </td>
           </tr>

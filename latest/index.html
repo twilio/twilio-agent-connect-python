@@ -10,7 +10,7 @@
       
       
       
-        <link rel="canonical" href="https://twilio.github.io/twilio-agent-connect-python/2.5.0/">
+        <link rel="canonical" href="https://twilio.github.io/twilio-agent-connect-python/2.6.0/">
       
       
       
@@ -963,19 +963,22 @@
 <p>Seamlessly integrate with Twilio Conversation Memory and Conversation Orchestrator to build LLM-powered agents with persistent memory and conversation context.</p>
 <blockquote>
 <p>[!TIP]
-<strong>Building AI agents on AWS or Microsoft?</strong> Connect them to Twilio's voice, messaging, and conversation context with these dedicated packages:
+<strong>Building AI agents on AWS, Microsoft, or Google?</strong> Connect them to Twilio's voice, messaging, and conversation context with these dedicated packages:
 - <strong><a href="https://github.com/twilio/twilio-agent-connect-aws">TAC for AWS</a></strong> — Strands, Bedrock Agents, Bedrock AgentCore
-- <strong><a href="https://github.com/twilio/twilio-agent-connect-microsoft">TAC for Microsoft</a></strong> — Microsoft Agent Framework, Azure AI Foundry (incl. Voice Live), Azure OpenAI</p>
+- <strong><a href="https://github.com/twilio/twilio-agent-connect-microsoft">TAC for Microsoft</a></strong> — Microsoft Agent Framework, Azure AI Foundry (incl. Voice Live), Azure OpenAI
+- <strong><a href="https://github.com/twilio/twilio-agent-connect-google">TAC for Google</a></strong> — ADK and Agent Studio on Agent Engine, CX Agent Studio, Conversational Agents (Dialogflow CX)</p>
 </blockquote>
 <hr />
 <h2 id="key-features">Key Features<a class="headerlink" href="#key-features" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>Multi-Channel Support</strong>: Built-in handling for Voice (Twilio ConversationRelay, OpenAI GPT-Live, OpenAI Realtime API), SMS, RCS, WhatsApp, and Chat</li>
+<li><strong>Multi-Sender Support</strong>: Configure multiple phone numbers, RCS Sender IDs, or WhatsApp numbers per channel by setting the comma-separated plural env var (<code>TWILIO_PHONE_NUMBERS</code>, <code>TWILIO_RCS_SENDER_IDS</code>, <code>TWILIO_WHATSAPP_NUMBERS</code>) instead of the singular one; the first entry is the default sender for outbound</li>
 <li><strong>Outbound Conversations</strong>: Agent-initiated conversations across all supported channels</li>
 <li><strong>ConversationRelay-Only Mode</strong>: Get started quickly with TAC's voice plumbing (TwiML, WebSocket, callbacks) before adding Conversation Orchestrator or Conversation Memory</li>
 <li><strong>Memory Management</strong>: Automatic integration with Twilio Conversation Memory for persistent user context</li>
 <li><strong>Conversation Lifecycle</strong>: Automatic tracking of conversation sessions and state</li>
 <li><strong>Human Handoff</strong>: Built-in tool to route conversations to human agents via Twilio Studio Flows (including Flex)</li>
+<li><strong>Horizontal Scaling</strong>: Run N replicas behind a load balancer with no shared datastore; for voice, set <code>TWILIO_INSTANCE_PUBLIC_DOMAIN</code> to each replica's own public hostname</li>
 </ul>
 <h2 id="installation">Installation<a class="headerlink" href="#installation" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span>twilio-agent-connect
@@ -1087,9 +1090,10 @@ make<span class="w"> </span>setup<span class="w">  </span><span class="c1"># Ope
 - <strong>Speech-to-Speech Voice</strong> - Twilio Media Streams bridged to <a href="https://github.com/twilio/twilio-agent-connect-python/blob/main/getting_started/examples/partners/openai_gpt_live.py">OpenAI GPT-Live</a> or the <a href="https://github.com/twilio/twilio-agent-connect-python/blob/main/getting_started/examples/partners/openai_realtime.py">OpenAI Realtime API</a>
 - <strong><a href="https://github.com/twilio/twilio-agent-connect-python/blob/main/getting_started/examples/features/relay_only.py">ConversationRelay-Only Mode</a></strong> - Get started with voice using just ConversationRelay
 - More examples coming soon</p>
-<p><strong>AWS and Microsoft connectors:</strong>
+<p><strong>AWS, Microsoft, and Google connectors:</strong>
 - <strong><a href="https://github.com/twilio/twilio-agent-connect-aws">TAC for AWS</a></strong> — <code>StrandsConnector</code>, <code>BedrockConnector</code>, <code>BedrockAgentCoreConnector</code> for AWS Strands, Bedrock Agents, and Bedrock AgentCore
-- <strong><a href="https://github.com/twilio/twilio-agent-connect-microsoft">TAC for Microsoft</a></strong> — <code>AgentFrameworkConnector</code> and <code>VoiceLiveConnector</code> for Microsoft Agent Framework, Azure AI Foundry (including Voice Live), and Azure OpenAI</p>
+- <strong><a href="https://github.com/twilio/twilio-agent-connect-microsoft">TAC for Microsoft</a></strong> — <code>AgentFrameworkConnector</code> and <code>VoiceLiveConnector</code> for Microsoft Agent Framework, Azure AI Foundry (including Voice Live), and Azure OpenAI
+- <strong><a href="https://github.com/twilio/twilio-agent-connect-google">TAC for Google</a></strong> — <code>ADKAgentEngineConnector</code>, <code>StudioAgentEngineConnector</code>, <code>CXAgentStudioConnector</code>, <code>ConversationalAgentsConnector</code> for Google ADK, Agent Studio, CX Agent Studio, and Conversational Agents (Dialogflow CX)</p>
 <p><strong>Documentation:</strong>
 - <strong><a href="https://twilio.github.io/twilio-agent-connect-python/">API Reference</a></strong> - Full API documentation generated from the source
 - <strong><a href="https://github.com/twilio/twilio-agent-connect-python/blob/main/CLAUDE.md">CLAUDE.md</a></strong> - Architecture, development guide, and API reference
