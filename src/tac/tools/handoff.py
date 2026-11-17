@@ -167,10 +167,23 @@ async def _handoff_impl(
         return {"status": "handoff_initiated", "channel": channel}
 
     # Digital channels: POST handoff payload to the Studio Flow Executions
-    # endpoint. Resolve the Studio sender BEFORE touching the conversation:
-    # once it's INACTIVE with status callbacks cleared, TAC no longer receives
-    # its webhooks, so a handoff that can't be delivered must fail first.
+    # endpoint. Resolve the Studio `To` and `From` BEFORE touching the
+    # conversation: once it's INACTIVE with status callbacks cleared, TAC no
+    # longer receives its webhooks, so a handoff that can't be delivered must
+    # fail first.
     config = tac_instance.config
+
+    def fail_undeliverable(error: str) -> dict[str, str]:
+        logger.error(
+            f"Failed to deliver handoff payload: {error}",
+            conversation_id=session.conversation_id,
+        )
+        return {"status": "handoff_failed", "channel": channel, "error": error}
+
+    if not session.author_info or not session.author_info.address:
+        return fail_undeliverable(
+            f"No Studio `To` address for {channel} handoff: the session has no customer address."
+        )
     # Studio's `From` is the Twilio sender its widgets reply from, so it must
     # match the channel of `To` (the customer address). SMS/RCS/WhatsApp hand
     # off From the sender the customer actually reached
@@ -185,12 +198,9 @@ async def _handoff_impl(
     else:
         from_address = config.phone_number
     if from_address is None:
-        error = f"No Studio `From` sender for {channel} handoff: set phone_number in TACConfig."
-        logger.error(
-            f"Failed to deliver handoff payload: {error}",
-            conversation_id=session.conversation_id,
+        return fail_undeliverable(
+            f"No Studio `From` sender for {channel} handoff: set phone_number in TACConfig."
         )
-        return {"status": "handoff_failed", "channel": channel, "error": error}
 
     await _stop_tac_routing(co_client, session.conversation_id)
     # A delivery failure here means the user is stranded on a conversation

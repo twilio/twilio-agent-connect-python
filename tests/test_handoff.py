@@ -247,7 +247,11 @@ class TestHandoffExecution:
         post_mock = AsyncMock()
         monkeypatch.setattr(handoff_module, "post_studio_handoff", post_mock)
 
-        session = ConversationSession(conversation_id="conv_123", channel="SMS")
+        session = ConversationSession(
+            conversation_id="conv_123",
+            channel="SMS",
+            author_info=AuthorInfo(address="+15559998888"),
+        )
 
         tool = create_studio_handoff_tool(tac, session)
         result = await tool(reason="Customer wants human")
@@ -298,7 +302,11 @@ class TestHandoffExecution:
         post_mock = AsyncMock()
         monkeypatch.setattr(handoff_module, "post_studio_handoff", post_mock)
 
-        session = ConversationSession(conversation_id="conv_123", channel=channel)
+        session = ConversationSession(
+            conversation_id="conv_123",
+            channel=channel,
+            author_info=AuthorInfo(address="+15559998888"),
+        )
         session.ai_agent_info = AuthorInfo(address=agent_address, participant_id="p_agent")
 
         tool = create_studio_handoff_tool(tac, session)
@@ -329,7 +337,11 @@ class TestHandoffExecution:
         post_mock = AsyncMock()
         monkeypatch.setattr(handoff_module, "post_studio_handoff", post_mock)
 
-        session = ConversationSession(conversation_id="conv_123", channel="CHAT")
+        session = ConversationSession(
+            conversation_id="conv_123",
+            channel="CHAT",
+            author_info=AuthorInfo(address="+15559998888"),
+        )
         session.ai_agent_info = AuthorInfo(address="ai-assistant", participant_id="p_agent")
 
         tool = create_studio_handoff_tool(tac, session)
@@ -355,7 +367,11 @@ class TestHandoffExecution:
         post_mock = AsyncMock()
         monkeypatch.setattr(handoff_module, "post_studio_handoff", post_mock)
 
-        session = ConversationSession(conversation_id="conv_123", channel="CHAT")
+        session = ConversationSession(
+            conversation_id="conv_123",
+            channel="CHAT",
+            author_info=AuthorInfo(address="+15559998888"),
+        )
         session.ai_agent_info = AuthorInfo(address="ai-assistant", participant_id="p_agent")
 
         tool = create_studio_handoff_tool(tac, session)
@@ -367,6 +383,34 @@ class TestHandoffExecution:
         assert result["status"] == "handoff_failed"
         assert "CHAT" in result["error"]
         assert "phone_number" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_handoff_digital_without_to_address_fails(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Without a customer address there is no Studio `To`; report
+        handoff_failed before touching the conversation, since an INACTIVE
+        conversation with cleared status callbacks would strand the user."""
+        tac = TAC(get_test_config())
+        update_mock = AsyncMock()
+        clear_mock = AsyncMock()
+        tac.conversation_orchestrator_client.update_conversation = update_mock
+        tac.conversation_orchestrator_client.clear_status_callbacks = clear_mock
+
+        post_mock = AsyncMock()
+        monkeypatch.setattr(handoff_module, "post_studio_handoff", post_mock)
+
+        session = ConversationSession(conversation_id="conv_123", channel="SMS")
+
+        tool = create_studio_handoff_tool(tac, session)
+        result = await tool(reason="Customer wants human")
+
+        update_mock.assert_not_awaited()
+        clear_mock.assert_not_awaited()
+        post_mock.assert_not_called()
+        assert result["status"] == "handoff_failed"
+        assert "SMS" in result["error"]
+        assert "`To`" in result["error"]
 
     def test_factory_raises_without_flow_sid(self) -> None:
         """Factory rejects missing studio_handoff_flow_sid — it's misconfig, not a soft fallback."""
@@ -405,7 +449,11 @@ class TestHandoffExecution:
         post_mock = AsyncMock(side_effect=httpx.HTTPError("boom"))
         monkeypatch.setattr(handoff_module, "post_studio_handoff", post_mock)
 
-        session = ConversationSession(conversation_id="conv_123", channel="SMS")
+        session = ConversationSession(
+            conversation_id="conv_123",
+            channel="SMS",
+            author_info=AuthorInfo(address="+15559998888"),
+        )
 
         tool = create_studio_handoff_tool(tac, session)
         result = await tool(reason="Customer wants human")
