@@ -59,10 +59,16 @@ def create_communication_created_webhook(
     }
 
 
-def get_test_config_with_trait_groups(trait_groups: list[str] | None = None) -> TACConfig:
-    """Get test configuration with optional trait groups."""
-    memory_config = TwilioMemoryConfig(
-        trait_groups=trait_groups,
+def get_test_config_with_trait_groups(
+    trait_groups: list[str] | None = None, fetch_profile_traits: bool | None = None
+) -> TACConfig:
+    """Get test configuration with optional trait groups and trait-fetch flag."""
+    memory_config = (
+        TwilioMemoryConfig(trait_groups=trait_groups)
+        if fetch_profile_traits is None
+        else TwilioMemoryConfig(
+            trait_groups=trait_groups, fetch_profile_traits=fetch_profile_traits
+        )
     )
     return TACConfig(
         account_sid="ACtest123",
@@ -109,6 +115,15 @@ def get_mock_profile_response() -> ProfileResponse:
     )
 
 
+def get_empty_recall() -> MemoryRetrievalResponse:
+    return MemoryRetrievalResponse(
+        observations=[],
+        summaries=[],
+        communications=[],
+        meta=MemoryRetrievalMeta(queryTime=0),
+    )
+
+
 class TestProfileFetchingInRetrieveMemory:
     """Tests for profile fetching logic within retrieve_memory()."""
 
@@ -143,6 +158,7 @@ class TestProfileFetchingInRetrieveMemory:
             profile_id="profile_test_123",
             trait_groups=["Contact", "Preferences"],
         )
+        assert context.profile == mock_profile
 
     @pytest.mark.asyncio
     async def test_retrieve_memory_fetches_profile_without_trait_groups(self) -> None:
@@ -209,6 +225,108 @@ class TestProfileFetchingInRetrieveMemory:
         assert context.profile is None
         assert result is not None
         tac.conversation_memory_client.retrieve_memory.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_retrieve_memory_fetches_profile_when_fetch_profile_traits_true(self) -> None:
+        config = get_test_config_with_trait_groups(fetch_profile_traits=True)
+        tac = TAC(config)
+        tac.conversation_memory_client = create_memory_client(tac)
+        mock_profile = get_mock_profile_response()
+        tac.conversation_memory_client.get_profile = AsyncMock(return_value=mock_profile)
+        tac.conversation_memory_client.retrieve_memory = AsyncMock(return_value=get_empty_recall())
+        context = ConversationSession(
+            conversation_id="conv123", profile_id="profile_test_123", channel="SMS"
+        )
+
+        await tac.retrieve_memory(context)
+
+        tac.conversation_memory_client.get_profile.assert_awaited_once_with(
+            profile_id="profile_test_123", trait_groups=None
+        )
+        assert context.profile == mock_profile
+
+    @pytest.mark.asyncio
+    async def test_retrieve_memory_skips_profile_when_fetch_profile_traits_false(self) -> None:
+        config = get_test_config_with_trait_groups(fetch_profile_traits=False)
+        tac = TAC(config)
+        tac.conversation_memory_client = create_memory_client(tac)
+        tac.conversation_memory_client.get_profile = AsyncMock(
+            return_value=get_mock_profile_response()
+        )
+        tac.conversation_memory_client.retrieve_memory = AsyncMock(return_value=get_empty_recall())
+        context = ConversationSession(
+            conversation_id="conv123", profile_id="profile_test_123", channel="SMS"
+        )
+
+        await tac.retrieve_memory(context)
+
+        tac.conversation_memory_client.get_profile.assert_not_awaited()
+        tac.conversation_memory_client.retrieve_memory.assert_awaited_once()
+        assert context.profile is None
+
+    @pytest.mark.asyncio
+    async def test_retrieve_memory_does_not_refetch_when_profile_already_set(self) -> None:
+        config = get_test_config_with_trait_groups()
+        tac = TAC(config)
+        tac.conversation_memory_client = create_memory_client(tac)
+        existing = get_mock_profile_response()
+        tac.conversation_memory_client.get_profile = AsyncMock(return_value=existing)
+        tac.conversation_memory_client.retrieve_memory = AsyncMock(return_value=get_empty_recall())
+        context = ConversationSession(
+            conversation_id="conv123",
+            profile_id="profile_test_123",
+            channel="SMS",
+            profile=existing,
+        )
+
+        await tac.retrieve_memory(context)
+
+        tac.conversation_memory_client.get_profile.assert_not_awaited()
+        assert context.profile is existing
+
+
+class TestFetchProfile:
+    """Tests for TAC.fetch_profile(), the on-demand profile fetch."""
+
+    @pytest.mark.asyncio
+    async def test_returns_profile_with_configured_trait_groups(self) -> None:
+        tac = TAC(get_test_config_with_trait_groups(trait_groups=["Contact"]))
+        tac.conversation_memory_client = create_memory_client(tac)
+        mock_profile = get_mock_profile_response()
+        tac.conversation_memory_client.get_profile = AsyncMock(return_value=mock_profile)
+
+        result = await tac.fetch_profile("profile_test_123")
+
+        assert result == mock_profile
+        tac.conversation_memory_client.get_profile.assert_awaited_once_with(
+            profile_id="profile_test_123", trait_groups=["Contact"]
+        )
+
+    @pytest.mark.asyncio
+    async def test_empty_profile_id_returns_none_without_a_request(self) -> None:
+        tac = TAC(get_test_config_with_trait_groups())
+        tac.conversation_memory_client = create_memory_client(tac)
+        tac.conversation_memory_client.get_profile = AsyncMock(
+            return_value=get_mock_profile_response()
+        )
+
+        assert await tac.fetch_profile("") is None
+        tac.conversation_memory_client.get_profile.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_no_memory_client_returns_none(self) -> None:
+        tac = TAC(get_test_config_with_trait_groups())
+        tac.conversation_memory_client = None
+
+        assert await tac.fetch_profile("profile_test_123") is None
+
+    @pytest.mark.asyncio
+    async def test_api_failure_returns_none(self) -> None:
+        tac = TAC(get_test_config_with_trait_groups())
+        tac.conversation_memory_client = create_memory_client(tac)
+        tac.conversation_memory_client.get_profile = AsyncMock(side_effect=RuntimeError("boom"))
+
+        assert await tac.fetch_profile("profile_test_123") is None
 
 
 def _make_participants() -> list[Any]:
