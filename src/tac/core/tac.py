@@ -15,7 +15,7 @@ from tac.core.logging import get_logger, setup_logging
 from tac.intelligence.operator_result_processor import OperatorResultProcessor
 from tac.models.conversation import ParticipantResponse
 from tac.models.intelligence import OperatorProcessingResult
-from tac.models.memory import ProfileLookupResponse
+from tac.models.memory import ProfileLookupResponse, ProfileResponse
 from tac.models.session import ConversationSession
 from tac.models.tac import TACMemoryResponse
 from tac.models.voice import InterruptMessage
@@ -213,8 +213,17 @@ class TAC:
         2. Conversation Orchestrator list_communications fallback (when CO is configured).
         3. Empty TACMemoryResponse (relay-only mode).
 
+        Also resolves the profile and loads its traits: if ``profile_id`` is unset it is
+        looked up from ``author_info.address``, and the profile's traits (limited to
+        ``memory_config.trait_groups`` when set) are fetched into ``profile``, where
+        ``build_profile_prompt()`` renders them. The recall endpoint itself never returns
+        traits, so this is a second API call, skipped when ``profile`` is already set or
+        ``memory_config.fetch_profile_traits`` is False. A failed trait fetch is logged and
+        retrieval continues without traits.
+
         Args:
             conversation_context: Session containing conversation and profile information.
+                Mutated: ``profile_id`` and ``profile`` are set when resolved.
             query: Optional search query to filter memories.
             conversation_id: Passed through to the /Recall request as-is; the
                 caller decides whether (and which) conversation_id to send.
@@ -224,7 +233,7 @@ class TAC:
                 to justify that cost (e.g. "once" mode's cache-priming fetch).
 
         Returns:
-            Memory response containing conversation history and profile data.
+            Memory response containing observations, summaries and communications.
         """
         if self.conversation_memory_client is None:
             if self.conversation_orchestrator_client is not None:
@@ -312,6 +321,39 @@ class TAC:
                 conversation_id=conversation_context.conversation_id
             )
             return TACMemoryResponse(communications)
+
+    async def fetch_profile(self, profile_id: str) -> ProfileResponse | None:
+        """Fetch a profile with its traits on demand.
+
+        Uses ``memory_config.trait_groups`` to filter the traits. ``retrieve_memory()``
+        already does this automatically unless ``memory_config.fetch_profile_traits``
+        is False.
+
+        Args:
+            profile_id: Profile ID to fetch.
+
+        Returns:
+            The profile, or None when ``profile_id`` is empty, no Conversation Memory
+            client is configured, or the request fails.
+        """
+        if not profile_id:
+            self.logger.warning("profile_id is required for profile fetching but was not provided")
+            return None
+
+        if self.conversation_memory_client is None:
+            self.logger.warning("Memory client is not available (relay-only mode)")
+            return None
+
+        try:
+            return await self.conversation_memory_client.get_profile(
+                profile_id=profile_id,
+                trait_groups=self.config.memory_config.trait_groups,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            self.logger.error(f"Failed to fetch profile for {profile_id}: {e}", exc_info=True)
+            return None
 
     async def process_cintel_event(
         self,
