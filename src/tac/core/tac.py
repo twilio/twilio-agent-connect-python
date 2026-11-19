@@ -213,17 +213,11 @@ class TAC:
         2. Conversation Orchestrator list_communications fallback (when CO is configured).
         3. Empty TACMemoryResponse (relay-only mode).
 
-        Also resolves the profile and loads its traits: if ``profile_id`` is unset it is
-        looked up from ``author_info.address``, and the profile's traits (limited to
-        ``memory_config.trait_groups`` when set) are fetched into ``profile``, where
-        ``build_profile_prompt()`` renders them. The recall endpoint itself never returns
-        traits, so this is a second API call, skipped when ``profile`` is already set or
-        ``memory_config.fetch_profile_traits`` is False. A failed trait fetch is logged and
-        retrieval continues without traits.
+        Also fetches the profile's traits into ``profile`` unless
+        ``memory_config.fetch_profile_traits`` is False.
 
         Args:
             conversation_context: Session containing conversation and profile information.
-                Mutated: ``profile_id`` and ``profile`` are set when resolved.
             query: Optional search query to filter memories.
             conversation_id: Passed through to the /Recall request as-is; the
                 caller decides whether (and which) conversation_id to send.
