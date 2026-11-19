@@ -20,11 +20,15 @@ from typing import (
 
 from pydantic import TypeAdapter
 
+from tac import get_logger
+
 if TYPE_CHECKING:
     # Typing-only soft dep: `openai-agents` is optional at runtime. The ignore
     # silences strict-mode downstream mypy when the package isn't installed
     # (and is a no-op when it is — `unused-ignore` covers both environments).
     from agents import FunctionTool  # type: ignore[import-not-found,unused-ignore]
+
+logger = get_logger(__name__)
 
 
 # Marker class for injected tool arguments
@@ -227,14 +231,30 @@ class TACTool:
 
         Handles both sync and async implementations transparently.
 
+        Arguments named after an ``InjectedToolArg`` parameter are dropped: those
+        values are supplied by the application through ``configure_injection()``
+        and are deliberately absent from the schema the model receives, so the
+        caller channel must never decide them. The schema is advisory — providers
+        differ in whether they reject undeclared properties — so the boundary is
+        enforced here, where every dispatch path converges.
+
         Args:
             **kwargs: Arguments provided by the LLM or caller
 
         Returns:
             Result from the tool's implementation
         """
-        # Merge LLM-provided args with injected args
-        all_args: dict[str, object] = {**self._injected_args, **kwargs}
+        reserved = self._injected_param_types.keys() & kwargs.keys()
+        if reserved:
+            logger.warning(
+                "Dropped caller-supplied arguments that collide with injected parameters",
+                tool=self.name,
+                dropped=sorted(reserved),
+            )
+            kwargs = {name: value for name, value in kwargs.items() if name not in reserved}
+
+        # Injected values are merged last so caller arguments can never take precedence
+        all_args: dict[str, object] = {**kwargs, **self._injected_args}
 
         if inspect.iscoroutinefunction(self._raw_implementation):
             result = await self._raw_implementation(**all_args)
