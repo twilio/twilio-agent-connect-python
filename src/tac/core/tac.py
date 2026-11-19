@@ -227,7 +227,8 @@ class TAC:
                 to justify that cost (e.g. "once" mode's cache-priming fetch).
 
         Returns:
-            Memory response containing conversation history and profile data.
+            Memory response containing observations, summaries and communications.
+            Profile traits go on ``conversation_context.profile``, not in the response.
         """
         if self.conversation_memory_client is None:
             if self.conversation_orchestrator_client is not None:
