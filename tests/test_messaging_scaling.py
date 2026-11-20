@@ -576,12 +576,11 @@ class TestApiCallBudget:
 
         await channel.process_webhook(inbound())
 
-        assert counter.calls == [
-            "list_participants",
-            "get_profile",
-            "retrieve_memory",
-            "create_action",
-        ]
+        # The trait fetch and the recall run in parallel, so their order isn't fixed.
+        assert counter.calls[0] == "list_participants"
+        assert sorted(counter.calls[1:3]) == ["get_profile", "retrieve_memory"]
+        assert counter.calls[3] == "create_action"
+        assert len(counter.calls) == 4
 
     @pytest.mark.asyncio
     async def test_profile_id_comes_off_the_participant_list(self) -> None:
