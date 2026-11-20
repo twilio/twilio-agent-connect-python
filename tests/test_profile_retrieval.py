@@ -1,5 +1,6 @@
 """Tests for profile retrieval functionality."""
 
+import asyncio
 from typing import Any
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -59,16 +60,10 @@ def create_communication_created_webhook(
     }
 
 
-def get_test_config_with_trait_groups(
-    trait_groups: list[str] | None = None, fetch_profile_traits: bool | None = None
-) -> TACConfig:
-    """Get test configuration with optional trait groups and trait-fetch flag."""
-    memory_config = (
-        TwilioMemoryConfig(trait_groups=trait_groups)
-        if fetch_profile_traits is None
-        else TwilioMemoryConfig(
-            trait_groups=trait_groups, fetch_profile_traits=fetch_profile_traits
-        )
+def get_test_config_with_trait_groups(trait_groups: list[str] | None = None) -> TACConfig:
+    """Get test configuration with optional trait groups."""
+    memory_config = TwilioMemoryConfig(
+        trait_groups=trait_groups,
     )
     return TACConfig(
         account_sid="ACtest123",
@@ -227,42 +222,35 @@ class TestProfileFetchingInRetrieveMemory:
         tac.conversation_memory_client.retrieve_memory.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_retrieve_memory_fetches_profile_when_fetch_profile_traits_true(self) -> None:
-        config = get_test_config_with_trait_groups(fetch_profile_traits=True)
-        tac = TAC(config)
+    async def test_retrieve_memory_fetches_profile_and_recall_in_parallel(self) -> None:
+        tac = TAC(get_test_config_with_trait_groups())
         tac.conversation_memory_client = create_memory_client(tac)
         mock_profile = get_mock_profile_response()
-        tac.conversation_memory_client.get_profile = AsyncMock(return_value=mock_profile)
-        tac.conversation_memory_client.retrieve_memory = AsyncMock(return_value=get_empty_recall())
+        release_profile = asyncio.Event()
+
+        async def slow_get_profile(**_: Any) -> ProfileResponse:
+            await release_profile.wait()
+            return mock_profile
+
+        recall_started = asyncio.Event()
+
+        async def recall(**_: Any) -> MemoryRetrievalResponse:
+            recall_started.set()
+            return get_empty_recall()
+
+        tac.conversation_memory_client.get_profile = slow_get_profile  # type: ignore[method-assign]
+        tac.conversation_memory_client.retrieve_memory = recall  # type: ignore[method-assign]
         context = ConversationSession(
             conversation_id="conv123", profile_id="profile_test_123", channel="SMS"
         )
 
-        await tac.retrieve_memory(context)
-
-        tac.conversation_memory_client.get_profile.assert_awaited_once_with(
-            profile_id="profile_test_123", trait_groups=None
-        )
-        assert context.profile == mock_profile
-
-    @pytest.mark.asyncio
-    async def test_retrieve_memory_skips_profile_when_fetch_profile_traits_false(self) -> None:
-        config = get_test_config_with_trait_groups(fetch_profile_traits=False)
-        tac = TAC(config)
-        tac.conversation_memory_client = create_memory_client(tac)
-        tac.conversation_memory_client.get_profile = AsyncMock(
-            return_value=get_mock_profile_response()
-        )
-        tac.conversation_memory_client.retrieve_memory = AsyncMock(return_value=get_empty_recall())
-        context = ConversationSession(
-            conversation_id="conv123", profile_id="profile_test_123", channel="SMS"
-        )
-
-        await tac.retrieve_memory(context)
-
-        tac.conversation_memory_client.get_profile.assert_not_awaited()
-        tac.conversation_memory_client.retrieve_memory.assert_awaited_once()
+        pending = asyncio.create_task(tac.retrieve_memory(context))
+        await asyncio.wait_for(recall_started.wait(), timeout=1)
         assert context.profile is None
+        release_profile.set()
+        await pending
+
+        assert context.profile == mock_profile
 
     @pytest.mark.asyncio
     async def test_retrieve_memory_does_not_refetch_when_profile_already_set(self) -> None:
