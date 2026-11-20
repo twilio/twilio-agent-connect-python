@@ -12,7 +12,9 @@ from dataclasses import dataclass, field
 from typing import (
     TYPE_CHECKING,
     Annotated,
+    Any,
     Union,
+    cast,
     get_args,
     get_origin,
     get_type_hints,
@@ -198,9 +200,11 @@ class TACTool:
 
                 adapter: TypeAdapter[object]
                 if is_pydantic_model:
-                    adapter = TypeAdapter(expected_type)
+                    adapter = TypeAdapter(cast(Any, expected_type))
                 else:
-                    adapter = TypeAdapter(expected_type, config={"arbitrary_types_allowed": True})
+                    adapter = TypeAdapter(
+                        cast(Any, expected_type), config={"arbitrary_types_allowed": True}
+                    )
 
                 adapter.validate_python(value)
             except Exception as pydantic_error:
@@ -471,7 +475,7 @@ def _type_to_json_schema(param_type: object) -> dict[str, object]:
             param_type = non_none_type
 
     try:
-        adapter: TypeAdapter[object] = TypeAdapter(param_type)
+        adapter: TypeAdapter[object] = TypeAdapter(cast(Any, param_type))
         schema = adapter.json_schema(mode="validation")
 
         # Remove Pydantic-specific metadata fields that aren't needed for LLM tools

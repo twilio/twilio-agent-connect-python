@@ -128,6 +128,7 @@ SYSTEM_INSTRUCTIONS = (
     "spoken aloud or sent as plain text."
 )
 
+
 async def handle_message_ready(user_message, context, memory_response):
     conv_id = context.conversation_id
 
@@ -138,15 +139,14 @@ async def handle_message_ready(user_message, context, memory_response):
     client = with_tac_memory(openai_client, memory_response, context)
 
     response = await client.responses.create(
-        model="gpt-5.4-mini",
-        instructions=SYSTEM_INSTRUCTIONS,
-        input=conversation_history[conv_id]
+        model="gpt-5.4-mini", instructions=SYSTEM_INSTRUCTIONS, input=conversation_history[conv_id]
     )
 
     llm_response = response.output_text
     conversation_history[conv_id].append({"role": "assistant", "content": llm_response})
 
     return llm_response
+
 
 tac.on_message_ready(handle_message_ready)
 TACFastAPIServer(tac=tac, voice_channel=voice_channel, messaging_channels=[sms_channel]).start()

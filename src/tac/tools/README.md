@@ -35,6 +35,7 @@ The `@function_tool()` decorator automatically extracts function metadata:
 ```python
 from tac.tools import function_tool
 
+
 @function_tool()
 def calculate_tip(bill_amount: float, tip_percentage: float = 15.0) -> dict:
     """Calculate tip amount and total bill."""
@@ -64,6 +65,7 @@ from typing import Annotated
 from tac.tools import function_tool, InjectedToolArg
 from tac.context.memory import MemoryClient
 
+
 async def retrieve_profile_memory(
     query: str,
     conversation_memory_client: Annotated[MemoryClient, InjectedToolArg],
@@ -76,11 +78,11 @@ async def retrieve_profile_memory(
     )
     return memory_response.model_dump(by_alias=True, exclude_none=True)
 
+
 # Wrap with decorator and configure injection
 tool = function_tool()(retrieve_profile_memory)
 tool.configure_injection(
-    conversation_memory_client=my_conversation_memory_client,
-    profile_id="prof_123"
+    conversation_memory_client=my_conversation_memory_client, profile_id="prof_123"
 )
 
 # LLM only sees: retrieve_profile_memory(query: str)
@@ -92,21 +94,20 @@ tool.configure_injection(
 ```python
 from tac.tools import create_tool
 
+
 def my_function(param1: str, param2: int = 5) -> str:
     return f"Got {param1} and {param2}"
+
 
 tool = create_tool(
     name="my_tool",
     description="Does something useful",
     params_json_schema={
         "type": "object",
-        "properties": {
-            "param1": {"type": "string"},
-            "param2": {"type": "integer"}
-        },
-        "required": ["param1"]
+        "properties": {"param1": {"type": "string"}, "param2": {"type": "integer"}},
+        "required": ["param1"],
     },
-    implementation=my_function
+    implementation=my_function,
 )
 ```
 
@@ -125,11 +126,7 @@ from tac.models.session import ConversationSession
 tac = TAC(config=TACConfig.from_env())
 
 # Create session
-session = ConversationSession(
-    profile_id="prof_123",
-    conversation_id="conv_456",
-    channel="sms"
-)
+session = ConversationSession(profile_id="prof_123", conversation_id="conv_456", channel="sms")
 
 # Create tool with injected dependencies
 memory_tool = create_memory_tool(tac.conversation_memory_client, session)
@@ -149,7 +146,7 @@ from tac.tools.knowledge import create_knowledge_tool
 knowledge_tool = await create_knowledge_tool(
     knowledge_client=tac.knowledge_client,
     knowledge_base_id="know_knowledgebase_000000000000000000000000",
-    name="search_product_faq",          # optional; defaults to search_<kb_display_name>
+    name="search_product_faq",  # optional; defaults to search_<kb_display_name>
     description="Search product FAQs",  # optional; defaults to the KB's description
     top_k=3,
 )
@@ -191,6 +188,7 @@ callable_func = tool.implementation
 
 # Inspect signature
 import inspect
+
 sig = inspect.signature(callable_func)
 # Only non-injected parameters appear in signature
 
