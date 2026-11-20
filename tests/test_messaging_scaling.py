@@ -593,6 +593,17 @@ class TestApiCallBudget:
         assert counter.count("lookup_profile") == 0
 
     @pytest.mark.asyncio
+    async def test_disabling_trait_fetch_returns_to_three_calls(self) -> None:
+        tac, channel, counter = make_sms_channel(
+            mode="always", profile_id="profile_1", fetch_profile_traits=False
+        )
+        tac.on_message_ready(lambda msg, ctx, mem: "reply")
+
+        await channel.process_webhook(inbound())
+
+        assert counter.calls == ["list_participants", "retrieve_memory", "create_action"]
+
+    @pytest.mark.asyncio
     async def test_closed_with_no_handler_costs_nothing(self) -> None:
         tac, channel, counter = make_sms_channel()
 

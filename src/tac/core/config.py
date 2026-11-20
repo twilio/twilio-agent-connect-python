@@ -109,6 +109,14 @@ class TwilioMemoryConfig(BaseModel):
         description="Min relevance score for observations and summaries (0.0-1.0).",
     )
 
+    fetch_profile_traits: bool = Field(
+        default=True,
+        description="Whether to fetch profile traits alongside a recall. Recall returns "
+        "observations, summaries and communications but never traits, so this is a second "
+        "API call. Traits populate `ConversationSession.profile`, which is what "
+        "`build_profile_prompt()` renders — set False if your prompts don't use them.",
+    )
+
     phone_trait_group: str = Field(
         default="Contact",
         description="Trait group name that holds the phone identifier on newly created profiles. "

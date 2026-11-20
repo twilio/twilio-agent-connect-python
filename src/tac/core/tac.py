@@ -213,7 +213,8 @@ class TAC:
         2. Conversation Orchestrator list_communications fallback (when CO is configured).
         3. Empty TACMemoryResponse (relay-only mode).
 
-        Also fetches the profile's traits into ``profile``, in parallel with the recall.
+        Also fetches the profile's traits into ``profile``, in parallel with the recall,
+        unless ``memory_config.fetch_profile_traits`` is False.
 
         Args:
             conversation_context: Session containing conversation and profile information.
@@ -269,7 +270,11 @@ class TAC:
             memory_client = self.conversation_memory_client
 
             async def fetch_profile_traits() -> None:
-                if not conversation_context.profile_id or conversation_context.profile:
+                if (
+                    not self.config.memory_config.fetch_profile_traits
+                    or not conversation_context.profile_id
+                    or conversation_context.profile
+                ):
                     return
                 try:
                     profile_response = await memory_client.get_profile(
@@ -323,7 +328,8 @@ class TAC:
         """Fetch a profile with its traits on demand.
 
         Uses ``memory_config.trait_groups`` to filter the traits. ``retrieve_memory()``
-        already does this automatically.
+        already does this automatically unless ``memory_config.fetch_profile_traits``
+        is False.
 
         Args:
             profile_id: Profile ID to fetch.
