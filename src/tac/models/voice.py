@@ -315,6 +315,12 @@ class VoiceTwiMLOptionsConversationRelay(VoiceTwiMLOptions):
         description="Conversation Service SID for ConversationRelay to automatically "
         "manage conversation creation and participants.",
     )
+    conversation_id: str | None = Field(
+        None,
+        description="Existing Conversation Orchestrator conversation ID. Routes the call "
+        "directly to that conversation, bypassing the configuration's grouping rules; "
+        "wins over conversation_configuration for routing.",
+    )
     websocket_url: str | None = Field(
         None,
         description="ConversationRelay WebSocket URL (the <ConversationRelay url=...> "
