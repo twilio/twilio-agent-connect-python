@@ -9,6 +9,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from tac import TAC
+from tac.context.base import describe_error
 from tac.core.analytics import track_event
 from tac.core.logging import get_logger
 from tac.models.conversation import ParticipantResponse
@@ -176,7 +177,9 @@ class BaseChannel(ABC):
         try:
             participant = ParticipantResponse.model_validate(event_data)
         except ValidationError as e:
-            self.logger.debug("Skipping unparseable PARTICIPANT_ADDED payload", error=str(e))
+            self.logger.debug(
+                "Skipping unparseable PARTICIPANT_ADDED payload", error=describe_error(e)
+            )
             return
         if participant.type not in ("CUSTOMER", "UNKNOWN"):
             return

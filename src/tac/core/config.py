@@ -322,7 +322,10 @@ class TACConfig(BaseModel):
             "reused, with their IDs.\n"
             "- `DEBUG`: control flow, such as the name of each tool the model calls.\n\n"
             "No level logs request or response bodies, message text, transcripts, "
-            "memory queries, profile traits, or tool arguments and results."
+            "memory queries, profile traits, or tool arguments and results. An "
+            "exception raised by your own code, such as a tool or a callback, is "
+            "logged at `ERROR` with its message and traceback, so keep user content "
+            "out of the exceptions it raises."
         ),
     )
 

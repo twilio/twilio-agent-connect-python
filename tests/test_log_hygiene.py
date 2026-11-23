@@ -9,7 +9,7 @@ from unittest.mock import patch
 import httpx
 import pytest
 
-from tac.context.base import BaseAPIClient
+from tac.context.base import BaseAPIClient, describe_error
 from tac.context.conversation import ConversationClient
 from tac.context.memory import MemoryClient
 from tac.models.conversation import (
@@ -245,3 +245,12 @@ def test_dropped_recall_item_logs_no_content(records: list[logging.LogRecord]) -
     assert response.observations == []
     assert "Dropping invalid Conversation Memory ObservationInfo" in _logged(records)
     assert SECRET not in _logged(records)
+
+
+@pytest.mark.parametrize("code", [SECRET, {"detail": SECRET}, True])
+def test_non_integer_error_code_is_not_logged(code: object) -> None:
+    request = httpx.Request("POST", "https://conversations.twilio.com/v2/Conversations")
+    response = httpx.Response(400, json={"code": code}, request=request)
+    error = httpx.HTTPStatusError("failed", request=request, response=response)
+
+    assert describe_error(error) == "POST /v2/Conversations: status 400"

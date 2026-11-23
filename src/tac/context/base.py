@@ -33,7 +33,7 @@ def describe_error(error: Exception) -> str:
         code = error.response.json().get("code")
     except Exception:
         code = None
-    if code is not None:
+    if isinstance(code, int) and not isinstance(code, bool):
         description += f", Twilio error code {code}"
     return description
 
