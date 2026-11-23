@@ -4,11 +4,12 @@ import json
 import logging
 from collections.abc import Awaitable, Callable, Iterator
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
 
+from tac.channels.base import BaseChannel
 from tac.context.base import BaseAPIClient, describe_error
 from tac.context.conversation import ConversationClient
 from tac.context.memory import MemoryClient
@@ -56,6 +57,13 @@ def _failing_client(status: int = 400) -> Callable[[], httpx.AsyncClient]:
             "code": 20001,
             "message": f"{RESPONSE_SECRET} {request.content.decode()}",
         }
+        return httpx.Response(status, json=body)
+
+    return lambda: httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+
+def _responding_client(body: object, status: int = 200) -> Callable[[], httpx.AsyncClient]:
+    def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(status, json=body)
 
     return lambda: httpx.AsyncClient(transport=httpx.MockTransport(handler))
@@ -186,6 +194,41 @@ CALLS: list[tuple[str, Callable[[], BaseAPIClient], CallFactory, str, str]] = [
         "POST",
         "/v1/Stores/mem_store_1/Profiles/mem_profile_1/ConversationSummaries",
     ),
+    (
+        "list_conversations",
+        _conversation_client,
+        lambda c: c.list_conversations(status=["ACTIVE"]),
+        "GET",
+        "/v2/Conversations",
+    ),
+    (
+        "list_communications",
+        _conversation_client,
+        lambda c: c.list_communications("conv_1"),
+        "GET",
+        "/v2/Conversations/conv_1/Communications",
+    ),
+    (
+        "list_participants",
+        _conversation_client,
+        lambda c: c.list_participants("conv_1"),
+        "GET",
+        "/v2/Conversations/conv_1/Participants",
+    ),
+    (
+        "get_conversation",
+        _conversation_client,
+        lambda c: c.get_conversation("conv_1"),
+        "GET",
+        "/v2/Conversations/conv_1",
+    ),
+    (
+        "clear_status_callbacks",
+        _conversation_client,
+        lambda c: c.clear_status_callbacks("conv_1"),
+        "PATCH",
+        "/v2/Conversations/conv_1",
+    ),
 ]
 
 
@@ -254,3 +297,107 @@ def test_non_integer_error_code_is_not_logged(code: object) -> None:
     error = httpx.HTTPStatusError("failed", request=request, response=response)
 
     assert describe_error(error) == "POST /v2/Conversations: status 400"
+
+
+@pytest.mark.asyncio
+async def test_conversation_dedup_409_logs_no_content(records: list[logging.LogRecord]) -> None:
+    client = _conversation_client()
+    with (
+        patch.object(client, "_get_client", _failing_client(status=409)),
+        pytest.raises(httpx.HTTPStatusError),
+    ):
+        await client.create_conversation(name=SECRET)
+
+    logged = _logged(records)
+    assert "POST /v2/Conversations: status 409" in logged
+    assert SECRET not in logged
+    assert RESPONSE_SECRET not in logged
+
+
+@pytest.mark.asyncio
+async def test_invalid_participants_response_logs_no_content(
+    records: list[logging.LogRecord],
+) -> None:
+    client = _conversation_client()
+    with patch.object(
+        client, "_get_client", _responding_client({"participants": [{"name": SECRET}]})
+    ):
+        assert await client.list_participants("conv_1") == []
+
+    assert "Invalid list participants response for conversation conv_1" in _logged(records)
+    assert SECRET not in _logged(records)
+
+
+@pytest.mark.asyncio
+async def test_invalid_lookup_response_logs_no_content(records: list[logging.LogRecord]) -> None:
+    client = _memory_client()
+    with (
+        patch.object(client, "_get_client", _responding_client({"profiles": SECRET})),
+        pytest.raises(ValueError) as excinfo,
+    ):
+        await client.lookup_profile("phone", "value")
+
+    assert SECRET not in str(excinfo.value)
+    assert SECRET not in _logged(records)
+
+
+@pytest.mark.asyncio
+async def test_create_profile_without_id_raises_without_content() -> None:
+    client = _memory_client()
+    with (
+        patch.object(client, "_get_client", _responding_client({"traits": SECRET})),
+        pytest.raises(ValueError) as excinfo,
+    ):
+        await client.create_profile({"Contact": {"phone": "value"}})
+
+    assert SECRET not in str(excinfo.value)
+
+
+def test_dropped_recall_meta_logs_no_content(records: list[logging.LogRecord]) -> None:
+    _memory_client()._parse_recall_response({"meta": {"queryTime": SECRET}})
+
+    assert "Dropping invalid Conversation Memory meta" in _logged(records)
+    assert SECRET not in _logged(records)
+
+
+def _sync_client(body: object, status: int) -> Callable[[], httpx.Client]:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(status, json=body)
+
+    return lambda: httpx.Client(transport=httpx.MockTransport(handler))
+
+
+@pytest.mark.no_auto_mock
+@pytest.mark.parametrize(
+    ("body", "status", "expected"),
+    [
+        (
+            {"code": 20404, "message": RESPONSE_SECRET},
+            404,
+            "GET /v2/ControlPlane/Configurations/conv_cfg_1: status 404, Twilio error code 20404",
+        ),
+        ({"id": RESPONSE_SECRET}, 200, "Failed to parse configuration conv_cfg_1"),
+    ],
+    ids=["http_error", "invalid_response"],
+)
+def test_get_configuration_logs_no_response_content(
+    records: list[logging.LogRecord], body: object, status: int, expected: str
+) -> None:
+    client = _conversation_client()
+    with (
+        patch.object(client, "_get_sync_client", _sync_client(body, status)),
+        pytest.raises((httpx.HTTPStatusError, ValueError)),
+    ):
+        client.get_configuration("conv_cfg_1")
+
+    assert expected in _logged(records)
+    assert RESPONSE_SECRET not in _logged(records)
+
+
+def test_unparseable_participant_added_logs_no_content() -> None:
+    channel = MagicMock()
+
+    BaseChannel._track_conversation_started(channel, {"name": SECRET})
+
+    channel.logger.debug.assert_called_once()
+    assert SECRET not in str(channel.logger.mock_calls)
