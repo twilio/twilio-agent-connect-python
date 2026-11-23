@@ -261,3 +261,23 @@ class TestSessionConfigTokenKeepsInheritedParameters:
         assert provider._call_session_configs[params[SESSION_CONFIG_TOKEN_PARAM]] == {
             "model": "per-call"
         }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["openai_realtime", "gpt_live"])
+async def test_tool_call_logs_no_arguments_or_result(kind: str) -> None:
+    secret = "end-user-secret-text"
+
+    async def lookup(**kwargs: Any) -> dict[str, str]:
+        return {"answer": secret}
+
+    provider = make_media_streams_provider(kind)
+    provider._tools_by_name = {"lookup": lookup}
+    provider.logger = MagicMock()
+
+    output = await provider._run_tool_call("conv_1", "lookup", f'{{"q": "{secret}"}}')
+
+    assert output == {"answer": secret}
+    logged = str(provider.logger.mock_calls)
+    assert "lookup" in logged
+    assert secret not in logged

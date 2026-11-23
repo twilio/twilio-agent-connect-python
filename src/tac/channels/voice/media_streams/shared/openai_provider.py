@@ -248,7 +248,7 @@ class MediaStreamsOpenAIProvider(VoiceProvider, Generic[TCallState]):
         Errors are returned as part of the output rather than raised, so a bad
         tool call doesn't kill the call.
         """
-        self.logger.debug(f"Tool call: {name}({arguments_json})", conversation_id=conv_id)
+        self.logger.debug(f"Tool call: {name}", conversation_id=conv_id)
 
         if not name:
             return {"error": "Tool name is required"}
@@ -260,7 +260,7 @@ class MediaStreamsOpenAIProvider(VoiceProvider, Generic[TCallState]):
         try:
             arguments = json.loads(arguments_json or "{}")
             output = await tool(**arguments)
-            self.logger.debug(f"Tool result: {name} -> {output}", conversation_id=conv_id)
+            self.logger.debug(f"Tool call completed: {name}", conversation_id=conv_id)
             return output
         except Exception as e:
             self.logger.error(f"Tool '{name}' failed: {e}", conversation_id=conv_id, exc_info=True)

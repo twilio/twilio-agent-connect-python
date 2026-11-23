@@ -310,7 +310,20 @@ class TACConfig(BaseModel):
 
     log_level: str = Field(
         default="INFO",
-        description="Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)",
+        description=(
+            "Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL). TAC writes to the "
+            "`tac` logger, on stdout, with phone numbers and emails masked.\n\n"
+            "- `ERROR`: failed API calls and handlers. A failed API call logs its "
+            "method, path (with the conversation or profile ID), status code and "
+            "Twilio error code.\n"
+            "- `WARNING`: recoverable problems, such as a dropped webhook or an "
+            "invalid item in a Conversation Memory response.\n"
+            "- `INFO`: lifecycle events, such as calls placed and conversations "
+            "reused, with their IDs.\n"
+            "- `DEBUG`: control flow, such as the name of each tool the model calls.\n\n"
+            "No level logs request or response bodies, message text, transcripts, "
+            "memory queries, profile traits, or tool arguments and results."
+        ),
     )
 
     studio_handoff_flow_sid: str | None = Field(
