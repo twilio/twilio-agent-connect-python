@@ -249,9 +249,16 @@ async def test_communication_created_webhook(whatsapp_channel: WhatsAppChannel) 
         }
     )
 
-    with patch.object(
-        whatsapp_channel, "_reconcile_participants", new_callable=AsyncMock
-    ) as mock_reconcile:
+    with (
+        patch.object(
+            whatsapp_channel.tac.conversation_orchestrator_client,
+            "list_participants",
+            new=AsyncMock(return_value=[mock_agent, mock_customer]),
+        ),
+        patch.object(
+            whatsapp_channel, "_reconcile_participants", new_callable=AsyncMock
+        ) as mock_reconcile,
+    ):
         mock_reconcile.return_value = (mock_agent, mock_customer)
 
         webhook = create_communication_created_webhook(
@@ -360,9 +367,16 @@ async def test_conversation_updated_closed(whatsapp_channel: WhatsAppChannel) ->
         }
     )
 
-    with patch.object(
-        whatsapp_channel, "_reconcile_participants", new_callable=AsyncMock
-    ) as mock_reconcile:
+    with (
+        patch.object(
+            whatsapp_channel.tac.conversation_orchestrator_client,
+            "list_participants",
+            new=AsyncMock(return_value=[mock_agent, mock_customer]),
+        ),
+        patch.object(
+            whatsapp_channel, "_reconcile_participants", new_callable=AsyncMock
+        ) as mock_reconcile,
+    ):
         mock_reconcile.return_value = (mock_agent, mock_customer)
         await whatsapp_channel.process_webhook(webhook)
 
@@ -461,9 +475,16 @@ async def test_webhook_deduplication(whatsapp_channel: WhatsAppChannel) -> None:
         }
     )
 
-    with patch.object(
-        whatsapp_channel, "_reconcile_participants", new_callable=AsyncMock
-    ) as mock_reconcile:
+    with (
+        patch.object(
+            whatsapp_channel.tac.conversation_orchestrator_client,
+            "list_participants",
+            new=AsyncMock(return_value=[mock_agent, mock_customer]),
+        ),
+        patch.object(
+            whatsapp_channel, "_reconcile_participants", new_callable=AsyncMock
+        ) as mock_reconcile,
+    ):
         mock_reconcile.return_value = (mock_agent, mock_customer)
 
         # Process webhook with idempotency token
@@ -588,6 +609,11 @@ async def test_memory_mode_enabled(mock_tac: TAC) -> None:
 
     with (
         patch.object(mock_tac, "retrieve_memory", new_callable=AsyncMock) as mock_retrieve,
+        patch.object(
+            mock_tac.conversation_orchestrator_client,
+            "list_participants",
+            new=AsyncMock(return_value=[mock_agent, mock_customer]),
+        ),
         patch.object(channel, "_reconcile_participants", new_callable=AsyncMock) as mock_reconcile,
     ):
         mock_retrieve.return_value = mock_memory

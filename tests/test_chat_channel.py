@@ -196,10 +196,17 @@ class TestChatChannel:
             }
         )
 
-        with patch.object(
-            channel,
-            "_reconcile_participants",
-            new=AsyncMock(return_value=(mock_agent, None)),
+        with (
+            patch.object(
+                tac.conversation_orchestrator_client,
+                "list_participants",
+                new=AsyncMock(return_value=[mock_agent]),
+            ),
+            patch.object(
+                channel,
+                "_reconcile_participants",
+                new=AsyncMock(return_value=(mock_agent, None)),
+            ),
         ):
             await channel.process_webhook(webhook)
 
@@ -586,10 +593,17 @@ class TestChatChannel:
             }
         )
 
-        with patch.object(
-            channel,
-            "_reconcile_participants",
-            new=AsyncMock(return_value=(mock_agent, None)),
+        with (
+            patch.object(
+                tac.conversation_orchestrator_client,
+                "list_participants",
+                new=AsyncMock(return_value=[mock_agent]),
+            ),
+            patch.object(
+                channel,
+                "_reconcile_participants",
+                new=AsyncMock(return_value=(mock_agent, None)),
+            ),
         ):
             await channel.process_webhook(webhook, idempotency_token="token_1")
             await channel.process_webhook(webhook, idempotency_token="token_1")
@@ -730,6 +744,11 @@ class TestChatChannel:
 
         with (
             patch.object(
+                tac.conversation_orchestrator_client,
+                "list_participants",
+                new=AsyncMock(return_value=[mock_agent]),
+            ),
+            patch.object(
                 channel,
                 "_reconcile_participants",
                 new=AsyncMock(return_value=(mock_agent, None)),
@@ -757,20 +776,37 @@ class TestChatChannel:
         tac = TAC(get_test_config())
         channel = ChatChannel(tac, config={"memory_mode": "never"})
 
+        callback_calls = 0
+
         # Callback that returns None (manual send_response flow)
         async def message_callback(
             user_message: str,
             context: ConversationSession,
             memory_response: TACMemoryResponse | None,
         ) -> None:
+            nonlocal callback_calls
+            callback_calls += 1
             # User will manually call channel.send_response() later
-            pass
 
         tac.on_message_ready(message_callback)
 
-        with patch.object(
-            tac.conversation_orchestrator_client, "create_action"
-        ) as mock_create_action:
+        with (
+            patch.object(
+                tac.conversation_orchestrator_client,
+                "list_participants",
+                new=AsyncMock(
+                    return_value=[
+                        chat_participant("PA_AGENT", "AI_AGENT", "ai-assistant", "CH_CHAT_SID_123"),
+                        chat_participant(
+                            "PA_NO_AUTO", "CUSTOMER", "user@example.com", "CH_CHAT_SID_123"
+                        ),
+                    ]
+                ),
+            ),
+            patch.object(
+                tac.conversation_orchestrator_client, "create_action"
+            ) as mock_create_action,
+        ):
             # Process message that triggers callback
             message_webhook = create_communication_created_webhook(
                 "CH_NO_AUTO", "PA_NO_AUTO", "Test message", "2025-11-18T00:00:01.000Z"
@@ -778,4 +814,5 @@ class TestChatChannel:
             await channel.process_webhook(message_webhook)
 
             # Verify create_action was NOT called (callback returned None)
+            assert callback_calls == 1
             mock_create_action.assert_not_called()

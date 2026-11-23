@@ -103,6 +103,7 @@ class TestVoiceChannel:
         tac.conversation_memory_client.retrieve_memory = AsyncMock(
             return_value=mock_memory_response
         )
+        tac.conversation_memory_client.get_profile = AsyncMock(return_value=None)
 
         # Create channel with memory_mode enabled (default is "never")
         channel = VoiceChannel(tac, config={"memory_mode": "always"})

@@ -81,6 +81,7 @@ class TestMemoryFallback:
                 meta=MemoryRetrievalMeta(queryTime=100),
             )
         )
+        tac.conversation_memory_client.get_profile = AsyncMock(return_value=None)
 
         context = ConversationSession(
             conversation_id="CH123",
