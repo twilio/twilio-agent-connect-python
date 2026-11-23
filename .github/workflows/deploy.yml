@@ -30,10 +30,10 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: uv sync --frozen --all-extras --all-groups
-      - run: uv run ruff check .
-      - run: uv run ruff format --check .
-      - run: MYPYPATH=src uv run mypy src/tac getting_started
-      - run: uv run pytest
+      - run: uv run --frozen ruff check .
+      - run: uv run --frozen ruff format --check .
+      - run: MYPYPATH=src uv run --frozen mypy src/tac getting_started
+      - run: uv run --frozen pytest
 
   deploy:
     name: Publish to PyPI
