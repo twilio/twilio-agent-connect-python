@@ -2,9 +2,40 @@ import platform
 from enum import Enum
 
 import httpx
+from pydantic import ValidationError
 
 from tac import __version__
 from tac.core.logging import get_logger
+
+
+def describe_error(error: Exception) -> str:
+    """Describe a failed API call for logs without request or response content.
+
+    HTTP errors give the method, path, status code and Twilio error code.
+    Validation errors give each field location and message, never the input.
+    """
+    if isinstance(error, ValidationError):
+        return "; ".join(
+            f"{'.'.join(str(part) for part in err['loc'])}: {err['msg']}"
+            for err in error.errors(include_input=False, include_url=False)
+        )
+    if not isinstance(error, httpx.HTTPError):
+        return f"{type(error).__name__}: {error}"
+    try:
+        request = error.request
+    except RuntimeError:
+        return type(error).__name__
+    description = f"{request.method} {request.url.path}"
+    if not isinstance(error, httpx.HTTPStatusError):
+        return f"{description}: {type(error).__name__}: {error}"
+    description += f": status {error.response.status_code}"
+    try:
+        code = error.response.json().get("code")
+    except Exception:
+        code = None
+    if isinstance(code, int) and not isinstance(code, bool):
+        description += f", Twilio error code {code}"
+    return description
 
 
 class PartnerConnector(Enum):

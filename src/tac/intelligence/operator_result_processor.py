@@ -5,6 +5,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from tac.context.base import describe_error
 from tac.context.memory import MemoryClient
 from tac.core.config import ConversationIntelligenceConfig
 from tac.core.logging import get_logger
@@ -198,11 +199,9 @@ class OperatorResultProcessor:
         try:
             event = OperatorResultEvent(**payload)
         except ValidationError as e:
-            self.logger.error(f"Failed to parse event payload: {e}")
-            return OperatorProcessingResult(
-                success=False,
-                error=f"Failed to parse event payload: {e}",
-            )
+            message = f"Failed to parse event payload: {describe_error(e)}"
+            self.logger.error(message)
+            return OperatorProcessingResult(success=False, error=message)
 
         # Filter by configuration ID
         if event.intelligence_configuration.id != self.config.configuration_id:

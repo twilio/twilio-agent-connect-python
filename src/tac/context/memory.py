@@ -4,7 +4,7 @@ from typing import Any, TypeVar
 import httpx
 from pydantic import BaseModel, ValidationError
 
-from tac.context.base import BaseAPIClient
+from tac.context.base import BaseAPIClient, describe_error
 from tac.models.memory import (
     MemoryCommunication,
     MemoryRetrievalMeta,
@@ -105,22 +105,14 @@ class MemoryClient(BaseAPIClient):
                 return self._parse_recall_response(data)
 
         except httpx.HTTPError as e:
-            response_text = (
-                getattr(e.response, "text", "No response body")
-                if hasattr(e, "response")
-                else "No response"
-            )
             self.logger.error(
-                f"Failed to retrieve context from Conversation Memory: {e}\n"
-                f"URL: {url}\n"
-                f"Request body: {request_payload}\n"
-                f"Response: {response_text}"
+                f"Failed to retrieve context from Conversation Memory: {describe_error(e)}"
             )
             # Return empty response on API errors
             return MemoryRetrievalResponse()
 
         except Exception as e:
-            self.logger.error(f"Failed to parse Conversation Memory response: {e}")
+            self.logger.error(f"Failed to parse Conversation Memory response: {describe_error(e)}")
             # Return empty response on parsing errors
             return MemoryRetrievalResponse()
 
@@ -143,7 +135,9 @@ class MemoryClient(BaseAPIClient):
             try:
                 meta = MemoryRetrievalMeta.model_validate(raw_meta)
             except ValidationError as e:
-                self.logger.warning(f"Dropping invalid Conversation Memory meta: {e}")
+                self.logger.warning(
+                    f"Dropping invalid Conversation Memory meta: {describe_error(e)}"
+                )
 
         return MemoryRetrievalResponse(
             observations=self._parse_items(data.get("observations"), ObservationInfo),
@@ -167,7 +161,9 @@ class MemoryClient(BaseAPIClient):
             try:
                 parsed.append(model.model_validate(item))
             except ValidationError as e:
-                self.logger.warning(f"Dropping invalid Conversation Memory {model.__name__}: {e}")
+                self.logger.warning(
+                    f"Dropping invalid Conversation Memory {model.__name__}: {describe_error(e)}"
+                )
         return parsed
 
     async def get_profile(
@@ -206,21 +202,14 @@ class MemoryClient(BaseAPIClient):
 
                 return profile_response
         except httpx.HTTPError as e:
-            response_text = (
-                getattr(e.response, "text", "No response body")
-                if hasattr(e, "response")
-                else "No response"
-            )
             self.logger.error(
-                f"Failed to retrieve profile from Conversation Memory: {e}\n"
-                f"URL: {url}\n"
-                f"Query params: {params}\n"
-                f"Response: {response_text}"
+                f"Failed to retrieve profile from Conversation Memory: {describe_error(e)}"
             )
             raise
         except Exception as e:
-            self.logger.error(f"Failed to generate Conversation Memory profile response: {e}")
-            raise
+            message = f"Invalid Conversation Memory profile response: {describe_error(e)}"
+            self.logger.error(message)
+            raise ValueError(message) from None
 
     async def lookup_profile(
         self,
@@ -266,21 +255,14 @@ class MemoryClient(BaseAPIClient):
 
                 return lookup_response
         except httpx.HTTPError as e:
-            response_text = (
-                getattr(e.response, "text", "No response body")
-                if hasattr(e, "response")
-                else "No response"
-            )
             self.logger.error(
-                f"Failed to lookup profile from Conversation Memory: {e}\n"
-                f"URL: {url}\n"
-                f"Request body: {request_payload}\n"
-                f"Response: {response_text}"
+                f"Failed to lookup profile from Conversation Memory: {describe_error(e)}"
             )
             raise
         except Exception as e:
-            self.logger.error(f"Failed to parse Conversation Memory lookup response: {e}")
-            raise
+            message = f"Invalid Conversation Memory lookup response: {describe_error(e)}"
+            self.logger.error(message)
+            raise ValueError(message) from None
 
     async def create_profile(
         self,
@@ -322,22 +304,12 @@ class MemoryClient(BaseAPIClient):
                 response.raise_for_status()
                 data = response.json()
         except httpx.HTTPError as e:
-            response_text = (
-                getattr(e.response, "text", "No response body")
-                if hasattr(e, "response")
-                else "No response"
-            )
-            self.logger.error(
-                f"Failed to create profile: {e}\n"
-                f"URL: {url}\n"
-                f"Request body: {payload}\n"
-                f"Response: {response_text}"
-            )
+            self.logger.error(f"Failed to create profile: {describe_error(e)}")
             raise
 
         profile_id = data.get("id") if isinstance(data, dict) else None
         if not isinstance(profile_id, str):
-            raise ValueError(f"CreateProfile response missing 'id' field: {data!r}")
+            raise ValueError("CreateProfile response missing 'id' field")
         return profile_id
 
     async def create_observation(
@@ -391,17 +363,7 @@ class MemoryClient(BaseAPIClient):
                 return result
 
         except httpx.HTTPError as e:
-            response_text = (
-                getattr(e.response, "text", "No response body")
-                if hasattr(e, "response")
-                else "No response"
-            )
-            self.logger.error(
-                f"Failed to create observation: {e}\n"
-                f"URL: {url}\n"
-                f"Profile ID: {profile_id}\n"
-                f"Response: {response_text}"
-            )
+            self.logger.error(f"Failed to create observation: {describe_error(e)}")
             raise
 
     async def create_conversation_summaries(
@@ -441,16 +403,7 @@ class MemoryClient(BaseAPIClient):
                 return result
 
         except httpx.HTTPError as e:
-            response_text = (
-                getattr(e.response, "text", "No response body")
-                if hasattr(e, "response")
-                else "No response"
-            )
             self.logger.error(
-                f"Failed to create conversation summaries: {e}\n"
-                f"URL: {url}\n"
-                f"Profile ID: {profile_id}\n"
-                f"Summary count: {len(summaries)}\n"
-                f"Response: {response_text}"
+                f"Failed to create {len(summaries)} conversation summaries: {describe_error(e)}"
             )
             raise

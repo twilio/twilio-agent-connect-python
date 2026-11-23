@@ -1,7 +1,7 @@
 """Tests for Conversation Intelligence event processing."""
 
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -557,6 +557,15 @@ class TestOperatorResultProcessor:
 
         assert result.success is False
         assert "Failed to parse event payload" in result.error
+
+    @pytest.mark.asyncio
+    async def test_process_event_invalid_payload_omits_input(self, processor):
+        with patch.object(processor.logger, "error") as log_error:
+            result = await processor.process_event({"summary": "end-user-secret-text"})
+
+        assert result.success is False
+        assert "end-user-secret-text" not in result.error
+        assert "end-user-secret-text" not in str(log_error.call_args)
 
     @pytest.mark.asyncio
     async def test_process_event_uses_memory_store_id(self, processor, mock_memory_client):

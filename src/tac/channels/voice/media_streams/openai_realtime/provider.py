@@ -474,7 +474,6 @@ class OpenAIRealtimeProvider(MediaStreamsOpenAIProvider[_CallState]):
             self.logger.error(
                 "Received malformed function_call item without call_id",
                 conversation_id=conv_id,
-                item=item,
             )
             return
 
@@ -484,7 +483,6 @@ class OpenAIRealtimeProvider(MediaStreamsOpenAIProvider[_CallState]):
                 "Received malformed function_call item without tool name",
                 conversation_id=conv_id,
                 call_id=call_id,
-                item=item,
             )
             output_json = json.dumps({"error": "Malformed function call: missing tool name."})
         else:

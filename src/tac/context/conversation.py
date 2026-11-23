@@ -3,7 +3,7 @@ from typing import Any, Literal
 import httpx
 from pydantic import ValidationError
 
-from tac.context.base import BaseAPIClient
+from tac.context.base import BaseAPIClient, describe_error
 from tac.models.conversation import (
     ActionResponse,
     Communication,
@@ -90,17 +90,7 @@ class ConversationClient(BaseAPIClient):
                 return conversations_list.conversations
 
         except httpx.HTTPError as e:
-            response_text = (
-                getattr(e.response, "text", "No response body")
-                if hasattr(e, "response")
-                else "No response"
-            )
-            self.logger.error(
-                f"Failed to list conversations: {e}\n"
-                f"URL: {url}\n"
-                f"Query params: {params}\n"
-                f"Response: {response_text}"
-            )
+            self.logger.error(f"Failed to list conversations: {describe_error(e)}")
             raise
 
     async def add_participant(
@@ -140,17 +130,7 @@ class ConversationClient(BaseAPIClient):
                 return ParticipantResponse(**response.json())
 
         except httpx.HTTPError as e:
-            response_text = (
-                getattr(e.response, "text", "No response body")
-                if hasattr(e, "response")
-                else "No response"
-            )
-            self.logger.error(
-                f"Failed to add participant: {e}\n"
-                f"URL: {url}\n"
-                f"Request body: {request_payload}\n"
-                f"Response: {response_text}"
-            )
+            self.logger.error(f"Failed to add participant: {describe_error(e)}")
             raise
 
     async def update_participant(
@@ -204,17 +184,7 @@ class ConversationClient(BaseAPIClient):
                 return ParticipantResponse(**response.json())
 
         except httpx.HTTPError as e:
-            response_text = (
-                getattr(e.response, "text", "No response body")
-                if hasattr(e, "response")
-                else "No response"
-            )
-            self.logger.error(
-                f"Failed to update participant: {e}\n"
-                f"URL: {url}\n"
-                f"Request body: {request_payload}\n"
-                f"Response: {response_text}"
-            )
+            self.logger.error(f"Failed to update participant: {describe_error(e)}")
             raise
 
     async def list_participants(self, conversation_id: str) -> list[ParticipantResponse]:
@@ -230,12 +200,13 @@ class ConversationClient(BaseAPIClient):
             self.logger.error(f"Timeout listing participants for conversation {conversation_id}")
             return []
         except httpx.HTTPError as e:
-            self.logger.error(
-                f"HTTP error listing participants for conversation {conversation_id}: {e}"
-            )
+            self.logger.error(f"Failed to list participants: {describe_error(e)}")
             return []
         except ValueError as e:
-            self.logger.error(f"Invalid JSON format when listing participants: {e}")
+            self.logger.error(
+                f"Invalid list participants response for conversation {conversation_id}: "
+                f"{describe_error(e)}"
+            )
             return []
 
     async def create_conversation(
@@ -272,8 +243,6 @@ class ConversationClient(BaseAPIClient):
             metadata=metadata,
         )
         request_payload = request_data.model_dump(by_alias=True, exclude_none=True)
-        # Metadata is customer data: keep its values out of logs.
-        loggable_payload = {k: v for k, v in request_payload.items() if k != "metadata"}
 
         try:
             async with self._get_client() as client:
@@ -285,35 +254,11 @@ class ConversationClient(BaseAPIClient):
                 conversation = ConversationResponse(**response.json())
                 return conversation
 
-        except httpx.HTTPStatusError as e:
-            if e.response.status_code == 409:
-                self.logger.info(f"Conversation creation returned 409 (dedup): {e}\nURL: {url}")
-            else:
-                # CO may echo an offending metadata value, so log only the status then.
-                response_detail = (
-                    f"Status: {e.response.status_code}"
-                    if metadata
-                    else f"Response: {e.response.text}"
-                )
-                self.logger.error(
-                    f"Failed to create conversation: {e}\n"
-                    f"URL: {url}\n"
-                    f"Request body: {loggable_payload}\n"
-                    f"{response_detail}"
-                )
-            raise
         except httpx.HTTPError as e:
-            response_text = (
-                getattr(e.response, "text", "No response body")
-                if hasattr(e, "response")
-                else "No response"
-            )
-            self.logger.error(
-                f"Failed to create conversation: {e}\n"
-                f"URL: {url}\n"
-                f"Request body: {loggable_payload}\n"
-                f"Response: {response_text}"
-            )
+            if isinstance(e, httpx.HTTPStatusError) and e.response.status_code == 409:
+                self.logger.info(f"Conversation creation returned 409 (dedup): {describe_error(e)}")
+            else:
+                self.logger.error(f"Failed to create conversation: {describe_error(e)}")
             raise
 
     async def create_or_reuse_conversation(
@@ -392,17 +337,7 @@ class ConversationClient(BaseAPIClient):
                 return conversation
 
         except httpx.HTTPError as e:
-            response_text = (
-                getattr(e.response, "text", "No response body")
-                if hasattr(e, "response")
-                else "No response"
-            )
-            self.logger.error(
-                f"Failed to update conversation: {e}\n"
-                f"URL: {url}\n"
-                f"Request body: {request_payload}\n"
-                f"Response: {response_text}"
-            )
+            self.logger.error(f"Failed to update conversation: {describe_error(e)}")
             raise
 
     async def get_conversation(self, conversation_id: str) -> ConversationResponse:
@@ -425,7 +360,7 @@ class ConversationClient(BaseAPIClient):
                 response.raise_for_status()
                 return ConversationResponse(**response.json())
         except httpx.HTTPError as e:
-            self.logger.error(f"Failed to fetch conversation: {e}\nURL: {url}")
+            self.logger.error(f"Failed to fetch conversation: {describe_error(e)}")
             raise
 
     async def patch_conversation_metadata(
@@ -455,7 +390,7 @@ class ConversationClient(BaseAPIClient):
                 response.raise_for_status()
                 return ConversationResponse(**response.json())
         except httpx.HTTPError as e:
-            self.logger.error(f"Failed to update conversation metadata: {e}\nURL: {url}")
+            self.logger.error(f"Failed to update conversation metadata: {describe_error(e)}")
             raise
 
     async def clear_status_callbacks(
@@ -486,17 +421,7 @@ class ConversationClient(BaseAPIClient):
                 response.raise_for_status()
 
         except httpx.HTTPError as e:
-            response_text = (
-                getattr(e.response, "text", "No response body")
-                if hasattr(e, "response")
-                else "No response"
-            )
-            self.logger.error(
-                f"Failed to clear status callbacks: {e}\n"
-                f"URL: {url}\n"
-                f"Request body: {request_payload}\n"
-                f"Response: {response_text}"
-            )
+            self.logger.error(f"Failed to clear status callbacks: {describe_error(e)}")
             raise
 
     async def create_communication(
@@ -532,17 +457,7 @@ class ConversationClient(BaseAPIClient):
                 return communication
 
         except httpx.HTTPError as e:
-            response_text = (
-                getattr(e.response, "text", "No response body")
-                if hasattr(e, "response")
-                else "No response"
-            )
-            self.logger.error(
-                f"Failed to add communication: {e}\n"
-                f"URL: {url}\n"
-                f"Request body: {request_payload}\n"
-                f"Response: {response_text}"
-            )
+            self.logger.error(f"Failed to add communication: {describe_error(e)}")
             raise
 
     async def list_communications(
@@ -586,17 +501,7 @@ class ConversationClient(BaseAPIClient):
                 return communications_list.communications
 
         except httpx.HTTPError as e:
-            response_text = (
-                getattr(e.response, "text", "No response body")
-                if hasattr(e, "response")
-                else "No response"
-            )
-            self.logger.error(
-                f"Failed to list communications: {e}\n"
-                f"URL: {url}\n"
-                f"Query params: {params}\n"
-                f"Response: {response_text}"
-            )
+            self.logger.error(f"Failed to list communications: {describe_error(e)}")
             raise
 
     async def create_action(
@@ -639,18 +544,7 @@ class ConversationClient(BaseAPIClient):
                 return ActionResponse(**response.json())
 
         except httpx.HTTPError as e:
-            response_text = (
-                getattr(e.response, "text", "No response body")
-                if hasattr(e, "response")
-                else "No response"
-            )
-            self.logger.error(
-                f"Failed to create action: {e}\n"
-                f"URL: {url}\n"
-                f"ConversationId: {conversation_id}\n"
-                f"Request body: {request_payload}\n"
-                f"Response: {response_text}"
-            )
+            self.logger.error(f"Failed to create action: {describe_error(e)}")
             raise
 
     def get_configuration(self, configuration_id: str) -> ConversationConfiguration:
@@ -679,18 +573,10 @@ class ConversationClient(BaseAPIClient):
                     return configuration
                 except ValidationError as e:
                     self.logger.error(
-                        f"Failed to parse configuration response: {e}\n"
-                        f"URL: {url}\nResponse: {response.text}"
+                        f"Failed to parse configuration {configuration_id}: {describe_error(e)}"
                     )
                     raise ValueError(f"Invalid configuration response schema: {e}") from e
 
         except httpx.HTTPError as e:
-            response_text = (
-                getattr(e.response, "text", "No response body")
-                if hasattr(e, "response")
-                else "No response"
-            )
-            self.logger.error(
-                f"Failed to get configuration: {e}\nURL: {url}\nResponse: {response_text}"
-            )
+            self.logger.error(f"Failed to get configuration: {describe_error(e)}")
             raise

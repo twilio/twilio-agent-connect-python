@@ -900,3 +900,23 @@ class TestCallEventCallbackWiring:
         channel.on_call_status(self._noop_handler())
         kwargs = await self._place_call(channel, websocket_url="wss://example.com/ws")
         assert "status_callback" not in kwargs
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "item",
+    [
+        {"name": "add", "arguments": '{"note": "end-user-secret-text"}'},
+        {"call_id": "call_1", "arguments": '{"note": "end-user-secret-text"}'},
+    ],
+    ids=["missing_call_id", "missing_name"],
+)
+async def test_malformed_function_call_logs_no_arguments(item: dict[str, Any]) -> None:
+    provider = make_channel()._provider
+    provider._calls["CA12"] = _CallState(model_ws=FakeModelWebSocket())
+    provider.logger = MagicMock()
+
+    await provider._handle_function_call("CA12", item)
+
+    provider.logger.error.assert_called_once()
+    assert "end-user-secret-text" not in str(provider.logger.mock_calls)
