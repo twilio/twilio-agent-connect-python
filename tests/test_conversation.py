@@ -1,5 +1,7 @@
 """Tests for ConversationClient and related models."""
 
+from collections.abc import Callable
+from typing import Any
 from unittest.mock import AsyncMock, Mock, patch
 
 import httpx
@@ -1413,3 +1415,59 @@ class TestConversationClient:
             json={"metadata": {"appointment_id": "apt_42"}},
         )
         assert result.metadata == {"existing": "kept", "appointment_id": "apt_42"}
+
+
+class TestListParticipants:
+    """An outage must not look like a conversation with no participants."""
+
+    @staticmethod
+    def _client(
+        monkeypatch: pytest.MonkeyPatch, handler: Callable[[httpx.Request], httpx.Response]
+    ) -> ConversationClient:
+        original = httpx.AsyncClient
+
+        def async_client(*args: Any, **kwargs: Any) -> httpx.AsyncClient:
+            return original(*args, **{**kwargs, "transport": httpx.MockTransport(handler)})
+
+        monkeypatch.setattr(httpx, "AsyncClient", async_client)
+        return ConversationClient(
+            api_key="SK1", api_secret="secret", configuration_id="conv_configuration_test123"
+        )
+
+    @pytest.mark.asyncio
+    async def test_http_error_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        client = self._client(monkeypatch, lambda request: httpx.Response(503))
+
+        with pytest.raises(httpx.HTTPStatusError):
+            await client.list_participants("conv_1")
+
+    @pytest.mark.asyncio
+    async def test_timeout_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        def timeout(request: httpx.Request) -> httpx.Response:
+            raise httpx.ReadTimeout("timed out", request=request)
+
+        client = self._client(monkeypatch, timeout)
+
+        with pytest.raises(httpx.TimeoutException):
+            await client.list_participants("conv_1")
+
+    @pytest.mark.asyncio
+    async def test_participant_without_name_is_listed(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        body = {
+            "participants": [
+                {
+                    "id": "PA_1",
+                    "conversationId": "conv_1",
+                    "accountId": "ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+                    "type": "CUSTOMER",
+                    "addresses": [{"channel": "SMS", "address": "+15555550100"}],
+                }
+            ]
+        }
+        client = self._client(monkeypatch, lambda request: httpx.Response(200, json=body))
+
+        participants = await client.list_participants("conv_1")
+
+        assert [(p.id, p.name) for p in participants] == [("PA_1", None)]

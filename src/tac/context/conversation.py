@@ -188,6 +188,19 @@ class ConversationClient(BaseAPIClient):
             raise
 
     async def list_participants(self, conversation_id: str) -> list[ParticipantResponse]:
+        """
+        List a conversation's participants.
+
+        Args:
+            conversation_id: The conversation ID to list participants for
+
+        Returns:
+            List of ParticipantResponse objects
+
+        Raises:
+            httpx.HTTPError: If the API request fails
+            ValueError: If the response is not valid JSON or doesn't match the schema
+        """
         url = f"{self.base_url}/v2/Conversations/{conversation_id}/Participants"
 
         try:
@@ -196,17 +209,9 @@ class ConversationClient(BaseAPIClient):
                 response.raise_for_status()
                 participants = response.json().get("participants", [])
                 return [ParticipantResponse(**p) for p in participants]
-        except httpx.TimeoutException:
-            self.logger.error(f"Timeout listing participants for conversation {conversation_id}")
-            return []
         except httpx.HTTPError as e:
-            self.logger.error(
-                f"HTTP error listing participants for conversation {conversation_id}: {e}"
-            )
-            return []
-        except ValueError as e:
-            self.logger.error(f"Invalid JSON format when listing participants: {e}")
-            return []
+            self._log_request_failure("Failed to list participants", e)
+            raise
 
     async def create_conversation(
         self,
