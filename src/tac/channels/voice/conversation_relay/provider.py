@@ -47,6 +47,9 @@ _POLL_BASE_DELAY = 0.25
 # total wait time — total worst case is comfortably bounded (~11s of sleep)
 # instead of growing exponentially with attempt count.
 _POLL_MAX_DELAY = 1.5
+# Conversation lookups per call, including the one started on "setup". Each
+# failed lookup is retried on the caller's next prompt.
+_MAX_INIT_ATTEMPTS = 3
 
 
 class ConversationRelayProvider(VoiceProvider):
@@ -100,9 +103,14 @@ class ConversationRelayProvider(VoiceProvider):
         return self.channel.tac.is_orchestrator_enabled()
 
     @staticmethod
+    def _is_outbound(setup_msg: SetupMessage) -> bool:
+        # Twilio reports outbound calls as "outbound-api" or "outbound-dial".
+        return (setup_msg.direction or "").lower().startswith("outbound")
+
+    @staticmethod
     def _caller_address(setup_msg: SetupMessage) -> str | None:
         """Return the phone number of the remote caller/callee from the setup message."""
-        if setup_msg.direction and setup_msg.direction.upper() == "OUTBOUND":
+        if ConversationRelayProvider._is_outbound(setup_msg):
             return setup_msg.to_number
         return setup_msg.from_number
 
@@ -110,7 +118,7 @@ class ConversationRelayProvider(VoiceProvider):
     def _agent_address(setup_msg: SetupMessage) -> str | None:
         """TAC's own number for this call: the dialed number on inbound, the
         caller ID on outbound (the complement of `_caller_address`)."""
-        if setup_msg.direction and setup_msg.direction.upper() == "OUTBOUND":
+        if ConversationRelayProvider._is_outbound(setup_msg):
             return setup_msg.from_number
         return setup_msg.to_number
 
@@ -384,16 +392,18 @@ class ConversationRelayProvider(VoiceProvider):
         self.logger.debug("WebSocket connection established")
 
         conv_id: str | None = None
+        call_sid: str | None = None
         session_state = None
         # This call's background CO conversation lookup task (kicked off
         # below on "setup"), consumed and reset to None on the first
         # "prompt". Still non-None in `finally` means the call ended before
         # any prompt arrived.
         init_task: asyncio.Task[tuple[str, SessionState | None]] | None = None
+        init_attempts = 0
 
         try:
             # First message should be 'setup'
-            data = await websocket.receive_json()
+            data = await self._receive_message(websocket, conv_id, call_sid)
             if data.get("type") == "setup":
                 setup_msg = SetupMessage(**data)
                 call_sid = setup_msg.call_sid
@@ -412,20 +422,44 @@ class ConversationRelayProvider(VoiceProvider):
 
                 # Process all subsequent messages
                 while True:
-                    data = await websocket.receive_json()
+                    data = await self._receive_message(websocket, conv_id, call_sid)
                     msg_type = data.get("type")
 
                     if msg_type == "prompt":
                         if not conv_id and call_sid:
-                            if init_task is not None:
-                                # Clear before awaiting so a failure here
-                                # doesn't leave `finally` re-awaiting (and
-                                # re-logging) this same task. If still
-                                # polling, this just waits it out. (None here
-                                # only means relay-only mode — see "setup".)
-                                task_to_await = init_task
+                            if self.channel.tac.is_orchestrator_enabled():
+                                if init_attempts >= _MAX_INIT_ATTEMPTS:
+                                    await self._report_error(
+                                        RuntimeError(
+                                            "Cannot process prompt: conversation initialization "
+                                            f"failed after {init_attempts} attempts for call "
+                                            f"{call_sid}"
+                                        ),
+                                        conv_id,
+                                        call_sid,
+                                    )
+                                    continue
+                                # The first attempt claims the lookup started on
+                                # "setup"; a retry starts a new one. Cleared
+                                # before awaiting so a failure here doesn't leave
+                                # `finally` re-awaiting (and re-logging) this
+                                # same task. If still polling, this just waits
+                                # it out.
+                                task_to_await = init_task or asyncio.create_task(
+                                    self._initialize_conversation(call_sid, setup_msg, websocket)
+                                )
                                 init_task = None
-                                conv_id, session_state = await task_to_await
+                                try:
+                                    conv_id, session_state = await task_to_await
+                                except Exception as e:
+                                    init_attempts += 1
+                                    self.logger.error(
+                                        f"Conversation initialization failed: {e}",
+                                        call_sid=call_sid,
+                                        attempt=init_attempts,
+                                    )
+                                    await self._report_error(e, conv_id, call_sid)
+                                    continue
                             else:
                                 conv_id = call_sid
                                 self._websocket_manager.add_websocket(conv_id, websocket)
@@ -505,6 +539,41 @@ class ConversationRelayProvider(VoiceProvider):
                 # A real external cancellation, not the one we caused above —
                 # propagate it now that cleanup ran.
                 raise cancelled_error
+
+    async def _receive_message(
+        self, websocket: WebSocketProtocol, conv_id: str | None, call_sid: str | None
+    ) -> dict[str, Any]:
+        """Receive the next message, skipping frames that aren't a JSON object.
+
+        A frame that isn't valid JSON is logged and reported to ``on_error``;
+        one that is JSON but not an object is only logged.
+        """
+        while True:
+            try:
+                data = await websocket.receive_json()
+            except ValueError as e:
+                self.logger.warning(
+                    f"Skipping WebSocket frame that is not valid JSON: {e}",
+                    conversation_id=conv_id,
+                    call_sid=call_sid,
+                )
+                await self._report_error(e, conv_id, call_sid)
+                continue
+            if isinstance(data, dict):
+                return data
+            self.logger.debug(
+                "Skipping WebSocket frame that is not a JSON object",
+                conversation_id=conv_id,
+                call_sid=call_sid,
+            )
+
+    async def _report_error(
+        self, error: Exception, conv_id: str | None, call_sid: str | None
+    ) -> None:
+        await self.channel.tac.trigger_error(
+            error,
+            {"conversation_id": conv_id, "call_sid": call_sid, "channel": self.channel_name},
+        )
 
     def _merge_call_options(self, per_call: CallOptions | None) -> CallOptions | None:
         """Overlay ``per_call`` onto ``ConversationRelayProviderConfig.default_call_options``.
@@ -644,8 +713,9 @@ class ConversationRelayProvider(VoiceProvider):
             session_state: Session state object (if session_manager provided)
         """
         try:
-            should_process = data.get("final", True)
-            if should_process:
+            # With partialPrompts enabled, ConversationRelay streams `last: false`
+            # partials before the complete prompt; only the complete one is a turn.
+            if data.get("last", True) is not False:
                 prompt_msg = PromptMessage(**data)
                 conv_id = prompt_msg.conversation_id or conv_id
 

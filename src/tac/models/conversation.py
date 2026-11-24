@@ -261,7 +261,7 @@ class ParticipantResponse(BaseModel):
     id: str = Field(..., description="Participant ID")
     conversation_id: str = Field(..., alias="conversationId", description="Conversation ID")
     account_id: str = Field(..., alias="accountId", description="Account ID")
-    name: str = Field(..., description="Participant display name")
+    name: str | None = Field(None, description="Participant display name")
     type: Literal["HUMAN_AGENT", "CUSTOMER", "AI_AGENT", "AGENT", "UNKNOWN"] | None = Field(
         None, description="Type of Participant in the Conversation"
     )

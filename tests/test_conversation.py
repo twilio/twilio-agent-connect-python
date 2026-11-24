@@ -1,5 +1,7 @@
 """Tests for ConversationClient and related models."""
 
+from collections.abc import Callable
+from typing import Any
 from unittest.mock import AsyncMock, Mock, patch
 
 import httpx
@@ -1326,12 +1328,10 @@ class TestConversationClient:
         )
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize(
-        ("metadata", "body_logged"), [({"secret": "value-x"}, False), (None, True)]
-    )
+    @pytest.mark.parametrize("metadata", [{"secret": "value-x"}, None])
     @patch("httpx.AsyncClient")
-    async def test_create_conversation_error_log_omits_body_when_metadata_sent(
-        self, mock_async_client_class, metadata, body_logged
+    async def test_create_conversation_error_log_omits_response_body(
+        self, mock_async_client_class, metadata
     ):
         request = httpx.Request("POST", "https://conversations.twilio.com/v2/Conversations")
         error_response = httpx.Response(400, text="bad value-x here", request=request)
@@ -1350,11 +1350,9 @@ class TestConversationClient:
             with pytest.raises(httpx.HTTPStatusError):
                 await client.create_conversation(metadata=metadata)
 
-        logged = log_error.call_args.args[0]
-        assert ("bad value-x here" in logged) is body_logged
-        assert "value-x" not in logged or body_logged
-        if not body_logged:
-            assert "Status: 400" in logged
+        logged = str(log_error.call_args)
+        assert "value-x" not in logged
+        assert log_error.call_args.kwargs["status"] == 400
 
     @pytest.mark.asyncio
     async def test_create_or_reuse_passes_metadata_to_create(self):
@@ -1417,3 +1415,59 @@ class TestConversationClient:
             json={"metadata": {"appointment_id": "apt_42"}},
         )
         assert result.metadata == {"existing": "kept", "appointment_id": "apt_42"}
+
+
+class TestListParticipants:
+    """An outage must not look like a conversation with no participants."""
+
+    @staticmethod
+    def _client(
+        monkeypatch: pytest.MonkeyPatch, handler: Callable[[httpx.Request], httpx.Response]
+    ) -> ConversationClient:
+        original = httpx.AsyncClient
+
+        def async_client(*args: Any, **kwargs: Any) -> httpx.AsyncClient:
+            return original(*args, **{**kwargs, "transport": httpx.MockTransport(handler)})
+
+        monkeypatch.setattr(httpx, "AsyncClient", async_client)
+        return ConversationClient(
+            api_key="SK1", api_secret="secret", configuration_id="conv_configuration_test123"
+        )
+
+    @pytest.mark.asyncio
+    async def test_http_error_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        client = self._client(monkeypatch, lambda request: httpx.Response(503))
+
+        with pytest.raises(httpx.HTTPStatusError):
+            await client.list_participants("conv_1")
+
+    @pytest.mark.asyncio
+    async def test_timeout_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        def timeout(request: httpx.Request) -> httpx.Response:
+            raise httpx.ReadTimeout("timed out", request=request)
+
+        client = self._client(monkeypatch, timeout)
+
+        with pytest.raises(httpx.TimeoutException):
+            await client.list_participants("conv_1")
+
+    @pytest.mark.asyncio
+    async def test_participant_without_name_is_listed(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        body = {
+            "participants": [
+                {
+                    "id": "PA_1",
+                    "conversationId": "conv_1",
+                    "accountId": "ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+                    "type": "CUSTOMER",
+                    "addresses": [{"channel": "SMS", "address": "+15555550100"}],
+                }
+            ]
+        }
+        client = self._client(monkeypatch, lambda request: httpx.Response(200, json=body))
+
+        participants = await client.list_participants("conv_1")
+
+        assert [(p.id, p.name) for p in participants] == [("PA_1", None)]

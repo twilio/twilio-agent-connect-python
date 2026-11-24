@@ -84,6 +84,7 @@ class TestProfileLookupInMemoryRetrieval:
             summaries_limit=5,
             communications_limit=0,
             relevance_threshold=0.0,
+            raise_on_error=True,
         )
 
     @pytest.mark.asyncio
@@ -144,6 +145,7 @@ class TestProfileLookupInMemoryRetrieval:
             summaries_limit=5,
             communications_limit=0,
             relevance_threshold=0.0,
+            raise_on_error=True,
         )
 
         # Result is wrapped in TACMemoryResponse
@@ -197,6 +199,7 @@ class TestProfileLookupInMemoryRetrieval:
             summaries_limit=5,
             communications_limit=0,
             relevance_threshold=0.0,
+            raise_on_error=True,
         )
 
     @pytest.mark.asyncio

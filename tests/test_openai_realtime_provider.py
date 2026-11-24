@@ -16,6 +16,7 @@ from tac.channels.voice.media_streams.openai_realtime.provider import (
     TWILIO_AUDIO_FORMAT_FOR_REALTIME,
 )
 from tac.channels.voice.media_streams.shared.openai_provider import SESSION_CONFIG_TOKEN_PARAM
+from tac.models.knowledge import KnowledgeChunkResult
 from tac.models.outbound import (
     InitiateVoiceConversationOptions,
     InitiateVoiceConversationOptionsOpenAIRealtime,
@@ -400,6 +401,33 @@ class TestToolCalls:
         result = await provider._run_tool_call("CA8", "add", json.dumps({"a": 2, "b": 3}))
 
         assert result == 5
+
+    @pytest.mark.asyncio
+    async def test_pydantic_output_is_sent_as_json(self) -> None:
+        @function_tool()
+        def lookup() -> KnowledgeChunkResult:
+            """Return a knowledge chunk."""
+            return KnowledgeChunkResult(
+                content="Store hours", knowledge_id="know_1", created_at="2025-01-01T00:00:00Z"
+            )
+
+        channel = make_channel(tools=[lookup])
+        provider = channel._provider
+
+        model_ws = FakeModelWebSocket()
+        provider._calls["CA10"] = _CallState(model_ws=model_ws)
+
+        await provider._handle_function_call(
+            "CA10", {"call_id": "call_1", "name": "lookup", "arguments": "{}"}
+        )
+
+        outputs = [m for m in model_ws.sent if m["type"] == "conversation.item.create"]
+        assert json.loads(outputs[0]["item"]["output"]) == {
+            "content": "Store hours",
+            "knowledgeId": "know_1",
+            "createdAt": "2025-01-01T00:00:00Z",
+            "score": None,
+        }
 
     @pytest.mark.asyncio
     async def test_non_serializable_output_still_sends_function_call_output(self) -> None:

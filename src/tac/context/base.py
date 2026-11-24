@@ -99,6 +99,25 @@ class BaseAPIClient:
             )
         return user_agent
 
+    def _log_request_failure(self, message: str, error: httpx.HTTPError) -> None:
+        """Log a failed request by method, URL and status only.
+
+        Request bodies, query strings and response bodies are left out: they can
+        carry customer data (phone numbers, emails, traits, message content), and
+        error responses may echo the request.
+        """
+        method: str | None = None
+        url: str | None = None
+        try:
+            method = error.request.method
+            url = str(error.request.url.copy_with(query=None))
+        except RuntimeError:
+            pass
+        status = error.response.status_code if isinstance(error, httpx.HTTPStatusError) else None
+        self.logger.error(
+            f"{message}: {type(error).__name__}", method=method, url=url, status=status
+        )
+
     def _get_client(self) -> httpx.AsyncClient:
         """Create a new httpx.AsyncClient for each request to avoid event loop issues."""
         return httpx.AsyncClient(

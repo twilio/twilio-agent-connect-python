@@ -363,13 +363,13 @@ class TestMessagingCallSites:
     async def test_response_sent_suppressed_when_send_fails(
         self, mock_client: MagicMock, tac: TAC
     ) -> None:
-        """send_response swallows the error, so tracking must sit inside the try."""
         channel = SMSChannel(tac)
         channel.conversation_orchestrator_client.create_action = AsyncMock(
             side_effect=RuntimeError("Orchestrator down")
         )
 
-        await channel.send_response(self.session("SMS"), "hello")
+        with pytest.raises(RuntimeError, match="Orchestrator down"):
+            await channel.send_response(self.session("SMS"), "hello")
 
         assert not [c for c in tracked(mock_client) if c["event"] == "Response Sent"]
 

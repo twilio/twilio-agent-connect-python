@@ -462,6 +462,48 @@ class TestParticipantLookupFailure:
         assert errors[0]["dropped_inbound"] is True
 
 
+class TestParticipantOutage:
+    """A Conversation Orchestrator outage on the participant lookup drops the
+    turn with that reason, instead of passing for an empty conversation."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("channel_type", [SMSChannel, ChatChannel])
+    async def test_outage_drops_the_turn_without_adding_a_participant(
+        self, channel_type: type[SMSChannel] | type[ChatChannel], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        tac = TAC(get_test_config())
+        channel = channel_type(tac)
+        handled: list[str] = []
+        errors: list[tuple[Exception, dict[str, Any]]] = []
+        tac.on_message_ready(lambda msg, ctx, mem: handled.append(msg) or "reply")
+        tac.on_error(lambda e, ctx: errors.append((e, ctx)))
+
+        original = httpx.AsyncClient
+        transport = httpx.MockTransport(lambda request: httpx.Response(503))
+        monkeypatch.setattr(
+            httpx,
+            "AsyncClient",
+            lambda *a, **k: original(*a, **{**k, "transport": transport}),
+        )
+        event = inbound()
+        if channel_type is ChatChannel:
+            event = inbound(author_address="user@example.com", author_participant_id="PA_USER")
+            event["data"]["author"]["channel"] = "CHAT"
+            event["data"]["channelId"] = "CH_CHAT_SID"
+
+        co = tac.conversation_orchestrator_client
+        assert co is not None
+        with patch.object(co, "add_participant", new=AsyncMock()) as add_participant:
+            await channel.process_webhook(event)
+
+        assert handled == []
+        add_participant.assert_not_awaited()
+        assert len(errors) == 1
+        error, context = errors[0]
+        assert "Could not read participants" in str(error)
+        assert context["dropped_inbound"] is True
+
+
 class TestReplyRecipient:
     @pytest.mark.asyncio
     async def test_reply_goes_to_the_reconciled_customer_not_the_author(self) -> None:

@@ -53,7 +53,7 @@ class KnowledgeClient(BaseAPIClient):
 
                 return KnowledgeBase(**data)
         except httpx.HTTPError as e:
-            self.logger.error(f"Failed to fetch knowledge base: {e}")
+            self._log_request_failure("Failed to fetch knowledge base", e)
             raise
 
     async def search_knowledge_base(
@@ -96,5 +96,5 @@ class KnowledgeClient(BaseAPIClient):
                 return chunks
 
         except httpx.HTTPError as e:
-            self.logger.error(f"Failed to search knowledge base: {e}")
+            self._log_request_failure("Failed to search knowledge base", e)
             raise
