@@ -2605,6 +2605,29 @@ class TestSessionManagerDefaults:
         assert session_state.stream_task.done()
 
 
+class TestPartialPrompts:
+    """With partialPrompts on, ConversationRelay marks partial prompts `last: false`."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("extra", "handled"),
+        [({"last": False}, False), ({"last": True}, True), ({}, True)],
+        ids=["partial", "last", "no-last-field"],
+    )
+    async def test_only_complete_prompts_start_a_turn(
+        self, extra: dict[str, bool], handled: bool
+    ) -> None:
+        channel = VoiceChannel(TAC(get_test_config()))
+        provider = channel._provider
+        provider._handle_prompt = AsyncMock()
+
+        await provider._handle_prompt_async(
+            "CA_PARTIAL", {"type": "prompt", "voicePrompt": "I need", **extra}, None
+        )
+
+        assert provider._handle_prompt.await_count == (1 if handled else 0)
+
+
 class TestVoicePublicDomainNormalization:
     """TACConfig.voice_public_domain strips schemes/whitespace/trailing slashes."""
 
