@@ -1,5 +1,6 @@
 """MessagingChannel base class for messaging channels (SMS, RCS, WhatsApp, Chat)."""
 
+import contextlib
 import warnings
 from abc import abstractmethod
 from collections.abc import AsyncGenerator, Awaitable, Callable
@@ -332,40 +333,30 @@ class MessagingChannel(BaseChannel):
             TypeError: If response is not a string (e.g. an async generator is
                 passed, since messaging channels don't support streaming)
             RuntimeError: If no recipient can be resolved for the conversation.
+            httpx.HTTPError: If the Conversation Orchestrator send fails.
+
+        Any failure other than the `TypeError` is reported to `on_error`
+        before it is raised.
         """
         channel_name = self.get_channel_name()
         if not isinstance(response, str):
             raise TypeError(f"{channel_name} channel only supports string responses")
 
-        if isinstance(conversation_id, ConversationSession):
-            session: ConversationSession | None = conversation_id
-            conv_id = conversation_id.conversation_id
-        else:
-            conv_id = conversation_id
-            participants = await self._list_participants(conv_id)
-            if participants is None:
-                raise RuntimeError(
-                    f"Unable to send {channel_name} message: could not read participants for "
-                    f"conversation {conv_id}. Pass the ConversationSession from "
-                    "on_message_ready or initiate_outbound_conversation to avoid this lookup."
-                )
-            session = self._session_from_participants(conv_id, participants)
-
-        if session is None or session.author_info is None:
-            raise RuntimeError(
-                f"Unable to send {channel_name} message: no recipient resolved for "
-                f"conversation {conv_id}. Pass the ConversationSession you were "
-                "handed by on_message_ready or initiate_outbound_conversation."
-            )
-
-        agent_address = (
-            session.ai_agent_info.address
-            if session.ai_agent_info
-            else self._agent_address(session).address
+        conv_id = (
+            conversation_id.conversation_id
+            if isinstance(conversation_id, ConversationSession)
+            else conversation_id
         )
-        channel_settings = self._build_channel_settings(conv_id, session)
-
         try:
+            session = await self._resolve_send_session(conversation_id)
+            assert session.author_info is not None  # checked by _resolve_send_session
+            agent_address = (
+                session.ai_agent_info.address
+                if session.ai_agent_info
+                else self._agent_address(session).address
+            )
+            channel_settings = self._build_channel_settings(conv_id, session)
+
             action_request = SendMessageActionRequest(
                 payload=SendMessageActionPayload(
                     from_=self._participant_ref(
@@ -391,24 +382,54 @@ class MessagingChannel(BaseChannel):
                 to_address=mask_address(session.author_info.address),
                 channel_id=channel_settings.channel_id if channel_settings else None,
             )
-
-            # Inside the try, not after it: the handler below swallows the
-            # error rather than re-raising, so tracking after the block would
-            # report a failed send as delivered.
-            track_event(
-                "Response Sent",
-                self.tac.config.account_sid,
-                channel=self._telemetry_channel,
-                conversation_id=conv_id,
-                response_type="full",
-            )
         except Exception as e:
             self.logger.error(
-                "Failed to create action",
+                f"Failed to send {channel_name} response",
                 conversation_id=conv_id,
                 error=str(e),
                 exc_info=True,
             )
+            await self.tac.trigger_error(e, {"conversation_id": conv_id, "channel": channel_name})
+            raise
+
+        track_event(
+            "Response Sent",
+            self.tac.config.account_sid,
+            channel=self._telemetry_channel,
+            conversation_id=conv_id,
+            response_type="full",
+        )
+
+    async def _resolve_send_session(
+        self, conversation_id: str | ConversationSession
+    ) -> ConversationSession:
+        """Return the session to reply within, rebuilding it from CO for a bare id.
+
+        Raises:
+            RuntimeError: If no recipient can be resolved for the conversation.
+        """
+        channel_name = self.get_channel_name()
+        if isinstance(conversation_id, ConversationSession):
+            session: ConversationSession | None = conversation_id
+            conv_id = conversation_id.conversation_id
+        else:
+            conv_id = conversation_id
+            participants = await self._list_participants(conv_id)
+            if participants is None:
+                raise RuntimeError(
+                    f"Unable to send {channel_name} message: could not read participants for "
+                    f"conversation {conv_id}. Pass the ConversationSession from "
+                    "on_message_ready or initiate_outbound_conversation to avoid this lookup."
+                )
+            session = self._session_from_participants(conv_id, participants)
+
+        if session is None or session.author_info is None:
+            raise RuntimeError(
+                f"Unable to send {channel_name} message: no recipient resolved for "
+                f"conversation {conv_id}. Pass the ConversationSession you were "
+                "handed by on_message_ready or initiate_outbound_conversation."
+            )
+        return session
 
     async def process_webhook(
         self, webhook_data: dict[str, Any], idempotency_token: str | None = None
@@ -587,9 +608,6 @@ class MessagingChannel(BaseChannel):
 
         try:
             response = await self.tac.trigger_message_ready(message_text, session, memory_response)
-            # Auto-send if callback returned a string (None = manual send_response flow)
-            if response is not None:
-                await self.send_response(session, response, role="assistant")
         except Exception as e:
             self.logger.error(
                 "Error in message ready callback",
@@ -597,6 +615,14 @@ class MessagingChannel(BaseChannel):
                 error=str(e),
                 exc_info=True,
             )
+            await self.tac.trigger_error(e, {"conversation_id": conv_id, "channel": channel})
+            return
+
+        # Auto-send if callback returned a string (None = manual send_response flow)
+        if response is not None:
+            # send_response has already logged and reported a failed send.
+            with contextlib.suppress(Exception):
+                await self.send_response(session, response, role="assistant")
 
     async def _resolve_participants(
         self,

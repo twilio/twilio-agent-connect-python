@@ -14,6 +14,7 @@ import pytest
 
 from tac import TAC
 from tac.channels.sms import SMSChannel
+from tac.models.conversation import ParticipantAddress, ParticipantResponse
 
 
 def get_test_config() -> dict[str, Any]:
@@ -185,3 +186,96 @@ class TestReconcileFailureRoutesToOnError:
             await channel._handle_communication_created(webhook_event)
 
         assert message_ready_calls == []
+
+
+def _participants() -> list[ParticipantResponse]:
+    def participant(pid: str, ptype: str, address: str) -> ParticipantResponse:
+        return ParticipantResponse(
+            id=pid,
+            conversation_id="CH123",
+            account_id="ACtest123",
+            type=ptype,  # type: ignore[arg-type]
+            addresses=[ParticipantAddress(channel="SMS", address=address)],
+        )
+
+    return [
+        participant("PA_A", "AI_AGENT", "+15551234567"),
+        participant("PA_C", "CUSTOMER", "+15555550100"),
+    ]
+
+
+def _inbound_event() -> dict[str, Any]:
+    return {
+        "id": "comms_communication_01test",
+        "conversationId": "CH123",
+        "accountId": "ACtest",
+        "author": {"address": "+15555550100", "channel": "SMS", "participantId": "PA_C"},
+        "content": {"type": "TEXT", "text": "hi"},
+        "recipients": [{"address": "+15551234567", "channel": "SMS", "participantId": "PA_A"}],
+        "createdAt": "2026-04-27T00:00:00Z",
+    }
+
+
+class TestSendFailuresRouteToOnError:
+    """A reply that fails to send, or a callback that raises, reaches on_error."""
+
+    @staticmethod
+    def _setup() -> tuple[TAC, SMSChannel, list[tuple[Exception, dict[str, Any]]]]:
+        tac = TAC(get_test_config())
+        channel = SMSChannel(tac)
+        errors: list[tuple[Exception, dict[str, Any]]] = []
+        tac.on_error(lambda error, context: errors.append((error, context)))
+        co = tac.conversation_orchestrator_client
+        assert co is not None
+        co.list_participants = AsyncMock(return_value=_participants())  # type: ignore[method-assign]
+        return tac, channel, errors
+
+    @pytest.mark.asyncio
+    async def test_send_response_reports_and_raises(self) -> None:
+        tac, channel, errors = self._setup()
+        send_error = httpx.ConnectError("conversation orchestrator unreachable")
+        co = tac.conversation_orchestrator_client
+        assert co is not None
+
+        with (
+            patch.object(co, "create_action", new=AsyncMock(side_effect=send_error)),
+            pytest.raises(httpx.ConnectError),
+        ):
+            await channel.send_response("CH123", "Hello")
+
+        assert len(errors) == 1
+        error, context = errors[0]
+        assert error is send_error
+        assert context["conversation_id"] == "CH123"
+        assert context["channel"] == "SMS"
+
+    @pytest.mark.asyncio
+    async def test_auto_send_failure_is_reported_once(self) -> None:
+        tac, channel, errors = self._setup()
+        tac.on_message_ready(lambda message, session, memory: "reply")
+        send_error = httpx.ConnectError("conversation orchestrator unreachable")
+        co = tac.conversation_orchestrator_client
+        assert co is not None
+
+        with patch.object(co, "create_action", new=AsyncMock(side_effect=send_error)):
+            await channel._handle_communication_created(_inbound_event())
+
+        assert [e for e, _ in errors] == [send_error]
+
+    @pytest.mark.asyncio
+    async def test_callback_failure_is_reported(self) -> None:
+        tac, channel, errors = self._setup()
+        callback_error = ValueError("model unavailable")
+
+        def failing_callback(message: str, session: Any, memory: Any) -> str:
+            raise callback_error
+
+        tac.on_message_ready(failing_callback)
+
+        await channel._handle_communication_created(_inbound_event())
+
+        assert len(errors) == 1
+        error, context = errors[0]
+        assert error is callback_error
+        assert context["conversation_id"] == "CH123"
+        assert context["channel"] == "SMS"

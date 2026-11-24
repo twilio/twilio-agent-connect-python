@@ -480,7 +480,8 @@ class TAC:
         otherwise be invisible to your application — for example, an inbound
         message that is dropped because participant reconciliation failed
         (Conversation Orchestrator unreachable, a participant-promotion conflict,
-        or no resolvable customer). Without a handler these are only logged;
+        or no resolvable customer), a messaging reply that fails to send, or an
+        `on_message_ready` callback that raises. Without a handler these are only logged;
         registering ``on_error`` lets you alert, retry, or reconcile.
 
         The callback receives the exception and a context dict with details such
