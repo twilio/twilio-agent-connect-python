@@ -8,10 +8,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING, Any
 
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from tac.channels.voice.conversation_relay.twiml import TwiMLBuilderConversationRelay
 from tac.channels.voice.provider import VoiceProvider
@@ -19,6 +20,7 @@ from tac.channels.websocket_manager import WebSocketManager
 from tac.channels.websocket_protocol import WebSocketDisconnectError, WebSocketProtocol
 from tac.core.analytics import track_event
 from tac.core.config import TACConfig
+from tac.models.conversation import ParticipantAddress, ParticipantRequest
 from tac.models.outbound import (
     CallOptions,
     InitiateVoiceConversationOptions,
@@ -47,6 +49,14 @@ _POLL_BASE_DELAY = 0.25
 # total wait time — total worst case is comfortably bounded (~11s of sleep)
 # instead of growing exponentially with attempt count.
 _POLL_MAX_DELAY = 1.5
+
+# <Parameter> carrying a pre-created conversation ID to the WebSocket ``setup`` message.
+_PRECREATED_CONVERSATION_PARAMETER = "tacConversationId"
+
+# Limit on the whole conversation pre-create. Twilio waits about 15s for inbound
+# TwiML, so a hung create must give up well before that and fall back, leaving
+# time for the app's on_inbound_call_twiml customizer.
+_PRE_CREATE_TIMEOUT_SECONDS = 5.0
 
 
 class ConversationRelayProvider(VoiceProvider):
@@ -191,11 +201,113 @@ class ConversationRelayProvider(VoiceProvider):
                 )
             customized = result
 
-        return self._twiml.build(
-            "handle_incoming_call",
-            host=host_twiml_options,
-            per_call=customized,
+        resolved = self._twiml.resolve_options(host_twiml_options, customized)
+        if twiml_request is not None:
+            resolved = await self._with_pre_created_conversation(
+                resolved,
+                twiml_request.call_sid,
+                twiml_request.from_number,
+                twiml_request.to_number,
+            )
+        return self._twiml.build_resolved("handle_incoming_call", resolved)
+
+    async def _with_pre_created_conversation(
+        self,
+        resolved: VoiceTwiMLOptionsConversationRelay,
+        call_sid: str | None,
+        customer_address: str | None,
+        agent_address: str | None,
+    ) -> VoiceTwiMLOptionsConversationRelay:
+        """Pre-create the call's conversation and route the TwiML to it by
+        ``conversation_id``, appending ``tacConversationId`` to the resolved
+        ``custom_parameters``.
+
+        Skipped, returning ``resolved`` unchanged, when the options already
+        select a conversation or use a ``conversation_configuration`` other
+        than TAC's: the conversation would be created under TAC's
+        configuration, so ConversationRelay creates it from the selected one
+        instead."""
+        if (
+            resolved.conversation_id
+            or resolved.conversation_configuration is None
+            or resolved.conversation_configuration
+            != self.channel.tac.config.conversation_configuration_id
+        ):
+            return resolved
+
+        conversation_id = await self._pre_create_conversation(
+            call_sid, customer_address, agent_address
         )
+        if not conversation_id:
+            return resolved
+
+        existing = resolved.custom_parameters
+        if isinstance(existing, BaseModel):
+            existing = existing.model_dump(by_alias=True, exclude_none=True)
+        routed = resolved.model_copy()
+        routed.conversation_id = conversation_id
+        routed.custom_parameters = {
+            **(existing or {}),
+            _PRECREATED_CONVERSATION_PARAMETER: conversation_id,
+        }
+        return routed
+
+    async def _pre_create_conversation(
+        self,
+        call_sid: str | None,
+        customer_address: str | None,
+        agent_address: str | None,
+    ) -> str | None:
+        """Create (or reuse, on a 409) the conversation for a call before its
+        TwiML is returned, so ConversationRelay routes to it instead of creating
+        one on the first communication. Returns None outside orchestrated mode,
+        on failure, or after ``_PRE_CREATE_TIMEOUT_SECONDS`` (the request is
+        cancelled), leaving ConversationRelay to create it."""
+        client = self.channel.tac.conversation_orchestrator_client
+        if (
+            not self.channel.tac.is_orchestrator_enabled()
+            or client is None
+            or not customer_address
+            or not agent_address
+        ):
+            return None
+
+        started_at = time.monotonic()
+        try:
+            conv_id, reused = await asyncio.wait_for(
+                client.create_or_reuse_conversation(
+                    [
+                        ParticipantRequest(
+                            type="CUSTOMER",
+                            addresses=[
+                                ParticipantAddress(channel="VOICE", address=customer_address)
+                            ],
+                        ),
+                        ParticipantRequest(
+                            type="AI_AGENT",
+                            addresses=[ParticipantAddress(channel="VOICE", address=agent_address)],
+                        ),
+                    ]
+                ),
+                timeout=_PRE_CREATE_TIMEOUT_SECONDS,
+            )
+        except Exception as e:
+            self.logger.warning(
+                "Voice conversation pre-create failed, ConversationRelay will create it "
+                "on the first communication",
+                call_sid=call_sid,
+                error=str(e),
+                timed_out=isinstance(e, asyncio.TimeoutError),
+            )
+            return None
+        self.logger.info(
+            "Pre-created voice conversation",
+            call_sid=call_sid,
+            conversation_id=conv_id,
+            reused=reused,
+            create_ms=int((time.monotonic() - started_at) * 1000),
+        )
+        return conv_id
 
     async def handle_twilio_provider_callback(
         self,
@@ -276,8 +388,23 @@ class ConversationRelayProvider(VoiceProvider):
                 f"{_POLL_ATTEMPTS} attempts."
             )
 
-        conversation = conversations[0]
-        conv_id = conversation.id
+        return await self._register_conversation(
+            conversations[0].id, call_sid, setup_msg, websocket
+        )
+
+    async def _register_conversation(
+        self,
+        conv_id: str,
+        call_sid: str,
+        setup_msg: SetupMessage,
+        websocket: WebSocketProtocol,
+    ) -> tuple[str, SessionState | None]:
+        """Register the local session and WebSocket for a known orchestrated
+        conversation, reading the caller's address and profile from its
+        participants."""
+        conversation_orchestrator_client = self.channel.tac.conversation_orchestrator_client
+        if conversation_orchestrator_client is None:
+            raise RuntimeError("_register_conversation called without Conversation Orchestrator")
 
         participants = await conversation_orchestrator_client.list_participants(conv_id)
 
@@ -406,8 +533,13 @@ class ConversationRelayProvider(VoiceProvider):
                 # for the caller's first utterance (transcription) rather than
                 # paying that latency serially once the first prompt lands.
                 if call_sid and self.channel.tac.is_orchestrator_enabled():
+                    pre_created_id = (setup_msg.custom_parameters or {}).get(
+                        _PRECREATED_CONVERSATION_PARAMETER
+                    )
                     init_task = asyncio.create_task(
-                        self._initialize_conversation(call_sid, setup_msg, websocket)
+                        self._register_conversation(pre_created_id, call_sid, setup_msg, websocket)
+                        if isinstance(pre_created_id, str) and pre_created_id
+                        else self._initialize_conversation(call_sid, setup_msg, websocket)
                     )
 
                 # Process all subsequent messages
@@ -584,10 +716,11 @@ class ConversationRelayProvider(VoiceProvider):
         # override is options.twiml_options. ``options.websocket_url`` is the
         # dedicated per-call override and wins over any websocket_url that came
         # through the layered merge; both fall back to the TACConfig-derived URL.
-        twiml_xml = self._twiml.build(
-            "initiate_outbound_conversation",
-            per_call=twiml_options,
-            websocket_url=options.websocket_url,
+        resolved = await self._with_pre_created_conversation(
+            self._twiml.resolve_options(None, twiml_options), None, options.to, from_number
+        )
+        twiml_xml = self._twiml.build_resolved(
+            "initiate_outbound_conversation", resolved, websocket_url=options.websocket_url
         )
 
         call_kwargs = self._build_call_kwargs(options.call_options)

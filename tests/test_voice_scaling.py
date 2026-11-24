@@ -879,7 +879,14 @@ class TestInstanceAffinity:
 
         from tac.models.outbound import InitiateVoiceConversationOptions
 
-        with patch.object(channel, "_get_twilio_client", return_value=twilio_client):
+        with (
+            patch.object(channel, "_get_twilio_client", return_value=twilio_client),
+            patch.object(
+                channel.tac.conversation_orchestrator_client,
+                "create_or_reuse_conversation",
+                AsyncMock(side_effect=RuntimeError("pre-create not mocked in this test")),
+            ),
+        ):
             await channel.initiate_outbound_conversation(
                 InitiateVoiceConversationOptions(to="+15559998888")
             )

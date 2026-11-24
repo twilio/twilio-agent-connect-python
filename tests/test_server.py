@@ -1144,6 +1144,8 @@ class TestTwiMLCustomizerEndToEnd:
     def test_customizer_on_voice_channel_receives_parsed_context_and_overrides_twiml(
         self,
     ) -> None:
+        from unittest.mock import AsyncMock, patch
+
         from fastapi.testclient import TestClient
 
         from tac.channels.voice import VoiceChannel
@@ -1173,11 +1175,17 @@ class TestTwiMLCustomizerEndToEnd:
             "ApiVersion": "2010-04-01",
         }
         signature = compute_signature("http://testserver/twiml", form_data)
-        resp = client.post(
-            "/twiml",
-            data=form_data,
-            headers={"X-Twilio-Signature": signature},
-        )
+        # POST /twiml pre-creates the voice conversation.
+        with patch.object(
+            tac.conversation_orchestrator_client,
+            "create_or_reuse_conversation",
+            AsyncMock(side_effect=RuntimeError("pre-create not mocked in this test")),
+        ):
+            resp = client.post(
+                "/twiml",
+                data=form_data,
+                headers={"X-Twilio-Signature": signature},
+            )
         assert resp.status_code == 200
         ctx = captured["ctx"]
         assert ctx.from_number == "+14155551234"
