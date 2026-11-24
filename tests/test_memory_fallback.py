@@ -2,6 +2,7 @@
 
 from unittest.mock import AsyncMock
 
+import httpx
 import pytest
 
 from tac import TAC, TACConfig
@@ -103,6 +104,7 @@ class TestMemoryFallback:
             summaries_limit=5,
             communications_limit=0,
             relevance_threshold=0.0,
+            raise_on_error=True,
         )
 
         # Result should be wrapped in TACMemoryResponse
@@ -344,6 +346,90 @@ class TestMemoryFallback:
         for i, comm in enumerate(result.communications):
             assert comm.id == f"comm_{i}"
             assert comm.content.text == f"Message {i}"
+
+
+class TestRecallFailureFallback:
+    """A failed Recall falls back to Conversation Orchestrator, not to empty memory."""
+
+    @staticmethod
+    def _with_recall_response(monkeypatch: pytest.MonkeyPatch, response: httpx.Response) -> None:
+        original = httpx.AsyncClient
+        transport = httpx.MockTransport(lambda request: response)
+        monkeypatch.setattr(
+            httpx,
+            "AsyncClient",
+            lambda *a, **k: original(*a, **{**k, "transport": transport}),
+        )
+
+    @staticmethod
+    def _communication() -> Communication:
+        return Communication(
+            id="comm_fallback",
+            conversationId="CH123",
+            accountId="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            author=CommunicationParticipant(
+                address="+15555550100", channel="SMS", participantId="part_customer"
+            ),
+            content=CommunicationContent(type="TEXT", text="Hello"),
+            recipients=[],
+            createdAt="2026-01-01T00:00:00Z",
+            updatedAt="2026-01-01T00:00:00Z",
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "response",
+        [
+            httpx.Response(503),
+            httpx.Response(200, text="not json"),
+            httpx.Response(200, json=["not", "an", "object"]),
+        ],
+        ids=["http-error", "invalid-json", "not-an-object"],
+    )
+    async def test_failed_recall_falls_back_to_communications(
+        self, monkeypatch: pytest.MonkeyPatch, response: httpx.Response
+    ) -> None:
+        config = get_test_config_without_memory()
+        config["memory_config"] = TwilioMemoryConfig(fetch_profile_traits=False)
+        tac = TAC(TACConfig(**config))
+        tac.conversation_memory_client = MemoryClient(
+            store_id="mem_store_test", api_key="key", api_secret="secret"
+        )
+        co = tac.conversation_orchestrator_client
+        assert co is not None
+        co.list_communications = AsyncMock(  # type: ignore[method-assign]
+            return_value=[self._communication()]
+        )
+        self._with_recall_response(monkeypatch, response)
+        context = ConversationSession(
+            conversation_id="CH123", profile_id="mem_profile_1", channel="SMS"
+        )
+
+        result = await tac.retrieve_memory(context, query="refund")
+
+        co.list_communications.assert_awaited_once_with(conversation_id="CH123")
+        assert [c.id for c in result.communications] == ["comm_fallback"]
+
+    @pytest.mark.asyncio
+    async def test_direct_recall_call_still_returns_empty_on_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        client = MemoryClient(store_id="mem_store_test", api_key="key", api_secret="secret")
+        self._with_recall_response(monkeypatch, httpx.Response(503))
+
+        result = await client.retrieve_memory(profile_id="mem_profile_1")
+
+        assert result == MemoryRetrievalResponse()
+
+    @pytest.mark.asyncio
+    async def test_direct_recall_call_raises_when_asked(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        client = MemoryClient(store_id="mem_store_test", api_key="key", api_secret="secret")
+        self._with_recall_response(monkeypatch, httpx.Response(503))
+
+        with pytest.raises(httpx.HTTPStatusError):
+            await client.retrieve_memory(profile_id="mem_profile_1", raise_on_error=True)
 
 
 class TestTACCommunicationConversion:

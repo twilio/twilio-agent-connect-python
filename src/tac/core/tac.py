@@ -302,6 +302,7 @@ class TAC:
                     summaries_limit=cfg.summaries_limit,
                     communications_limit=cfg.communications_limit,
                     relevance_threshold=cfg.relevance_threshold,
+                    raise_on_error=True,
                 ),
                 fetch_profile_traits(),
             )
