@@ -105,17 +105,7 @@ class MemoryClient(BaseAPIClient):
                 return self._parse_recall_response(data)
 
         except httpx.HTTPError as e:
-            response_text = (
-                getattr(e.response, "text", "No response body")
-                if hasattr(e, "response")
-                else "No response"
-            )
-            self.logger.error(
-                f"Failed to retrieve context from Conversation Memory: {e}\n"
-                f"URL: {url}\n"
-                f"Request body: {request_payload}\n"
-                f"Response: {response_text}"
-            )
+            self._log_request_failure("Failed to retrieve context from Conversation Memory", e)
             # Return empty response on API errors
             return MemoryRetrievalResponse()
 
@@ -206,17 +196,7 @@ class MemoryClient(BaseAPIClient):
 
                 return profile_response
         except httpx.HTTPError as e:
-            response_text = (
-                getattr(e.response, "text", "No response body")
-                if hasattr(e, "response")
-                else "No response"
-            )
-            self.logger.error(
-                f"Failed to retrieve profile from Conversation Memory: {e}\n"
-                f"URL: {url}\n"
-                f"Query params: {params}\n"
-                f"Response: {response_text}"
-            )
+            self._log_request_failure("Failed to retrieve profile from Conversation Memory", e)
             raise
         except Exception as e:
             self.logger.error(f"Failed to generate Conversation Memory profile response: {e}")
@@ -266,17 +246,7 @@ class MemoryClient(BaseAPIClient):
 
                 return lookup_response
         except httpx.HTTPError as e:
-            response_text = (
-                getattr(e.response, "text", "No response body")
-                if hasattr(e, "response")
-                else "No response"
-            )
-            self.logger.error(
-                f"Failed to lookup profile from Conversation Memory: {e}\n"
-                f"URL: {url}\n"
-                f"Request body: {request_payload}\n"
-                f"Response: {response_text}"
-            )
+            self._log_request_failure("Failed to lookup profile from Conversation Memory", e)
             raise
         except Exception as e:
             self.logger.error(f"Failed to parse Conversation Memory lookup response: {e}")
@@ -322,17 +292,7 @@ class MemoryClient(BaseAPIClient):
                 response.raise_for_status()
                 data = response.json()
         except httpx.HTTPError as e:
-            response_text = (
-                getattr(e.response, "text", "No response body")
-                if hasattr(e, "response")
-                else "No response"
-            )
-            self.logger.error(
-                f"Failed to create profile: {e}\n"
-                f"URL: {url}\n"
-                f"Request body: {payload}\n"
-                f"Response: {response_text}"
-            )
+            self._log_request_failure("Failed to create profile", e)
             raise
 
         profile_id = data.get("id") if isinstance(data, dict) else None
@@ -391,17 +351,7 @@ class MemoryClient(BaseAPIClient):
                 return result
 
         except httpx.HTTPError as e:
-            response_text = (
-                getattr(e.response, "text", "No response body")
-                if hasattr(e, "response")
-                else "No response"
-            )
-            self.logger.error(
-                f"Failed to create observation: {e}\n"
-                f"URL: {url}\n"
-                f"Profile ID: {profile_id}\n"
-                f"Response: {response_text}"
-            )
+            self._log_request_failure("Failed to create observation", e)
             raise
 
     async def create_conversation_summaries(
@@ -441,16 +391,5 @@ class MemoryClient(BaseAPIClient):
                 return result
 
         except httpx.HTTPError as e:
-            response_text = (
-                getattr(e.response, "text", "No response body")
-                if hasattr(e, "response")
-                else "No response"
-            )
-            self.logger.error(
-                f"Failed to create conversation summaries: {e}\n"
-                f"URL: {url}\n"
-                f"Profile ID: {profile_id}\n"
-                f"Summary count: {len(summaries)}\n"
-                f"Response: {response_text}"
-            )
+            self._log_request_failure("Failed to create conversation summaries", e)
             raise

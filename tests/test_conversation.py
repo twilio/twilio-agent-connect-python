@@ -1326,12 +1326,10 @@ class TestConversationClient:
         )
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize(
-        ("metadata", "body_logged"), [({"secret": "value-x"}, False), (None, True)]
-    )
+    @pytest.mark.parametrize("metadata", [{"secret": "value-x"}, None])
     @patch("httpx.AsyncClient")
-    async def test_create_conversation_error_log_omits_body_when_metadata_sent(
-        self, mock_async_client_class, metadata, body_logged
+    async def test_create_conversation_error_log_omits_response_body(
+        self, mock_async_client_class, metadata
     ):
         request = httpx.Request("POST", "https://conversations.twilio.com/v2/Conversations")
         error_response = httpx.Response(400, text="bad value-x here", request=request)
@@ -1350,11 +1348,9 @@ class TestConversationClient:
             with pytest.raises(httpx.HTTPStatusError):
                 await client.create_conversation(metadata=metadata)
 
-        logged = log_error.call_args.args[0]
-        assert ("bad value-x here" in logged) is body_logged
-        assert "value-x" not in logged or body_logged
-        if not body_logged:
-            assert "Status: 400" in logged
+        logged = str(log_error.call_args)
+        assert "value-x" not in logged
+        assert log_error.call_args.kwargs["status"] == 400
 
     @pytest.mark.asyncio
     async def test_create_or_reuse_passes_metadata_to_create(self):
