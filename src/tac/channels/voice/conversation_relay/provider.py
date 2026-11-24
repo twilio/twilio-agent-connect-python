@@ -103,9 +103,14 @@ class ConversationRelayProvider(VoiceProvider):
         return self.channel.tac.is_orchestrator_enabled()
 
     @staticmethod
+    def _is_outbound(setup_msg: SetupMessage) -> bool:
+        # Twilio reports outbound calls as "outbound-api" or "outbound-dial".
+        return (setup_msg.direction or "").lower().startswith("outbound")
+
+    @staticmethod
     def _caller_address(setup_msg: SetupMessage) -> str | None:
         """Return the phone number of the remote caller/callee from the setup message."""
-        if setup_msg.direction and setup_msg.direction.upper() == "OUTBOUND":
+        if ConversationRelayProvider._is_outbound(setup_msg):
             return setup_msg.to_number
         return setup_msg.from_number
 
@@ -113,7 +118,7 @@ class ConversationRelayProvider(VoiceProvider):
     def _agent_address(setup_msg: SetupMessage) -> str | None:
         """TAC's own number for this call: the dialed number on inbound, the
         caller ID on outbound (the complement of `_caller_address`)."""
-        if setup_msg.direction and setup_msg.direction.upper() == "OUTBOUND":
+        if ConversationRelayProvider._is_outbound(setup_msg):
             return setup_msg.from_number
         return setup_msg.to_number
 

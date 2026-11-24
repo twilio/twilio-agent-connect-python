@@ -2774,6 +2774,30 @@ class TestWebSocketResilience:
         assert channel._conversations == {}
 
 
+class TestCallDirection:
+    """Twilio reports outbound calls as `outbound-api` or `outbound-dial`."""
+
+    @pytest.mark.parametrize(
+        ("direction", "caller", "agent"),
+        [
+            ("inbound", "+15555550100", "+15555550199"),
+            (None, "+15555550100", "+15555550199"),
+            ("outbound", "+15555550199", "+15555550100"),
+            ("outbound-api", "+15555550199", "+15555550100"),
+            ("outbound-dial", "+15555550199", "+15555550100"),
+        ],
+    )
+    def test_addresses_follow_direction(
+        self, direction: str | None, caller: str, agent: str
+    ) -> None:
+        setup = SetupMessage(
+            from_number="+15555550100", to_number="+15555550199", direction=direction
+        )
+
+        assert ConversationRelayProvider._caller_address(setup) == caller
+        assert ConversationRelayProvider._agent_address(setup) == agent
+
+
 class TestVoicePublicDomainNormalization:
     """TACConfig.voice_public_domain strips schemes/whitespace/trailing slashes."""
 
