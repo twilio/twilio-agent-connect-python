@@ -525,13 +525,11 @@ class ConversationRelayProvider(VoiceProvider):
                 setup_msg = SetupMessage(**data)
                 call_sid = setup_msg.call_sid
 
-                # Kick off the CO conversation lookup now, in the background,
-                # instead of waiting for the first prompt. ConversationRelay
-                # creates the CO conversation as soon as the call connects, not
-                # when the caller speaks, so this overlaps CO's
-                # list_conversations/list_participants polling with the wait
-                # for the caller's first utterance (transcription) rather than
-                # paying that latency serially once the first prompt lands.
+                # Start initialization now, in the background, so it overlaps
+                # the wait for the caller's first utterance instead of delaying
+                # the first prompt. A pre-created conversation is registered by
+                # id; otherwise poll for the one ConversationRelay creates on
+                # the first communication.
                 if call_sid and self.channel.tac.is_orchestrator_enabled():
                     pre_created_id = (setup_msg.custom_parameters or {}).get(
                         _PRECREATED_CONVERSATION_PARAMETER
