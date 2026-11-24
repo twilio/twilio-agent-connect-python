@@ -2628,6 +2628,152 @@ class TestPartialPrompts:
         assert provider._handle_prompt.await_count == (1 if handled else 0)
 
 
+class TestWebSocketResilience:
+    """A bad frame or a failed conversation lookup doesn't end the call."""
+
+    SETUP = {"type": "setup", "callSid": "CA_resilience", "from": "+15555550100"}
+
+    @staticmethod
+    def _prompt(text: str) -> dict[str, str]:
+        return {"type": "prompt", "voicePrompt": text}
+
+    @staticmethod
+    def _orchestrated_channel() -> tuple[TAC, VoiceChannel]:
+        tac = TAC(get_test_config())
+        co = tac.conversation_orchestrator_client
+        assert co is not None
+        co.list_participants = AsyncMock(  # type: ignore[method-assign]
+            return_value=[
+                ParticipantResponse(
+                    id="PA_customer",
+                    conversation_id="CH_resilience",
+                    account_id="ACtest123",
+                    type="CUSTOMER",
+                    addresses=[ParticipantAddress(channel="VOICE", address="+15555550100")],
+                )
+            ]
+        )
+        return tac, VoiceChannel(tac)
+
+    @staticmethod
+    def _conversation() -> ConversationResponse:
+        return ConversationResponse(
+            id="CH_resilience",
+            accountId="ACtest123",
+            configuration_id="conv_configuration_test123",
+            status="ACTIVE",
+        )
+
+    @staticmethod
+    def _record(tac: TAC) -> tuple[list[str], list[tuple[Exception, dict]]]:
+        prompts: list[str] = []
+        errors: list[tuple[Exception, dict]] = []
+
+        async def on_message(message: str, session: object, memory: object) -> None:
+            prompts.append(message)
+
+        tac.on_message_ready(on_message)
+        tac.on_error(lambda error, context: errors.append((error, context)))
+        return prompts, errors
+
+    @pytest.mark.asyncio
+    async def test_invalid_frame_is_reported_and_skipped(self) -> None:
+        import json
+
+        from tac.channels.websocket_protocol import WebSocketDisconnectError
+
+        tac, channel = self._orchestrated_channel()
+        co = tac.conversation_orchestrator_client
+        assert co is not None
+        co.list_conversations = AsyncMock(return_value=[self._conversation()])  # type: ignore[method-assign]
+        prompts, errors = self._record(tac)
+        bad_frame = json.JSONDecodeError("Expecting value", "not json", 0)
+        websocket = AsyncMock()
+        websocket.receive_json = AsyncMock(
+            side_effect=[
+                bad_frame,
+                self.SETUP,
+                bad_frame,
+                self._prompt("hello"),
+                WebSocketDisconnectError(),
+            ]
+        )
+
+        await channel.handle_websocket(websocket)
+
+        assert prompts == ["hello"]
+        assert [e for e, _ in errors] == [bad_frame, bad_frame]
+        assert errors[1][1]["call_sid"] == "CA_resilience"
+        websocket.close.assert_not_awaited()
+        assert_no_residual_state(channel, "CH_resilience")
+
+    @pytest.mark.asyncio
+    async def test_lookup_failure_is_reported_and_retried_on_next_prompt(self) -> None:
+        import httpx
+
+        from tac.channels.websocket_protocol import WebSocketDisconnectError
+
+        tac, channel = self._orchestrated_channel()
+        co = tac.conversation_orchestrator_client
+        assert co is not None
+        outage = httpx.ConnectError("conversation orchestrator unreachable")
+        co.list_conversations = AsyncMock(  # type: ignore[method-assign]
+            side_effect=[outage, [self._conversation()]]
+        )
+        prompts, errors = self._record(tac)
+        websocket = AsyncMock()
+        websocket.receive_json = AsyncMock(
+            side_effect=[
+                self.SETUP,
+                self._prompt("first"),
+                self._prompt("second"),
+                WebSocketDisconnectError(),
+            ]
+        )
+
+        await channel.handle_websocket(websocket)
+
+        assert prompts == ["second"]
+        assert len(errors) == 1
+        error, context = errors[0]
+        assert error is outage
+        assert context["call_sid"] == "CA_resilience"
+        assert co.list_conversations.await_count == 2
+        assert_no_residual_state(channel, "CH_resilience")
+
+    @pytest.mark.asyncio
+    async def test_lookup_gives_up_after_three_attempts_but_keeps_the_call(self) -> None:
+        import httpx
+
+        from tac.channels.websocket_protocol import WebSocketDisconnectError
+
+        tac, channel = self._orchestrated_channel()
+        co = tac.conversation_orchestrator_client
+        assert co is not None
+        co.list_conversations = AsyncMock(  # type: ignore[method-assign]
+            side_effect=httpx.ConnectError("conversation orchestrator unreachable")
+        )
+        prompts, errors = self._record(tac)
+        websocket = AsyncMock()
+        websocket.receive_json = AsyncMock(
+            side_effect=[
+                self.SETUP,
+                *(self._prompt(f"prompt {n}") for n in range(4)),
+                WebSocketDisconnectError(),
+            ]
+        )
+
+        await channel.handle_websocket(websocket)
+
+        assert prompts == []
+        assert co.list_conversations.await_count == 3
+        assert len(errors) == 4
+        assert "after 3 attempts" in str(errors[3][0])
+        assert websocket.receive_json.await_count == 6
+        websocket.close.assert_not_awaited()
+        assert channel._conversations == {}
+
+
 class TestVoicePublicDomainNormalization:
     """TACConfig.voice_public_domain strips schemes/whitespace/trailing slashes."""
 
