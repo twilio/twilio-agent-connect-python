@@ -124,6 +124,44 @@ class TestTACTool:
         result_json = await sdk_tool.on_invoke_tool(None, '{"x": "hello"}')
         assert json.loads(result_json) == {"echo": "hello"}
 
+    @pytest.mark.asyncio
+    async def test_to_openai_agents_sdk_tool_serializes_pydantic_results(self):
+        """Pydantic results (e.g. knowledge chunks) are encoded with their API field names."""
+
+        async def search(query: str) -> list[KnowledgeChunkResult]:
+            return [
+                KnowledgeChunkResult(
+                    content=f"About {query}",
+                    knowledge_id="know_1",
+                    created_at="2025-01-01T00:00:00Z",
+                    score=0.9,
+                )
+            ]
+
+        tool = TACTool(
+            name="search",
+            description="Search",
+            params_json_schema={
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+                "required": ["query"],
+            },
+            _raw_implementation=search,
+        )
+
+        result_json = await tool.to_openai_agents_sdk_tool().on_invoke_tool(
+            None, '{"query": "refunds"}'
+        )
+
+        assert json.loads(result_json) == [
+            {
+                "content": "About refunds",
+                "knowledgeId": "know_1",
+                "createdAt": "2025-01-01T00:00:00Z",
+                "score": 0.9,
+            }
+        ]
+
     def test_to_json(self):
         """Test conversion to JSON string."""
 

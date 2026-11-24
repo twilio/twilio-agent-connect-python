@@ -19,6 +19,7 @@ from typing import (
 )
 
 from pydantic import TypeAdapter
+from pydantic_core import PydanticSerializationError, to_jsonable_python
 
 if TYPE_CHECKING:
     # Typing-only soft dep: `openai-agents` is optional at runtime. The ignore
@@ -317,7 +318,7 @@ class TACTool:
         async def on_invoke(_ctx: object, args_json: str) -> str:
             args = json.loads(args_json) if args_json else {}
             result = await self(**args)
-            return json.dumps(result)
+            return _serialize_tool_result(result)
 
         return FunctionTool(
             name=self.name,
@@ -332,6 +333,20 @@ class TACTool:
     def to_json(self) -> str:
         """Convert tool to JSON string (OpenAI format by default)."""
         return json.dumps(self.to_openai_format(), indent=2)
+
+
+def _serialize_tool_result(result: object) -> str:
+    """JSON-encode a tool's return value, including pydantic models nested anywhere in it.
+
+    Models are encoded with their field aliases (the API's camelCase names).
+
+    Raises:
+        TypeError: If the result contains a value that has no JSON representation.
+    """
+    try:
+        return json.dumps(to_jsonable_python(result, by_alias=True))
+    except PydanticSerializationError as e:
+        raise TypeError(str(e)) from e
 
 
 def _is_injected_arg_type(param_type: object) -> bool:

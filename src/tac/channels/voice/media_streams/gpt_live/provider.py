@@ -31,6 +31,7 @@ from tac.models.outbound import (
 from tac.models.session import ConversationSession
 from tac.models.stream import StreamStartMessage
 from tac.models.voice import VoiceTwiMLOptionsMediaStreams
+from tac.tools.base import _serialize_tool_result
 from tac.utils.redaction import mask_phone, redact_twiml_parameters
 
 if TYPE_CHECKING:
@@ -446,7 +447,7 @@ class GPTLiveProvider(MediaStreamsOpenAIProvider[_CallState]):
         else:
             output = await self._run_tool_call(conv_id, name, item.get("arguments"))
             try:
-                output_json = json.dumps(output)
+                output_json = _serialize_tool_result(output)
             except TypeError as e:
                 self.logger.error(
                     f"Tool '{name}' returned a non-JSON-serializable result: {e}",
