@@ -5,6 +5,7 @@ import httpx
 
 from tac import __version__
 from tac.core.logging import get_logger
+from tac.utils.distrusted_intermediates import distrusting_ssl_context
 
 
 class PartnerConnector(Enum):
@@ -106,6 +107,7 @@ class BaseAPIClient:
             headers={"User-Agent": self._get_user_agent()},
             timeout=30.0,
             follow_redirects=True,
+            verify=distrusting_ssl_context(httpx.create_ssl_context()),
         )
 
     def _get_sync_client(self) -> httpx.Client:
@@ -115,4 +117,5 @@ class BaseAPIClient:
             headers={"User-Agent": self._get_user_agent()},
             timeout=30.0,
             follow_redirects=True,
+            verify=distrusting_ssl_context(httpx.create_ssl_context()),
         )

@@ -10,6 +10,7 @@ from tac.context.conversation import ConversationClient
 from tac.models.handoff import HandoffPayload, PendingHandoffData
 from tac.models.session import ConversationSession
 from tac.tools.base import InjectedToolArg, TACTool, function_tool
+from tac.utils.distrusted_intermediates import distrusting_ssl_context
 from tac.utils.redaction import mask_address
 
 if TYPE_CHECKING:
@@ -102,7 +103,9 @@ async def post_studio_handoff(
         "Parameters": json.dumps({"HandoffData": payload.model_dump(by_alias=True)}),
     }
 
-    async with httpx.AsyncClient(timeout=10.0) as client:
+    async with httpx.AsyncClient(
+        timeout=10.0, verify=distrusting_ssl_context(httpx.create_ssl_context())
+    ) as client:
         response = await client.post(
             handoff_url,
             data=data,
