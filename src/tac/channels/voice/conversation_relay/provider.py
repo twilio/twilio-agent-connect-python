@@ -528,8 +528,7 @@ class ConversationRelayProvider(VoiceProvider):
                 # Start initialization now, in the background, so it overlaps
                 # the wait for the caller's first utterance instead of delaying
                 # the first prompt. A pre-created conversation is registered by
-                # id; otherwise poll for the one ConversationRelay creates on
-                # the first communication.
+                # id; otherwise poll by call SID for the call's conversation.
                 if call_sid and self.channel.tac.is_orchestrator_enabled():
                     pre_created_id = (setup_msg.custom_parameters or {}).get(
                         _PRECREATED_CONVERSATION_PARAMETER
