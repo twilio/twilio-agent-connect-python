@@ -25,12 +25,18 @@ def get_test_config_with_memory() -> TACConfig:
 
 
 def create_memory_client(tac: TAC) -> MemoryClient:
-    """Helper to manually create Conversation Memory client for tests."""
-    return MemoryClient(
+    """Helper to manually create Conversation Memory client for tests.
+
+    retrieve_memory also fetches the profile's traits; these tests don't cover
+    that, so the profile fetch returns nothing.
+    """
+    client = MemoryClient(
         store_id="MGtest123",
         api_key=tac.config.api_key,
         api_secret=tac.config.api_secret,
     )
+    client.get_profile = AsyncMock(return_value=None)  # type: ignore[method-assign]
+    return client
 
 
 class TestProfileLookupInMemoryRetrieval:
