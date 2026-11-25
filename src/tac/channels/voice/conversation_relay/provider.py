@@ -644,8 +644,8 @@ class ConversationRelayProvider(VoiceProvider):
             session_state: Session state object (if session_manager provided)
         """
         try:
-            should_process = data.get("final", True)
-            if should_process:
+            # A partial prompt (last: false) isn't a turn.
+            if data.get("last", True) is not False:
                 prompt_msg = PromptMessage(**data)
                 conv_id = prompt_msg.conversation_id or conv_id
 

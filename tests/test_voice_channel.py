@@ -2605,6 +2605,72 @@ class TestSessionManagerDefaults:
         assert session_state.stream_task.done()
 
 
+class TestPartialPrompts:
+    """With partialPrompts on, ConversationRelay marks partial prompts `last: false`."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("extra", "handled"),
+        [({"last": False}, False), ({"last": True}, True), ({}, True)],
+        ids=["partial", "last", "no-last-field"],
+    )
+    async def test_only_complete_prompts_start_a_turn(
+        self, extra: dict[str, bool], handled: bool
+    ) -> None:
+        channel = VoiceChannel(TAC(get_test_config()))
+        provider = channel._provider
+        provider._handle_prompt = AsyncMock()
+
+        await provider._handle_prompt_async(
+            "CA_PARTIAL", {"type": "prompt", "voicePrompt": "I need", **extra}, None
+        )
+
+        assert provider._handle_prompt.await_count == (1 if handled else 0)
+
+    @pytest.mark.asyncio
+    async def test_only_complete_prompts_reach_on_message_ready_over_websocket(self) -> None:
+        from tac.channels.websocket_protocol import WebSocketDisconnectError
+
+        tac = TAC({**get_test_config(), "conversation_configuration_id": None})
+        channel = VoiceChannel(tac)
+        messages: list[str] = []
+
+        async def on_message_ready(
+            message: str, session: ConversationSession, memory: TACMemoryResponse | None
+        ) -> None:
+            messages.append(message)
+
+        tac.on_message_ready(on_message_ready)
+
+        def prompt(voice_prompt: str, last: bool | None = None) -> dict[str, object]:
+            frame: dict[str, object] = {"type": "prompt", "voicePrompt": voice_prompt}
+            if last is not None:
+                frame["last"] = last
+            return frame
+
+        frames: list[dict[str, object]] = [
+            {"type": "setup", "callSid": "CA_PARTIAL_WS", "from": "+15550001111"},
+            prompt("I need", last=False),
+            prompt("I need help with", last=False),
+            prompt("I need help with my order", last=True),
+            prompt("Thanks"),
+        ]
+
+        async def receive_json() -> dict[str, object]:
+            # Let each turn finish before the next frame arrives, as a caller would.
+            await asyncio.sleep(0.01)
+            if frames:
+                return frames.pop(0)
+            raise WebSocketDisconnectError()
+
+        websocket = AsyncMock()
+        websocket.receive_json = receive_json
+        await channel.handle_websocket(websocket)
+
+        assert messages == ["I need help with my order", "Thanks"]
+        assert_no_residual_state(channel, "CA_PARTIAL_WS")
+
+
 class TestVoicePublicDomainNormalization:
     """TACConfig.voice_public_domain strips schemes/whitespace/trailing slashes."""
 
