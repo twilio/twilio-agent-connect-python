@@ -371,7 +371,8 @@ class VoiceTwiMLOptionsConversationRelay(VoiceTwiMLOptions):
     partial_prompts: bool | None = Field(
         None,
         description="Send unfinalized prompts and eager end-of-turn events "
-        "(last=False). Only applies with Deepgram + flux speech model.",
+        "(last=False). Only applies with Deepgram + flux speech model. TAC ignores "
+        "these partial prompts: only the complete prompt reaches `on_message_ready`.",
     )
     deepgram_smart_format: bool | None = Field(
         None,

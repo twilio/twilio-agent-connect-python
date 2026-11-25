@@ -644,8 +644,7 @@ class ConversationRelayProvider(VoiceProvider):
             session_state: Session state object (if session_manager provided)
         """
         try:
-            # With partialPrompts enabled, ConversationRelay streams `last: false`
-            # partials before the complete prompt; only the complete one is a turn.
+            # A partial prompt (last: false) isn't a turn.
             if data.get("last", True) is not False:
                 prompt_msg = PromptMessage(**data)
                 conv_id = prompt_msg.conversation_id or conv_id
