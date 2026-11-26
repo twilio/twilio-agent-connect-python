@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import time
 from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING, Any
 
@@ -272,7 +271,6 @@ class ConversationRelayProvider(VoiceProvider):
         ):
             return None
 
-        started_at = time.monotonic()
         try:
             conv_id, reused = await asyncio.wait_for(
                 client.create_or_reuse_conversation(
@@ -300,12 +298,11 @@ class ConversationRelayProvider(VoiceProvider):
                 timed_out=isinstance(e, asyncio.TimeoutError),
             )
             return None
-        self.logger.info(
+        self.logger.debug(
             "Pre-created voice conversation",
             call_sid=call_sid,
             conversation_id=conv_id,
             reused=reused,
-            create_ms=int((time.monotonic() - started_at) * 1000),
         )
         return conv_id
 

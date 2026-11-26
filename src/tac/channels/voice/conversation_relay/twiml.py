@@ -256,14 +256,6 @@ class TwiMLBuilderConversationRelay(TwiMLBuilderBase):
             caller, self.resolve_options(host, per_call), websocket_url=websocket_url
         )
 
-    def resolve_options(
-        self,
-        host: VoiceTwiMLOptionsConversationRelay | None,
-        per_call: VoiceTwiMLOptionsConversationRelay | None,
-    ) -> VoiceTwiMLOptionsConversationRelay:
-        """Merge every option layer into the options the TwiML is built from."""
-        return self._build_twiml_options(host, per_call)
-
     def build_resolved(
         self,
         caller: str,
@@ -285,7 +277,7 @@ class TwiMLBuilderConversationRelay(TwiMLBuilderBase):
 
         return generate_twiml(resolved_websocket_url, merged)
 
-    def _build_twiml_options(
+    def resolve_options(
         self,
         host: VoiceTwiMLOptionsConversationRelay | None,
         per_call: VoiceTwiMLOptionsConversationRelay | None,
