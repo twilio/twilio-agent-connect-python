@@ -89,6 +89,7 @@ dependencies = [
 ## Key Architecture Concepts
 
 - **Channel-based**: Messaging channels (SMS, RCS, WhatsApp, Chat) and the Voice channel process Twilio webhooks, manage conversation lifecycle, and trigger `on_message_ready` / `on_conversation_ended` callbacks
+- **Voice conversation initialization**: ConversationRelay only creates the Conversation Orchestrator conversation on the first communication, so in orchestrated mode TAC pre-creates it (`ConversationRelayProvider._pre_create_conversation()`) before returning inbound TwiML or placing an outbound call. The TwiML carries `conversation_id` plus a `tacConversationId` parameter and omits `conversation_configuration` (with both set, ConversationRelay ignores the id). If pre-creation fails or is skipped, `setup` falls back to polling by `call_sid` (`_initialize_conversation`).
 - **Callback responses**: Callbacks return `str` (auto-sent) or `None` (manual `channel.send_response()`)
 - **Memory modes**:
   - `"never"` (default): No automatic memory retrieval

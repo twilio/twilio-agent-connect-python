@@ -1,5 +1,6 @@
 """Tests for outbound conversation support (SMS, RCS, WhatsApp, Chat, Voice)."""
 
+from collections.abc import Iterator
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -12,6 +13,7 @@ from tac.channels.rcs import RCSChannel
 from tac.channels.sms import SMSChannel
 from tac.channels.voice import ConversationRelayProviderConfig, VoiceChannel
 from tac.channels.whatsapp import WhatsAppChannel
+from tac.context.conversation import ConversationClient
 from tac.core.config import TwilioMemoryConfig
 from tac.models.conversation import (
     ActionResponse,
@@ -25,6 +27,7 @@ from tac.models.outbound import (
     InitiateMessagingConversationOptions,
     InitiateVoiceConversationOptions,
 )
+from tac.models.voice import VoiceTwiMLOptionsConversationRelay
 
 
 def get_test_config() -> dict[str, Any]:
@@ -39,6 +42,19 @@ def get_test_config() -> dict[str, Any]:
         "whatsapp_number": "whatsapp:+15551234567",
         "memory_config": TwilioMemoryConfig(trait_groups=["Contact"]),
     }
+
+
+@pytest.fixture
+def fail_voice_pre_create() -> Iterator[None]:
+    """Fail the voice pre-create for tests that don't cover it, so the call takes the
+    ``conversationConfiguration`` fallback. Patches the class because some tests build
+    their TAC inside the test; a per-instance patch in a test still wins."""
+    with patch.object(
+        ConversationClient,
+        "create_or_reuse_conversation",
+        AsyncMock(side_effect=RuntimeError("pre-create not mocked in this test")),
+    ):
+        yield
 
 
 def make_participant(
@@ -452,7 +468,119 @@ class TestChatOutbound:
 # =============================================================================
 
 
+@pytest.mark.usefixtures("fail_voice_pre_create")
 class TestVoiceOutbound:
+    @pytest.mark.asyncio
+    async def test_pre_creates_conversation_and_routes_call_by_id(self) -> None:
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+        client = tac.conversation_orchestrator_client
+        assert client is not None
+        mock_client = MagicMock()
+        mock_client.calls.create.return_value = MagicMock(sid="CApre")
+
+        with (
+            patch.object(channel, "_get_twilio_client", return_value=mock_client),
+            patch.object(
+                client, "create_or_reuse_conversation", AsyncMock(return_value=("conv_out", False))
+            ) as create,
+        ):
+            await channel.initiate_outbound_conversation(
+                InitiateVoiceConversationOptions(
+                    to="+15559876543", websocket_url="wss://example.com/ws"
+                )
+            )
+
+        participants = create.call_args.args[0]
+        assert participants[0].addresses[0].address == "+15559876543"
+        assert participants[1].addresses[0].address == "+15551234567"
+        twiml = mock_client.calls.create.call_args.kwargs["twiml"]
+        assert 'conversationId="conv_out"' in twiml
+        assert "conversationConfiguration=" not in twiml
+
+    @pytest.mark.asyncio
+    async def test_routes_to_explicit_conversation_id_without_pre_creating(self) -> None:
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+        client = tac.conversation_orchestrator_client
+        assert client is not None
+        mock_client = MagicMock()
+        mock_client.calls.create.return_value = MagicMock(sid="CAexplicit")
+
+        with (
+            patch.object(channel, "_get_twilio_client", return_value=mock_client),
+            patch.object(client, "create_or_reuse_conversation", AsyncMock()) as create,
+        ):
+            await channel.initiate_outbound_conversation(
+                InitiateVoiceConversationOptions(
+                    to="+15559876543",
+                    websocket_url="wss://example.com/ws",
+                    twiml_options=VoiceTwiMLOptionsConversationRelay(conversation_id="conv_mine"),
+                )
+            )
+
+        create.assert_not_called()
+        twiml = mock_client.calls.create.call_args.kwargs["twiml"]
+        assert 'conversationId="conv_mine"' in twiml
+        assert "conversationConfiguration=" not in twiml
+
+    @pytest.mark.asyncio
+    async def test_keeps_channel_default_custom_parameters_with_pre_created_id(self) -> None:
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(
+            tac,
+            config=ConversationRelayProviderConfig(
+                default_twiml_options=VoiceTwiMLOptionsConversationRelay(
+                    custom_parameters={"tenant": "acme"}
+                ),
+            ),
+        )
+        client = tac.conversation_orchestrator_client
+        assert client is not None
+        mock_client = MagicMock()
+        mock_client.calls.create.return_value = MagicMock(sid="CAparams")
+
+        with (
+            patch.object(channel, "_get_twilio_client", return_value=mock_client),
+            patch.object(
+                client, "create_or_reuse_conversation", AsyncMock(return_value=("conv_out", False))
+            ),
+        ):
+            await channel.initiate_outbound_conversation(
+                InitiateVoiceConversationOptions(
+                    to="+15559876543", websocket_url="wss://example.com/ws"
+                )
+            )
+
+        twiml = mock_client.calls.create.call_args.kwargs["twiml"]
+        assert 'name="tenant" value="acme"' in twiml
+        assert 'name="tacConversationId" value="conv_out"' in twiml
+
+    @pytest.mark.asyncio
+    async def test_places_call_with_configuration_when_pre_create_fails(self) -> None:
+        tac = TAC(get_test_config())
+        channel = VoiceChannel(tac)
+        client = tac.conversation_orchestrator_client
+        assert client is not None
+        mock_client = MagicMock()
+        mock_client.calls.create.return_value = MagicMock(sid="CAfallback")
+
+        with (
+            patch.object(channel, "_get_twilio_client", return_value=mock_client),
+            patch.object(
+                client, "create_or_reuse_conversation", AsyncMock(side_effect=RuntimeError("boom"))
+            ),
+        ):
+            await channel.initiate_outbound_conversation(
+                InitiateVoiceConversationOptions(
+                    to="+15559876543", websocket_url="wss://example.com/ws"
+                )
+            )
+
+        twiml = mock_client.calls.create.call_args.kwargs["twiml"]
+        assert "conversationConfiguration=" in twiml
+        assert "conversationId=" not in twiml
+
     @pytest.mark.asyncio
     async def test_places_call_with_twiml(self) -> None:
         tac = TAC(get_test_config())
@@ -742,6 +870,7 @@ class TestVoiceOutbound:
         assert kwargs["status_callback"] == "https://example.com/hooks/calls/status"
 
 
+@pytest.mark.usefixtures("fail_voice_pre_create")
 class TestDefaultCallOptions:
     """Channel-wide CallOptions layer, mirroring default_twiml_options. This is
     how a custom server or non-default routes supply their own callback URLs."""
@@ -1053,6 +1182,7 @@ class TestInitiateConversationActionFailure:
 # =============================================================================
 
 
+@pytest.mark.usefixtures("fail_voice_pre_create")
 class TestVoiceOutboundErrors:
     @pytest.mark.asyncio
     async def test_reraises_twilio_rest_error(self) -> None:

@@ -22,6 +22,7 @@ _OPTIONAL_RELAY_ATTRS = (
     "welcome_greeting",
     "welcome_greeting_interruptible",
     "conversation_configuration",
+    "conversation_id",
     # language / TTS / STT
     "language",
     "tts_language",
@@ -105,6 +106,11 @@ def generate_twiml(
     (positional wins when both are given), so a caller can pass everything in one
     object: ``generate_twiml(options=VoiceTwiMLOptionsConversationRelay(websocket_url=...))``.
 
+    When ``options.conversation_id`` is set, ``conversation_configuration`` is
+    omitted: ConversationRelay applies the configuration's grouping rules and
+    ignores the ID when both are present. An empty ``conversation_id`` counts
+    as unset and is not emitted.
+
     Args:
         websocket_url: Public WebSocket URL for ConversationRelay
             (e.g. ``'wss://example.ngrok.app/ws'``). Optional if
@@ -158,6 +164,12 @@ def generate_twiml(
     for attr in _OPTIONAL_RELAY_ATTRS:
         value = getattr(options, attr)
         if value is None:
+            continue
+        # ConversationRelay applies the configuration's grouping rules and
+        # ignores conversation_id when both are present.
+        if attr == "conversation_configuration" and options.conversation_id:
+            continue
+        if attr == "conversation_id" and not value:
             continue
         # Twilio accepts True/False on `interruptible` for backward-compat
         # but the documented enum is none|dtmf|speech|any. Normalize so we
@@ -240,8 +252,20 @@ class TwiMLBuilderConversationRelay(TwiMLBuilderBase):
             ValueError: If no layer and no ``TACConfig``-derived default
                 supplies a WebSocket URL.
         """
-        merged = self._build_twiml_options(host, per_call)
+        return self.build_resolved(
+            caller, self.resolve_options(host, per_call), websocket_url=websocket_url
+        )
 
+    def build_resolved(
+        self,
+        caller: str,
+        merged: VoiceTwiMLOptionsConversationRelay,
+        *,
+        websocket_url: str | None = None,
+    ) -> str:
+        """Build the TwiML XML from options already merged by
+        :meth:`resolve_options`. ``websocket_url`` is the dedicated per-call
+        override described on :meth:`build`."""
         if websocket_url is not None:
             resolved_websocket_url = websocket_url
         elif merged.websocket_url is not None:
@@ -253,7 +277,7 @@ class TwiMLBuilderConversationRelay(TwiMLBuilderBase):
 
         return generate_twiml(resolved_websocket_url, merged)
 
-    def _build_twiml_options(
+    def resolve_options(
         self,
         host: VoiceTwiMLOptionsConversationRelay | None,
         per_call: VoiceTwiMLOptionsConversationRelay | None,
